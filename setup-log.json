@@ -1,0 +1,10 @@
+{
+  "app_id": "clock-tower",
+  "app_name": "Clock Tower",
+  "domain": "https://clock-tower.fcc.lol",
+  "host": "localhost",
+  "port": "3118",
+  "author": "fcc",
+  "anthropic": false,
+  "created_on": "Fri Jun 26 03:17:59 UTC 2026"
+}
