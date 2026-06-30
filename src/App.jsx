@@ -1,13 +1,17 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import styled from "styled-components";
 
 // Fixed design dimensions — everything is authored at this exact size.
 const STAGE_W = 1080;
 const STAGE_H = 1920;
 
-// A static random tilt (5-15°, random direction) picked once per load so each
-// card sits at a fixed jaunty angle that doesn't change on re-render.
-const tilt = () => (Math.random() < 0.5 ? -1 : 1) * (5 + Math.random() * 10);
+// A random tilt with a larger 8-18° magnitude. When a previous angle is given,
+// the new one always flips to the opposite direction so each re-tilt swings
+// noticeably across (a 16-36° change), rather than nudging within one side.
+const tilt = (prev) => {
+  const dir = prev === undefined ? (Math.random() < 0.5 ? -1 : 1) : -Math.sign(prev) || 1;
+  return dir * (8 + Math.random() * 10);
+};
 
 // Long Island City, NY (ZIP 11101).
 const LAT = 40.7447;
@@ -138,13 +142,17 @@ const Line = styled.div`
   font-variant-numeric: tabular-nums;
   text-align: center;
   transform: rotate(${(p) => p.$rot}deg);
+  transition: transform 1.2s cubic-bezier(0.22, 1, 0.36, 1);
 `;
 
-// Picks a random tilt once on mount so the angle stays fixed across re-renders.
-function TiltLine({ big, children }) {
-  const rot = useRef(tilt());
+// Picks a random tilt that stays fixed across re-renders, but is recomputed
+// whenever `epoch` changes (every 10 minutes) so all lines re-tilt together.
+// Each new angle flips direction from the last so the transition is obvious.
+function TiltLine({ big, epoch, children }) {
+  const prev = useRef(undefined);
+  const rot = useMemo(() => (prev.current = tilt(prev.current)), [epoch]);
   return (
-    <Line $big={big} $rot={rot.current}>
+    <Line $big={big} $rot={rot}>
       {children}
     </Line>
   );
@@ -193,6 +201,17 @@ function useStageScale() {
   return scale;
 }
 
+// Increments every 10 minutes; drives a fresh set of rotation angles for all
+// lines on each tick.
+function useTiltEpoch() {
+  const [epoch, setEpoch] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setEpoch((e) => e + 1), 10 * 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
+  return epoch;
+}
+
 function useNow() {
   const [now, setNow] = useState(new Date());
   useEffect(() => {
@@ -236,6 +255,7 @@ function App() {
   const scale = useStageScale();
   const now = useNow();
   const weather = useWeather();
+  const epoch = useTiltEpoch();
   const onDevice =
     new URLSearchParams(window.location.search).get("onDevice") === "true";
 
@@ -267,25 +287,25 @@ function App() {
           />
         </VideoBackground>
         <Content>
-          <TiltLine big>{time}</TiltLine>
-          <TiltLine>{date}</TiltLine>
+          <TiltLine big epoch={epoch}>{time}</TiltLine>
+          <TiltLine epoch={epoch}>{date}</TiltLine>
           {weather ? (
             <>
-              <TiltLine>{Math.round(weather.temperature_2m)}°</TiltLine>
-              <TiltLine>{label}</TiltLine>
+              <TiltLine epoch={epoch}>{Math.round(weather.temperature_2m)}°</TiltLine>
+              <TiltLine epoch={epoch}>{label}</TiltLine>
               {sun && (
-                <TiltLine>
+                <TiltLine epoch={epoch}>
                   {sun.label} in {sun.h}h {sun.m}m
                 </TiltLine>
               )}
-              {weather.aqi != null && <TiltLine>AQI {weather.aqi}</TiltLine>}
+              {weather.aqi != null && <TiltLine epoch={epoch}>AQI {weather.aqi}</TiltLine>}
               {weather.uv_index != null && (
-                <TiltLine>UV {Math.round(weather.uv_index)}</TiltLine>
+                <TiltLine epoch={epoch}>UV {Math.round(weather.uv_index)}</TiltLine>
               )}
-              <TiltLine>{moon}</TiltLine>
+              <TiltLine epoch={epoch}>{moon}</TiltLine>
             </>
           ) : (
-            <TiltLine>Loading weather…</TiltLine>
+            <TiltLine epoch={epoch}>Loading weather…</TiltLine>
           )}
         </Content>
       </Stage>
