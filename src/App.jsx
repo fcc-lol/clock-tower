@@ -158,7 +158,7 @@ function TiltLine({ big, epoch, children }) {
   );
 }
 
-// Full-stage background layer. The 16:9 iframe is rotated 90° and sized so it
+// Full-stage background layer. The 16:9 source is rotated 90° and sized so it
 // covers the 1080x1920 portrait stage (1920x1080 rotated = 1080 wide x 1920 tall).
 const VideoBackground = styled.div`
   position: absolute;
@@ -166,7 +166,8 @@ const VideoBackground = styled.div`
   z-index: 0;
   overflow: hidden;
 
-  iframe {
+  iframe,
+  video {
     position: absolute;
     top: 50%;
     left: 50%;
@@ -175,6 +176,10 @@ const VideoBackground = styled.div`
     border: 0;
     transform: translate(-50%, -50%) rotate(90deg);
     pointer-events: none;
+  }
+
+  video {
+    object-fit: cover;
   }
 `;
 
@@ -279,12 +284,18 @@ function App() {
     <Viewport $onDevice={onDevice}>
       <Stage $scale={scale}>
         <VideoBackground>
-          <iframe
-            src="https://www.youtube.com/embed/uejy_W2eD_s?autoplay=1&mute=1&loop=1&playlist=uejy_W2eD_s&controls=0&playsinline=1&rel=0&modestbranding=1&disablekb=1&fs=0&iv_load_policy=3"
-            title="YouTube video"
-            allow="autoplay; encrypted-media"
-            allowFullScreen
-          />
+          {onDevice ? (
+            // On-device installs play a locally downloaded copy of the video
+            // (see README) instead of streaming the YouTube embed.
+            <video src="/background.mp4" autoPlay muted loop playsInline />
+          ) : (
+            <iframe
+              src="https://www.youtube.com/embed/uejy_W2eD_s?autoplay=1&mute=1&loop=1&playlist=uejy_W2eD_s&controls=0&playsinline=1&rel=0&modestbranding=1&disablekb=1&fs=0&iv_load_policy=3"
+              title="YouTube video"
+              allow="autoplay; encrypted-media"
+              allowFullScreen
+            />
+          )}
         </VideoBackground>
         <Content>
           <TiltLine big epoch={epoch}>{time}</TiltLine>
