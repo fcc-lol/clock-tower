@@ -2,9 +2,12 @@ import express from "express";
 import Database from "better-sqlite3";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { createVisuals, providerFromEnv, loadDotenv } from "./visuals.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+await loadDotenv(join(__dirname, ".env"));
 
 const app = express();
 const port = 3118;
@@ -13,10 +16,34 @@ const port = 3118;
 const db = new Database(join(__dirname, "data.sqlite"));
 db.pragma("journal_mode = WAL");
 
+// AI-generated backdrops (see visuals.js). Without an API key the endpoint
+// still answers, with enabled:false, and the display shows a plain background.
+const provider = providerFromEnv();
+const visuals = createVisuals({
+  dir: join(__dirname, "generated"),
+  provider,
+  style: process.env.IMAGE_STYLE || "random",
+});
+await visuals.load();
+visuals.start();
+console.log(
+  provider
+    ? `Backdrop generation on (${provider.name}/${provider.model}, style=${process.env.IMAGE_STYLE || "random"})`
+    : "Backdrop generation off (no API key; see .env.example)",
+);
+
 app.use(express.json());
 
-// Serve static files from dist
+// Serve static files from dist, plus generated backdrops (cache forever: the
+// filename is the slot timestamp so a given URL never changes).
 app.use(express.static(join(__dirname, "dist")));
+app.use("/generated", express.static(join(__dirname, "generated"), { maxAge: "7d", immutable: true }));
+
+// Polled by the display. Doubles as the "someone is watching" heartbeat.
+app.get("/api/visual", (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.json(visuals.snapshot());
+});
 
 // API endpoint for SQLite queries
 app.post("/api/query", (req, res) => {
@@ -43,4 +70,3 @@ app.get("*", (req, res) => {
 app.listen(port, () => {
   console.log(`Server is running at http://localhost:${port}`);
 });
-

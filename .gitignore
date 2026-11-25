@@ -4,6 +4,6 @@ dist/
 *.sqlite
 .DS_Store
 
-# Background video is downloaded per-device (see README), never committed.
-public/background.mp4
+# AI-generated backdrops are written at runtime, never committed.
+generated/
 

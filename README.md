@@ -1,15 +1,31 @@
 # Clock Tower
 
-Portrait clock/weather signage display for Long Island City. Shows the time, date, and current conditions (temperature, sky, sunrise/sunset countdown, AQI, UV, moon phase) over a looping background video, with all lines re-tilting to fresh random angles every 10 minutes.
+Portrait clock/weather signage display for Long Island City. Shows the time, date, and current conditions (temperature, sky, sunrise/sunset countdown, AQI, UV, moon phase) over an AI-generated backdrop that depicts those same conditions, regenerated every 15 minutes. All text lines re-tilt to fresh random angles every 10 minutes.
 
-Deployed at https://clock-tower.fcc.lol (pushes to `main` auto-deploy via GitHub Actions). It can also run standalone on a device such as a Raspberry Pi, playing a locally downloaded copy of the background video instead of streaming from YouTube.
+Deployed at https://clock-tower.fcc.lol (pushes to `main` auto-deploy via GitHub Actions). It can also run standalone on a device such as a Raspberry Pi.
 
 ## How it works
 
 - Vite + React app, served in production by a small Express server on port **3118** (`server.js` serves the `dist/` build).
 - Weather comes from the free Open-Meteo APIs (no key needed), refreshed every 10 minutes. This requires internet — offline, the display shows "Loading weather…" but the clock keeps working.
-- The `?onDevice=true` query param does two things: hides the mouse cursor, and switches the background from the YouTube embed to a local file at `/background.mp4`. Without the param (e.g. the fcc.lol deployment) the YouTube iframe is used.
-- The stage is authored at a fixed 1080×1920 portrait and scaled to fit the screen, so on a landscape monitor it letterboxes. The 16:9 video is rotated 90° to cover the portrait stage.
+- The `?onDevice=true` query param hides the mouse cursor.
+- The stage is authored at a fixed 1080×1920 portrait and scaled to fit the screen, so on a landscape monitor it letterboxes.
+
+### Generated backdrops
+
+`visuals.js` on the server turns the live weather/sky data into an image prompt and renders a portrait image through an image API. Time is cut into 15-minute slots on the quarter hour; while one slot's image is on screen, the next slot's is generated in the background, and the browser swaps to it the moment the boundary passes (a hard cut, on the client's own clock).
+
+- The browser polls `/api/visual` every 30 s. That poll is also the "someone is watching" heartbeat: if nothing has polled for 2 minutes, generation stops, so an idle server costs nothing.
+- Images and their prompts land in `generated/` (gitignored, last 12 kept) and are served at `/generated/<slot>.jpg`.
+- Three prompt styles live in `visuals.js`: `skyline` (painterly LIC waterfront), `poster` (abstract data poster where each metric is a shape) and `lookup` (cinematic shot up between LIC towers). `IMAGE_STYLE` picks one, or `random` rotates per slot.
+- Without an API key the display runs with a plain black backdrop.
+
+Configure via a `.env` file next to `server.js` (see `.env.example`): `OPENAI_API_KEY` for GPT Image (default, `gpt-image-2.5-flare`), or `IMAGE_PROVIDER=gemini` with `GEMINI_API_KEY`. Check the pipeline end to end with:
+
+```sh
+npm run visual:test -- poster          # generates generated/test-poster.jpg
+npm run visual:test -- skyline --dry   # prints the prompt only, no API call
+```
 
 ## First-time setup on a new device (Raspberry Pi)
 
@@ -19,7 +35,7 @@ Assumes Raspberry Pi OS with desktop (Bookworm or later).
 
 ```sh
 sudo apt update
-sudo apt install -y git yt-dlp
+sudo apt install -y git
 ```
 
 Install Node.js 20+ if not present (e.g. via [NodeSource](https://github.com/nodesource/distributions) or `nvm`).
@@ -34,14 +50,14 @@ cd clock-tower
 npm install
 ```
 
-### 3. Download the background video
-
-The video is not committed to the repo — download it once per device into `public/`. Video-only H.264 at ≤1080p, since playback is muted and H.264 gets hardware decoding on the Pi:
+### 3. Add the image API key
 
 ```sh
-mkdir -p public
-yt-dlp -f "bv*[vcodec^=avc1][height<=1080]" "https://www.youtube.com/watch?v=uejy_W2eD_s" -o public/background.mp4
+cp .env.example .env
+# then put your key in .env
 ```
+
+Skip this to run with a plain black backdrop.
 
 ### 4. Build and run
 
@@ -50,7 +66,7 @@ npm run build
 npm start
 ```
 
-Then open `http://localhost:3118/?onDevice=true` and confirm the video plays and the clock is ticking.
+Then open `http://localhost:3118/?onDevice=true` and confirm the clock is ticking. The first backdrop appears after the first generation finishes (roughly a minute).
 
 ### 5. Run the server on boot
 
@@ -111,4 +127,4 @@ sudo systemctl restart clock-tower
 npm run dev
 ```
 
-Vite dev server; add `?onDevice=true` to test local-video mode (drop any test MP4 at `public/background.mp4`).
+Vite dev server for the display only. The backdrop comes from the Express server, so to see it during development run `npm run build && npm start` and open port 3118, or point a dev proxy at it.
