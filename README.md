@@ -17,7 +17,7 @@ Deployed at https://clock-tower.fcc.lol (pushes to `main` auto-deploy via GitHub
 
 - The browser polls `/api/visual` every 30 s. That poll is also the "someone is watching" heartbeat: if nothing has polled for 2 minutes, generation stops, so an idle server costs nothing.
 - Images and their prompts land in `generated/` (gitignored, last 12 kept) and are served at `/generated/<slot>.jpg`.
-- Three prompt styles live in `visuals.js`: `skyline` (painterly LIC waterfront), `poster` (abstract data poster where each metric is a shape) and `lookup` (cinematic shot up between LIC towers). `IMAGE_STYLE` picks one, or `random` rotates per slot.
+- Fifteen prompt styles live in `visuals.js`, deliberately far apart in medium and viewpoint: painterly skyline, risograph data poster, cinematic look-up between towers, apartment window, 7 train platform, ukiyo-e woodblock, pixel art, satellite view, cut-paper collage, watercolor, neon synthwave, charcoal sketch, flat vector, cyanotype blueprint and street photo. `IMAGE_STYLE` pins one; the default `random` picks a different style from the previous slot every time.
 - Without Google credentials the display runs with a plain black backdrop.
 - Each build gets an id (`dist/build-id.txt`) that the server reports from `/api/visual`. A running display reloads itself when that changes, so after `npm run build` + a server restart the kiosk picks up the new version on its next poll (within 30 s) with no keyboard needed.
 
