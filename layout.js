@@ -39,11 +39,11 @@ const SYSTEM = `You are the typographer for a piece of wall art: a 4K portrait s
 
 The text is always the same set of readouts, in two blocks:
 - clock block: the time (very large, e.g. "12:45 PM"), then the date under it (e.g. "Wednesday, November 25")
-- weather block: the temperature (large) with the condition beside it (e.g. "42° Overcast"), then four small label/value pairs (Sunset in / 26m, Moon / Full Moon, Air quality / 50, UV index / 0)
+- weather block: the temperature (large) with the condition beside it (e.g. "42° Overcast"), then four small label/value pairs (Sunset in / 26m, Moon / Full Moon, Air quality / 50, UV index / 0), then one "today" fact as a small label over a line that may wrap to two (e.g. On this day in 1783 / George Washington Resigns as Commander-in-Chief)
 
 You are shown the picture and choose:
 
-arrangement: where the blocks go on the tall frame. "stack_top", "stack_center" and "stack_bottom" keep both blocks together (about half the frame height) at the top, middle or bottom. "split" puts the clock block at the top and the weather block at the bottom, leaving the middle clear. Put the type over the calmest, most even part of the picture and keep it off the subject: a skyline along the bottom wants stack_top; a picture whose interest is at the top wants stack_bottom; a subject in the middle wants split.
+arrangement: where the blocks go on the tall frame. "stack_top", "stack_center" and "stack_bottom" keep both blocks together (a little over half the frame height) at the top, middle or bottom. "split" puts the clock block at the top and the weather block at the bottom, leaving the middle clear. Put the type over the calmest, most even part of the picture and keep it off the subject: a skyline along the bottom wants stack_top; a picture whose interest is at the top wants stack_bottom; a subject in the middle wants split.
 
 align: left, center or right. Offset the type away from a strong vertical element or toward open space; center when the picture is symmetrical.
 

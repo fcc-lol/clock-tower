@@ -93,3 +93,42 @@ export async function fetchWeather(fetchFn = fetch) {
   if (!wx.current) throw new Error(wx.reason || "weather unavailable");
   return { ...wx.current, daily: wx.daily, aqi: aq.current?.us_aqi };
 }
+
+// The real color of the sky over Manhattan right now, measured from a live
+// camera in four directions (NYC Sky Colors API, refreshed every 15 minutes).
+// Returns { west, "north-west", "north-east", east } as #rrggbb, or null if
+// the reading is missing or stale.
+export const SKY_URL = "https://nyc-sky-colors.fcc.lol/api";
+export async function fetchSkyColors(fetchFn = fetch) {
+  try {
+    const d = await (await fetchFn(SKY_URL)).json();
+    const at = d.metadata?.lastUpdated?.timestamp;
+    if (!d.colors || d.metadata?.isHistoricalData || !at || Date.now() - at > 45 * 60 * 1000) return null;
+    return d.colors;
+  } catch {
+    return null;
+  }
+}
+
+// "#93b5d2" -> "light greyish blue": a color name an image model can paint.
+export function colorWords(hex) {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || "");
+  if (!m) return null;
+  const [r, g, b] = m.slice(1).map((x) => parseInt(x, 16) / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  const d = max - min;
+  const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+  let h = 0;
+  if (d) h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  h = (h * 60 + 360) % 360;
+  if (l < 0.06) return "black";
+  if (l > 0.94) return "white";
+  const tone = l < 0.16 ? "near-black" : l < 0.32 ? "dark" : l < 0.48 ? "deep" : l < 0.66 ? "" : l < 0.82 ? "light" : "pale";
+  if (s < 0.09) return `${tone} grey`.trim();
+  const hue =
+    h < 15 || h >= 335 ? "red" : h < 40 ? "orange" : h < 65 ? "yellow" : h < 160 ? "green" : h < 200 ? "teal" :
+    h < 250 ? "blue" : h < 290 ? "violet" : "pink";
+  return `${tone} ${s < 0.28 ? "greyish " : ""}${hue}`.trim();
+}

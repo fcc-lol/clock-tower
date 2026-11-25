@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import styled from "styled-components";
 import { WMO, moonPhase, nextSunEvent, fetchWeather } from "./lib/sky.js";
 import { FONTS, resolveLayout } from "./lib/layout.js";
+import { fetchToday, factFor } from "./lib/today.js";
 
 // Fixed design dimensions — everything is authored at this exact size.
 const STAGE_W = 1080;
@@ -183,6 +184,18 @@ const Stat = styled.div`
   }
 `;
 
+// The "today" fact: set like a stat, but its value may wrap.
+const Fact = styled(Stat)`
+  margin-top: 56px;
+  max-width: 100%;
+  b {
+    font-size: ${(p) => 44 * p.$t.scale}px;
+    line-height: 1.18;
+    white-space: normal;
+    text-wrap: balance;
+  }
+`;
+
 // Full-stage backdrop: the AI-generated image for the current 15-minute slot
 // (see visuals.js on the server). The layout's scrim darkens it behind the
 // readouts where needed. Swaps are a hard cut, so
@@ -254,6 +267,23 @@ function useWeather() {
     };
   }, []);
   return weather;
+}
+
+// Today's facts (holidays, events on this date, plants in bloom), refreshed
+// hourly so they roll over with the date.
+function useToday() {
+  const [facts, setFacts] = useState([]);
+  useEffect(() => {
+    let active = true;
+    const load = () => fetchToday().then((f) => active && f.length && setFacts(f)).catch(() => {});
+    load();
+    const id = setInterval(load, 60 * 60 * 1000);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, []);
+  return facts;
 }
 
 // Ask the browser to fetch every typeface up front, so the first time a layout
@@ -374,6 +404,8 @@ function App() {
   const previewed = usePreview(params.get("preview"));
   const backdrop = params.get("preview") ? previewed : live;
   const fontsLoaded = useFonts();
+  // One fact per image: it changes when the backdrop does.
+  const fact = factFor(useToday(), backdrop?.slot ?? now.getTime());
   const onDevice = params.get("onDevice") === "true";
   // The layout designed for this image, or the built-in one for its style.
   // ?theme=neon previews a built-in layout on whatever image is showing.
@@ -442,6 +474,12 @@ function App() {
                     </Stat>
                   )}
                 </Stats>
+                {fact && (
+                  <Fact $t={t}>
+                    <span>{fact.label}</span>
+                    <b>{fact.value}</b>
+                  </Fact>
+                )}
               </>
             ) : (
               <Cond $t={t}>Loading weather…</Cond>

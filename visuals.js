@@ -12,7 +12,7 @@
 import { readdir, readFile, writeFile, mkdir, unlink } from "fs/promises";
 import { join } from "path";
 import { GoogleAuth } from "google-auth-library";
-import { fetchWeather, WMO, moonPhase, toDate } from "./src/lib/sky.js";
+import { fetchWeather, fetchSkyColors, colorWords, WMO, moonPhase, toDate } from "./src/lib/sky.js";
 
 export const SLOT_MS = 15 * 60 * 1000;
 const LEAD_MS = 12 * 60 * 1000; // start the next slot's image this long before it begins
@@ -197,6 +197,31 @@ function sunContext(daily, now) {
   };
 }
 
+// Everything the prompt is built from: the weather reading plus, when
+// available, the measured color of the real sky (as `sky`).
+export async function fetchConditions() {
+  const [w, sky] = await Promise.all([fetchWeather(), fetchSkyColors()]);
+  return { ...w, sky };
+}
+
+// The measured sky colors as a sentence, e.g. "light greyish blue (#93b5d2)
+// to the west, ...". Neighbouring directions with the same name are merged.
+function measuredSky(sky) {
+  if (!sky) return "";
+  const parts = [];
+  for (const [dir, label] of [["west", "west"], ["north-west", "north-west"], ["north-east", "north-east"], ["east", "east"]]) {
+    const words = colorWords(sky[dir]);
+    if (!words) continue;
+    const last = parts[parts.length - 1];
+    if (last && last.words === words) last.dirs.push(label);
+    else parts.push({ words, hex: sky[dir], dirs: [label] });
+  }
+  if (!parts.length) return "";
+  const where = (dirs) => (dirs.length === 4 ? "in every direction" : `to the ${dirs.join(" and ")}`);
+  const list = parts.map((p) => `${p.words} (${p.hex}) ${where(p.dirs)}`).join(", ");
+  return `A camera above Manhattan has just measured the actual color of the sky: ${list}. Paint the sky in these measured colors and at this brightness; where they differ from the description above, the measurement wins.`;
+}
+
 // Turn a weather reading + timestamp into what every style shares:
 //   scene: a visual description of the conditions, for the pictorial styles
 //   facts: the raw figures, for the styles that encode data as shapes
@@ -246,6 +271,7 @@ export function describe(w, now = new Date()) {
     moonVisible
       ? `The moon is out: ${MOON_WORDS[moon]}, drawn with exactly that shape${bucket === "broken" ? ", glimpsed between clouds" : ""}.`
       : "Do not draw a moon.",
+    measuredSky(w.sky),
   ]
     .filter(Boolean)
     .join(" ");
@@ -531,7 +557,7 @@ export function createVisuals({ dir, provider, designer = null, style = "random"
 
   async function weather() {
     if (weatherCache && Date.now() - weatherCache.at < 10 * 60 * 1000) return weatherCache.data;
-    const data = await fetchWeather();
+    const data = await fetchConditions();
     weatherCache = { at: Date.now(), data };
     return data;
   }

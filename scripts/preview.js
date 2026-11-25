@@ -8,8 +8,7 @@
 import { writeFile, mkdir } from "fs/promises";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { fetchWeather } from "../src/lib/sky.js";
-import { buildPrompt, createProvider, loadDotenv, STYLES } from "../visuals.js";
+import { buildPrompt, fetchConditions, createProvider, loadDotenv, STYLES } from "../visuals.js";
 import { createLayoutDesigner } from "../layout.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -23,7 +22,7 @@ await mkdir(out, { recursive: true });
 const provider = await createProvider();
 if (!provider) process.exit(1);
 const designer = createLayoutDesigner();
-const weather = await fetchWeather();
+const weather = await fetchConditions();
 
 // The image API rate-limits bursts: go one at a time and wait out a 429.
 async function generate(prompt, tries = 4) {

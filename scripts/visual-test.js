@@ -6,8 +6,7 @@
 import { writeFile, mkdir } from "fs/promises";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { fetchWeather } from "../src/lib/sky.js";
-import { buildPrompt, createProvider, loadDotenv } from "../visuals.js";
+import { buildPrompt, fetchConditions, createProvider, loadDotenv } from "../visuals.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 await loadDotenv(join(root, ".env"));
@@ -16,7 +15,7 @@ const args = process.argv.slice(2);
 const style = args.find((a) => !a.startsWith("--")) || "random";
 const dry = args.includes("--dry");
 
-const weather = await fetchWeather();
+const weather = await fetchConditions();
 const { style: used, prompt } = buildPrompt(weather, new Date(), style);
 console.log(`style: ${used}\n\n${prompt}\n`);
 if (dry) process.exit(0);
