@@ -36,7 +36,6 @@ function scrimOf(where, strength) {
 function themeOf(l) {
   const d = FONTS[l.display_font];
   const b = FONTS[l.body_font];
-  const g = l.glow;
   return {
     display: d.stack,
     body: b.stack,
@@ -55,12 +54,6 @@ function themeOf(l) {
     row: l.stats === "row",
     ink: l.ink,
     accent: l.accent,
-    shadow: {
-      soft: "0 2px 28px rgba(0,0,0,.6), 0 0 3px rgba(0,0,0,.55)",
-      hard: "0 3px 0 rgba(0,0,0,.55), 0 0 24px rgba(0,0,0,.5)",
-      glow: `0 0 10px ${g}, 0 0 34px ${g}, 0 0 70px ${g}99, 0 2px 4px rgba(0,0,0,.7)`,
-      none: "0 1px 3px rgba(0,0,0,.35)",
-    }[l.shadow],
     scrim: scrimOf(l.scrim, l.scrim_strength),
   };
 }
@@ -106,7 +99,6 @@ const Content = styled.div`
   font-weight: ${(p) => p.$t.bodyWeight};
   font-style: ${(p) => (p.$t.italic ? "italic" : "normal")};
   color: ${(p) => p.$t.ink};
-  text-shadow: ${(p) => p.$t.shadow};
   text-transform: ${(p) => (p.$t.upper ? "uppercase" : "none")};
   letter-spacing: ${(p) => p.$t.track}em;
   font-variant-numeric: lining-nums tabular-nums;
@@ -143,15 +135,8 @@ const DateLine = styled.div`
   line-height: 1.2;
 `;
 
-const Rule = styled.div`
-  width: 120px;
-  height: 4px;
-  margin: ${(p) => (p.$t.split ? 0 : 70)}px 0 62px;
-  background: ${(p) => p.$t.accent};
-  box-shadow: 0 2px 18px rgba(0, 0, 0, 0.5);
-`;
-
 const Now = styled.div`
+  margin-top: ${(p) => (p.$t.split ? 0 : 96)}px;
   display: flex;
   align-items: baseline;
   justify-content: ${(p) => p.$t.flex};
@@ -365,13 +350,30 @@ function useBackdrop(now) {
   return shown && ready[shown.url] ? shown : null;
 }
 
+// ?preview=<name> shows generated/preview/<name>.json (made by
+// `npm run visual:preview`) instead of the live slot, to look at one image and
+// its layout on its own.
+function usePreview(name) {
+  const [meta, setMeta] = useState(null);
+  useEffect(() => {
+    if (!name) return;
+    fetch(`/generated/preview/${name}.json`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then(setMeta)
+      .catch(() => {});
+  }, [name]);
+  return meta;
+}
+
 function App() {
   const scale = useStageScale();
   const now = useNow();
   const weather = useWeather();
-  const backdrop = useBackdrop(now);
-  const fontsLoaded = useFonts();
   const params = new URLSearchParams(window.location.search);
+  const live = useBackdrop(now);
+  const previewed = usePreview(params.get("preview"));
+  const backdrop = params.get("preview") ? previewed : live;
+  const fontsLoaded = useFonts();
   const onDevice = params.get("onDevice") === "true";
   // The layout designed for this image, or the built-in one for its style.
   // ?theme=neon previews a built-in layout on whatever image is showing.
@@ -407,7 +409,6 @@ function App() {
             <DateLine $t={t}>{date}</DateLine>
           </Block>
           <Block $t={t}>
-            <Rule $t={t} />
             {weather ? (
               <>
                 <Now $t={t}>

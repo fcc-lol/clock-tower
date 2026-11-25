@@ -279,7 +279,10 @@ const NO_TEXT = "Absolutely no text, letters, numerals, words, captions, signatu
 const LOW_SUBJECT =
   "Composition: the subject and all fine detail sit in the bottom third of the tall frame; the upper two thirds is sky, " +
   "rendered with real tonal depth and character but without small busy high-contrast detail.";
-const FINISH = `${TONE} ${NO_TEXT}`;
+// Every image is artwork. Photographic realism is never wanted, whatever the style.
+const NOT_PHOTO =
+  "This is a hand-made artwork, never a photograph: no photorealism, no photographic or 3D-rendered look, no lens or camera effects. The medium named above must be unmistakable.";
+const FINISH = `${NOT_PHOTO} ${TONE} ${NO_TEXT}`;
 
 // Symbol styles draw the sun/moon only when it would really be visible.
 const symbol = (d, how) => (d.skyObject ? `${d.skyObject} ${how}` : "no sun or moon at all (hidden by cloud)");
@@ -311,27 +314,30 @@ export const STYLES = {
     `${d.falling ? `; fine falling ${d.falling === "snow" ? "dots" : "vertical lines"} over the whole composition for the ${d.falling}` : ""}. ` +
     `${FINISH}`,
 
-  // Cinematic shot looking straight up between LIC towers.
+  // Linocut looking straight up between LIC towers.
   lookup: (d) =>
-    `Tall vertical architectural photograph on medium-format film with fine grain, shot looking straight up from a Long Island City street in Queens, New York, ` +
-    `between glass and steel residential towers whose facades converge dramatically toward an irregular opening of sky. Strong graphic composition, deep rich blacks. ` +
-    `The sky seen in the opening, and reflected in the glass, shows these conditions exactly: ${d.scene} ` +
-    `The facades are dark and moody, picking up the real color of the sky${d.isDark ? ", with a scatter of warm lit windows" : ""}. No signage, no people. ${FINISH}`,
+    `Tall vertical reduction linocut print in three or four inks, bold carved lines, visible gouge marks and slightly uneven hand-pulled ink: ` +
+    `the view looking straight up from a Long Island City street in Queens, New York, between tall residential towers whose facades converge dramatically toward an irregular opening of sky. ` +
+    `Strong graphic composition, the towers as deep dark carved masses. ` +
+    `The sky in the opening shows these conditions exactly, translated into the print: ${d.scene} ` +
+    `${d.isDark ? "A scatter of small warm lit windows cut into the dark facades. " : ""}No signage, no people. ${FINISH}`,
 
-  // Looking out from inside an apartment.
+  // Pastel drawing looking out from inside an apartment.
   window: (d) =>
-    `Tall vertical photograph taken inside a dim, quiet Long Island City apartment, looking out through one large steel-framed window over Queens rooftops and wooden water towers ` +
-    `to the Manhattan skyline in the distance. Shot on 35mm film, natural light only, beautifully exposed for the view outside so the room falls into deep warm shadow. ` +
-    `The window fills nearly the whole frame; a radiator, a trailing plant and a mug on the sill are small dark shapes along the bottom edge. ` +
+    `Tall vertical drawing in soft pastel and colored pencil on dark toned paper, rich layered color and visible strokes, by a gifted illustrator: ` +
+    `the view from inside a dim, quiet Long Island City apartment, looking out through one large steel-framed window over Queens rooftops and wooden water towers ` +
+    `to the Manhattan skyline in the distance. The window fills nearly the whole sheet; a radiator, a trailing plant and a mug on the sill are small dark shapes along the bottom edge, ` +
+    `and the room is in deep warm shadow. ` +
     `Everything seen through the glass matches these conditions: ${d.scene} ` +
     `${d.falling === "snow" ? "Snow gathering on the outer sill. " : d.falling ? "Raindrops and running streaks on the glass, the view softened behind them. " : ""}` +
     `${d.humidity > 80 && d.feels < 50 ? "A little condensation fogging the corners of the pane. " : ""}` +
     `The sky takes up the upper two thirds of the window. ${FINISH}`,
 
-  // Elevated 7 train platform.
+  // Palette-knife oil painting of the elevated 7 train platform.
   platform: (d) =>
-    `Tall vertical photograph on 35mm color negative film from the end of the elevated 7 train platform at Queensboro Plaza in Long Island City, looking down the tracks toward Manhattan: ` +
-    `steel rails and riveted elevated structure converging into the distance, signal lights glowing, a subway train small and far off, the skyline beyond. Cinematic, patient, beautifully composed. ` +
+    `Tall vertical oil painting in thick impasto, laid on with a palette knife and broad brushes, the paint texture clearly visible, in the tradition of the Ashcan School painters of New York: ` +
+    `the end of the elevated 7 train platform at Queensboro Plaza in Long Island City, looking down the tracks toward Manhattan, ` +
+    `steel rails and riveted elevated structure converging into the distance, signal lights as dabs of glowing color, a subway train small and far off, the skyline beyond. ` +
     `Sky, light and weather match these conditions: ${d.scene} ` +
     `${d.falling === "snow" ? "Snow on the platform edge and sleepers. " : d.falling ? "The platform wet and reflective. " : "The platform dry. "}` +
     `${LOW_SUBJECT} No people, no signs. ${FINISH}`,
@@ -351,13 +357,14 @@ export const STYLES = {
     `Weather and light match these conditions, drawn in pixels: ${d.scene} ` +
     `The sky above the rooftops is a big dithered gradient with pixel clouds, and ${symbol(d, "as a clean pixel disc")}. ${LOW_SUBJECT} No people, blank signs. ${FINISH}`,
 
-  // Satellite view.
+  // Illustrated bird's-eye map.
   satellite: (d) =>
-    `Tall vertical aerial photograph from a high-altitude aircraft looking straight down on the East River, with Midtown Manhattan's street grid on the left, Long Island City, Queens on the right, ` +
-    `Roosevelt Island a long sliver in the channel and the Queensboro Bridge crossing it. Photorealistic, razor-sharp, rich color. ` +
-    `${d.fog ? "Fog fills the river and streets, with only the tallest towers poking through. " : d.cloud >= 85 ? "A textured cloud deck covers most of the frame, with ragged openings through which the river, the bridge and patches of the grid are clearly visible. " : d.cloud >= 30 ? "Scattered clouds float below the camera, casting sharp shadows on the city. " : "A completely clear view of the whole city grid. "}` +
-    `${d.isDark ? "It is dark: the city is a lattice of warm amber street lights, the river black, the bridge a string of lights. " : d.phase === "day" ? "" : "The sun is very low: long shadows stretch from every tower. "}` +
-    `Conditions: ${d.scene} ${FINISH}`,
+    `Tall vertical hand-illustrated bird's-eye map in ink line and flat gouache color, in the manner of a beautifully drawn mid-century pictorial city map: ` +
+    `looking straight down on the East River, with Midtown Manhattan's street grid on the left, Long Island City, Queens on the right, ` +
+    `Roosevelt Island a long sliver in the channel and the Queensboro Bridge crossing it, buildings as tiny drawn blocks, the river a deep flat color. ` +
+    `${d.fog ? "Drawn fog fills the river and streets, with only the tallest towers poking through. " : d.cloud >= 85 ? "A layer of stylized drawn clouds drifts over most of the map, with openings through which the river, the bridge and patches of the grid show clearly. " : d.cloud >= 30 ? "Scattered stylized clouds float over the map, each with its drawn shadow on the city. " : "A completely clear view of the whole city grid. "}` +
+    `${d.isDark ? "It is dark: a deep night palette, the streets a lattice of tiny warm dots of light, the river near black, the bridge a string of lights. " : d.phase === "day" ? "" : "The sun is very low: long drawn shadows stretch from every tower. "}` +
+    `Palette and atmosphere follow these conditions: ${d.scene} ${FINISH}`,
 
   // Cut-paper collage.
   collage: (d) =>
@@ -410,13 +417,13 @@ export const STYLES = {
     `Each instrument is drawn in the state matching these readings, shown by needle positions, fill levels and motion lines, never by labels: ${d.facts} ` +
     `In the upper third, a precise astronomical diagram of the moon at its current phase (${MOON_WORDS[d.moon]}). The rest is empty blue paper. ${FINISH}`,
 
-  // Street photo.
+  // Ligne claire comic panel of a street corner.
   street: (d) =>
-    `Tall vertical documentary street photograph on Vernon Boulevard in Long Island City, Queens, on 35mm color film with a 28mm lens, by a great color street photographer: ` +
-    `a low brick block with a corner deli awning, parked cars, a street tree, fire escapes, the elevated sense of a real, specific New York corner. ` +
+    `Tall vertical illustration in the ligne claire tradition of European comics: clean, even ink outlines, flat harmonious color with a few simple shadow shapes, meticulous architectural drawing. ` +
+    `A corner of Vernon Boulevard in Long Island City, Queens: a low brick block with a corner deli awning, parked cars, a street tree, fire escapes, a real and specific New York corner. ` +
     `Light and weather match these conditions: ${d.scene} ` +
     `${d.falling === "snow" ? "Fresh snow on the cars and sidewalk. " : d.falling ? "Wet asphalt and puddles reflecting the lights. " : "Dry pavement. "}` +
-    `${LOW_SUBJECT} No readable signage, no faces. ${FINISH}`,
+    `${LOW_SUBJECT} Blank signs, no people. ${FINISH}`,
 };
 
 // Picks the prompt style. "random" chooses any style other than `avoid` (the

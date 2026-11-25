@@ -28,9 +28,7 @@ const SCHEMA = {
     tracking: str(ENUMS.tracking),
     stats: str(ENUMS.stats),
     ink: { type: "string", description: "Main text color, #rrggbb." },
-    accent: { type: "string", description: "Color of the small labels, AM/PM and the rule, #rrggbb." },
-    shadow: str(ENUMS.shadow),
-    glow: { type: "string", description: "Glow color when shadow is glow, #rrggbb." },
+    accent: { type: "string", description: "Color of the small labels and AM/PM, #rrggbb." },
     scrim: str(ENUMS.scrim),
     scrim_strength: str(ENUMS.scrim_strength),
   },
@@ -41,7 +39,7 @@ const SYSTEM = `You are the typographer for a piece of wall art: a 4K portrait s
 
 The text is always the same set of readouts, in two blocks:
 - clock block: the time (very large, e.g. "12:45 PM"), then the date under it (e.g. "Wednesday, November 25")
-- weather block: a short rule, the temperature (large) with the condition beside it (e.g. "42° Overcast"), then four small label/value pairs (Sunset in / 26m, Moon / Full Moon, Air quality / 50, UV index / 0)
+- weather block: the temperature (large) with the condition beside it (e.g. "42° Overcast"), then four small label/value pairs (Sunset in / 26m, Moon / Full Moon, Air quality / 50, UV index / 0)
 
 You are shown the picture and choose:
 
@@ -55,7 +53,7 @@ Choose for the medium and mood of this particular picture, not from habit. Using
 
 time_weight, body_weight, time_size (110-340; around 250 is typical, wide faces like orbitron and press_start need about 130-190), uppercase, tracking ("wide" suits uppercase, "tight" suits heavy lowercase), and stats ("grid" is two rows of two, "row" is a single line of four).
 
-ink (main text color), accent (labels, AM/PM, the rule), shadow and scrim. Take the colors from the picture's own palette so the type belongs to it, but legibility comes first: against the area behind the text, ink needs very strong contrast, which nearly always means a near-white or pale tint of a color in the picture, or on a genuinely light, even area a near-black one. The accent should be clearly visible too. shadow: "soft" is a diffuse dark halo that suits most paintings and photographs, "hard" is a crisp offset shadow for flat graphic styles, "glow" is a colored neon glow (set glow), "none" only when the background is already dark and even. scrim darkens the picture behind the text ("top", "bottom", "both" ends, or "full"): use the least that makes the text read, "none" if the area is already dark and calm, stronger when it is bright or busy.
+ink (main text color), accent (the small labels and AM/PM) and scrim. The type is set flat, with no shadow, outline or glow, so its legibility comes entirely from your colors and the scrim. Take the colors from the picture's own palette so the type belongs to it, but legibility comes first: against the area behind the text, ink needs very strong contrast, which nearly always means a near-white or pale tint of a color in the picture, or on a genuinely light, even area a near-black one. The accent must be clearly readable too, not a mid-tone that sinks into the background. scrim darkens the picture behind the text ("top", "bottom", "both" ends, or "full"): with light ink, use enough of it that every line reads cleanly ("none" only if the area is already dark and even, "strong" when it is bright or busy); with dark ink on a light picture use "none", since a scrim would work against it.
 
 Reply with the layout as JSON.`;
 

@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "node server.js",
-    "visual:test": "node scripts/visual-test.js"
+    "visual:test": "node scripts/visual-test.js",
+    "visual:preview": "node scripts/preview.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.14.0",

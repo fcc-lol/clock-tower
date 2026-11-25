@@ -11,8 +11,7 @@
 //   align                     "left" | "center" | "right"
 //   arrangement               "stack_top" | "stack_center" | "stack_bottom" | "split"
 //   stats                     "grid" | "row"
-//   ink, accent, glow         "#rrggbb"
-//   shadow                    "soft" | "hard" | "glow" | "none"
+//   ink, accent               "#rrggbb"
 //   scrim, scrim_strength     where the image is darkened behind the text, and how much
 
 // Typefaces loaded in index.html. `scale` evens out faces that run large or
@@ -41,7 +40,6 @@ export const ENUMS = {
   align: ["left", "center", "right"],
   arrangement: ["stack_top", "stack_center", "stack_bottom", "split"],
   stats: ["grid", "row"],
-  shadow: ["soft", "hard", "glow", "none"],
   scrim: ["none", "top", "bottom", "both", "full"],
   scrim_strength: ["light", "medium", "strong"],
 };
@@ -60,8 +58,6 @@ export const DEFAULT_LAYOUT = {
   stats: "grid",
   ink: "#f7f6f2",
   accent: "#d9d6cc",
-  glow: "#ff2bd0",
-  shadow: "soft",
   scrim: "top",
   scrim_strength: "medium",
 };
@@ -71,20 +67,20 @@ export const DEFAULT_LAYOUT = {
 const L = (o) => ({ ...DEFAULT_LAYOUT, ...o });
 export const STYLE_LAYOUTS = {
   skyline: L({ display_font: "playfair", body_font: "playfair", time_size: 270, uppercase: false, tracking: "normal", ink: "#fbf3e4", accent: "#f0c9a0" }),
-  poster: L({ display_font: "archivo", body_font: "archivo", time_size: 270, align: "left", accent: "#ffd166", shadow: "hard" }),
+  poster: L({ display_font: "archivo", body_font: "archivo", time_size: 270, align: "left", accent: "#ffd166" }),
   lookup: L({ display_font: "inter", body_font: "inter", time_weight: "light", arrangement: "stack_center", scrim: "full" }),
   window: L({ display_font: "cormorant", body_font: "cormorant", time_weight: "regular", time_size: 300, uppercase: false, italic: true, tracking: "normal", ink: "#fff6e6", accent: "#f2d3a8" }),
-  platform: L({ display_font: "inter", body_font: "inter", uppercase: false, tracking: "tight", align: "left", accent: "#c79bf2", shadow: "hard" }),
+  platform: L({ display_font: "inter", body_font: "inter", uppercase: false, tracking: "tight", align: "left", accent: "#c79bf2" }),
   woodblock: L({ display_font: "shippori", body_font: "shippori", ink: "#f6ecd9", accent: "#f08a6b" }),
-  pixel: L({ display_font: "press_start", body_font: "press_start", time_size: 128, tracking: "normal", ink: "#ffffff", accent: "#ffe45c", shadow: "hard" }),
-  satellite: L({ display_font: "plex_mono", body_font: "plex_mono", time_weight: "light", time_size: 215, align: "left", ink: "#eafff4", accent: "#7df0b0", shadow: "hard", scrim: "full" }),
-  collage: L({ display_font: "abril", body_font: "outfit", body_weight: "bold", ink: "#fff8ea", accent: "#ffcf5c", shadow: "hard" }),
+  pixel: L({ display_font: "press_start", body_font: "press_start", time_size: 128, tracking: "normal", ink: "#ffffff", accent: "#ffe45c" }),
+  satellite: L({ display_font: "plex_mono", body_font: "plex_mono", time_weight: "light", time_size: 215, align: "left", ink: "#eafff4", accent: "#7df0b0", scrim: "full" }),
+  collage: L({ display_font: "abril", body_font: "outfit", body_weight: "bold", ink: "#fff8ea", accent: "#ffcf5c" }),
   watercolor: L({ display_font: "cormorant", body_font: "cormorant", time_weight: "regular", body_weight: "bold", time_size: 300, uppercase: false, italic: true, tracking: "normal" }),
-  neon: L({ display_font: "orbitron", body_font: "orbitron", time_size: 180, ink: "#ffffff", accent: "#7ef9ff", shadow: "glow", glow: "#ff2bd0" }),
+  neon: L({ display_font: "orbitron", body_font: "orbitron", time_size: 180, ink: "#ffffff", accent: "#7ef9ff" }),
   charcoal: L({ display_font: "caveat", body_font: "caveat", time_size: 320, uppercase: false, tracking: "normal", ink: "#f4f1ea", accent: "#d9d4c8" }),
-  flat: L({ display_font: "outfit", body_font: "outfit", body_weight: "light", time_size: 270, uppercase: false, tracking: "normal", align: "left", shadow: "hard" }),
+  flat: L({ display_font: "outfit", body_font: "outfit", body_weight: "light", time_size: 270, uppercase: false, tracking: "normal", align: "left" }),
   blueprint: L({ display_font: "share_tech", body_font: "share_tech", time_size: 230, ink: "#eaf4ff", accent: "#a9cdf5" }),
-  street: L({ display_font: "dm_mono", body_font: "dm_mono", time_size: 215, align: "left", ink: "#ffb84a", accent: "#ffd79a", shadow: "glow", glow: "#ff7800" }),
+  street: L({ display_font: "dm_mono", body_font: "dm_mono", time_size: 215, align: "left", ink: "#ffb84a", accent: "#ffd79a" }),
 };
 
 const HEX = /^#[0-9a-f]{6}$/i;
@@ -103,11 +99,10 @@ export function resolveLayout(layout, style) {
   oneOf("align", ENUMS.align);
   oneOf("arrangement", ENUMS.arrangement);
   oneOf("stats", ENUMS.stats);
-  oneOf("shadow", ENUMS.shadow);
   oneOf("scrim", ENUMS.scrim);
   oneOf("scrim_strength", ENUMS.scrim_strength);
   for (const key of ["uppercase", "italic"]) if (typeof layout[key] === "boolean") out[key] = layout[key];
-  for (const key of ["ink", "accent", "glow"]) if (HEX.test(layout[key] || "")) out[key] = layout[key];
+  for (const key of ["ink", "accent"]) if (HEX.test(layout[key] || "")) out[key] = layout[key];
   if (Number.isFinite(layout.time_size)) out.time_size = Math.max(110, Math.min(340, Math.round(layout.time_size)));
   return out;
 }
