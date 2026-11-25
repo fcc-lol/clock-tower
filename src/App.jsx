@@ -170,6 +170,19 @@ function useWeather() {
   return weather;
 }
 
+// If the server is running a newer build than this page, reload once to pick
+// it up (the kiosk has no keyboard). The sessionStorage guard stops a reload
+// loop if a stale copy somehow survives the reload.
+function reloadIfNewBuild(serverBuild) {
+  if (!serverBuild || serverBuild === __BUILD_ID__) return;
+  let already = null;
+  try {
+    already = sessionStorage.getItem("reloadedFor");
+    sessionStorage.setItem("reloadedFor", serverBuild);
+  } catch {}
+  if (already !== serverBuild) window.location.reload();
+}
+
 // Polls /api/visual (which also tells the server someone is watching, so it
 // keeps generating), preloads the next slot's image, and returns the one that
 // should be on screen right now. The swap happens on the client's own clock
@@ -186,6 +199,7 @@ function useBackdrop(now) {
       try {
         const res = await fetch("/api/visual", { cache: "no-store" });
         const v = await res.json();
+        reloadIfNewBuild(v.build);
         if (active) setVisual(v);
       } catch {
         // Keep showing whatever we have.

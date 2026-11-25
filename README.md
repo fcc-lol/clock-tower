@@ -19,6 +19,7 @@ Deployed at https://clock-tower.fcc.lol (pushes to `main` auto-deploy via GitHub
 - Images and their prompts land in `generated/` (gitignored, last 12 kept) and are served at `/generated/<slot>.jpg`.
 - Three prompt styles live in `visuals.js`: `skyline` (painterly LIC waterfront), `poster` (abstract data poster where each metric is a shape) and `lookup` (cinematic shot up between LIC towers). `IMAGE_STYLE` picks one, or `random` rotates per slot.
 - Without Google credentials the display runs with a plain black backdrop.
+- Each build gets an id (`dist/build-id.txt`) that the server reports from `/api/visual`. A running display reloads itself when that changes, so after `npm run build` + a server restart the kiosk picks up the new version on its next poll (within 30 s) with no keyboard needed.
 
 Images come from Google's Nano Banana (`gemini-nano-banana-2.1`) on Vertex AI, about $0.034 per image, so roughly $3.20/day if the screen is on around the clock. Auth is Application Default Credentials, not an API key: either `gcloud auth application-default login` run once as the user that runs `server.js`, or a service-account JSON file named by `GOOGLE_APPLICATION_CREDENTIALS`. The project to bill goes in a `.env` next to `server.js` as `GOOGLE_CLOUD_PROJECT` (see `.env.example`). Check the pipeline end to end with:
 
@@ -147,7 +148,7 @@ npm run build
 sudo systemctl restart clock-tower
 ```
 
-(The fcc.lol deployment updates itself on push to `main`; devices are updated manually.)
+The kiosk browser notices the new build and reloads on its own within about 30 seconds. (The fcc.lol deployment updates itself on push to `main`; devices are updated manually.)
 
 ## Development
 

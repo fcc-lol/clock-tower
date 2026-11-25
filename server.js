@@ -2,6 +2,7 @@ import express from "express";
 import Database from "better-sqlite3";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { readFile } from "fs/promises";
 import { createVisuals, createProvider, loadDotenv } from "./visuals.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -33,6 +34,10 @@ console.log(
     : "Backdrop generation off",
 );
 
+// Id of the build in dist/ at startup. Reported to the display so it can
+// reload itself after a deploy (build + server restart).
+const buildId = await readFile(join(__dirname, "dist", "build-id.txt"), "utf8").catch(() => null);
+
 app.use(express.json());
 
 // Serve static files from dist, plus generated backdrops (cache forever: the
@@ -43,7 +48,7 @@ app.use("/generated", express.static(join(__dirname, "generated"), { maxAge: "7d
 // Polled by the display. Doubles as the "someone is watching" heartbeat.
 app.get("/api/visual", (req, res) => {
   res.set("Cache-Control", "no-store");
-  res.json(visuals.snapshot());
+  res.json({ build: buildId, ...visuals.snapshot() });
 });
 
 // API endpoint for SQLite queries
