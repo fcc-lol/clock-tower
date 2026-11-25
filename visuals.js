@@ -175,35 +175,12 @@ export function buildPrompt(weather, now, styleName) {
 }
 
 // ---------------------------------------------------------------------------
-// Image providers
+// Image provider: Google Gemini (Nano Banana)
 // ---------------------------------------------------------------------------
 
-async function openaiGenerate(prompt, cfg) {
-  const res = await fetch("https://api.openai.com/v1/images/generations", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${cfg.key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: cfg.model || "gpt-image-2.5-flare",
-      prompt,
-      n: 1,
-      size: cfg.size || "1024x1824",
-      quality: cfg.quality || "medium",
-      output_format: "jpeg",
-      output_compression: 85,
-      moderation: "low",
-    }),
-  });
-  if (!res.ok) throw new Error(`openai ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  const json = await res.json();
-  // gpt-image-2.5 bills $30 per million image output tokens.
-  const tokens = json.usage?.output_tokens;
-  return { buffer: Buffer.from(json.data[0].b64_json, "base64"), ext: "jpg", tokens, usd: tokens != null ? (tokens / 1e6) * 30 : undefined };
-}
-
 async function geminiGenerate(prompt, cfg) {
-  const model = cfg.model || "gemini-nano-banana-2.1";
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${cfg.model}:generateContent`,
     {
       method: "POST",
       headers: { "x-goog-api-key": cfg.key, "Content-Type": "application/json" },
@@ -228,14 +205,12 @@ async function geminiGenerate(prompt, cfg) {
   return { buffer: Buffer.from(part.inlineData.data, "base64"), ext, tokens, usd: (tokens / 1e6) * 30 };
 }
 
-// Gemini (Nano Banana) is the default; set IMAGE_PROVIDER=openai for GPT Image.
+// Returns null when no GEMINI_API_KEY is set, which turns generation off.
 export function providerFromEnv(env = process.env) {
-  const provider = (env.IMAGE_PROVIDER || "gemini").toLowerCase();
-  const key = provider === "openai" ? env.OPENAI_API_KEY : env.GEMINI_API_KEY;
+  const key = env.GEMINI_API_KEY;
   if (!key) return null;
-  const cfg = { key, model: env.IMAGE_MODEL, quality: env.IMAGE_QUALITY, size: env.IMAGE_SIZE };
-  const fn = provider === "openai" ? openaiGenerate : geminiGenerate;
-  return { name: provider, model: cfg.model || (provider === "openai" ? "gpt-image-2.5-flare" : "gemini-nano-banana-2.1"), generate: (prompt) => fn(prompt, cfg) };
+  const cfg = { key, model: env.IMAGE_MODEL || "gemini-nano-banana-2.1" };
+  return { name: "gemini", model: cfg.model, generate: (prompt) => geminiGenerate(prompt, cfg) };
 }
 
 // ---------------------------------------------------------------------------

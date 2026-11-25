@@ -20,7 +20,7 @@ Deployed at https://clock-tower.fcc.lol (pushes to `main` auto-deploy via GitHub
 - Three prompt styles live in `visuals.js`: `skyline` (painterly LIC waterfront), `poster` (abstract data poster where each metric is a shape) and `lookup` (cinematic shot up between LIC towers). `IMAGE_STYLE` picks one, or `random` rotates per slot.
 - Without an API key the display runs with a plain black backdrop.
 
-Configure via a `.env` file next to `server.js` (see `.env.example`): `GEMINI_API_KEY` for Google's Nano Banana (default, `gemini-nano-banana-2.1`, about $0.034 per image, so roughly $3.20/day if the screen is on around the clock), or `IMAGE_PROVIDER=openai` with `OPENAI_API_KEY`. Check the pipeline end to end with:
+Configure via a `.env` file next to `server.js` (see `.env.example`): `GEMINI_API_KEY` for Google's Nano Banana (default, `gemini-nano-banana-2.1`, about $0.034 per image, so roughly $3.20/day if the screen is on around the clock). Check the pipeline end to end with:
 
 ```sh
 npm run visual:test -- poster          # generates generated/test-poster.jpg
