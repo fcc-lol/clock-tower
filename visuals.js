@@ -221,16 +221,21 @@ async function geminiGenerate(prompt, cfg) {
   const part = json.candidates?.[0]?.content?.parts?.find((p) => p.inlineData);
   if (!part) throw new Error("gemini returned no image");
   const ext = /png/.test(part.inlineData.mimeType) ? "png" : "jpg";
-  return { buffer: Buffer.from(part.inlineData.data, "base64"), ext };
+  // Image output is billed at $30 per million tokens; a 1K image is a flat
+  // 1120 tokens ($0.0336) on Nano Banana 2.1. Prefer the reported count.
+  const tokens =
+    json.usageMetadata?.candidatesTokensDetails?.find((d) => d.modality === "IMAGE")?.tokenCount ?? 1120;
+  return { buffer: Buffer.from(part.inlineData.data, "base64"), ext, tokens, usd: (tokens / 1e6) * 30 };
 }
 
+// Gemini (Nano Banana) is the default; set IMAGE_PROVIDER=openai for GPT Image.
 export function providerFromEnv(env = process.env) {
-  const provider = (env.IMAGE_PROVIDER || "openai").toLowerCase();
-  const key = provider === "gemini" ? env.GEMINI_API_KEY : env.OPENAI_API_KEY;
+  const provider = (env.IMAGE_PROVIDER || "gemini").toLowerCase();
+  const key = provider === "openai" ? env.OPENAI_API_KEY : env.GEMINI_API_KEY;
   if (!key) return null;
   const cfg = { key, model: env.IMAGE_MODEL, quality: env.IMAGE_QUALITY, size: env.IMAGE_SIZE };
-  const fn = provider === "gemini" ? geminiGenerate : openaiGenerate;
-  return { name: provider, model: cfg.model || (provider === "gemini" ? "gemini-nano-banana-2.1" : "gpt-image-2.5-flare"), generate: (prompt) => fn(prompt, cfg) };
+  const fn = provider === "openai" ? openaiGenerate : geminiGenerate;
+  return { name: provider, model: cfg.model || (provider === "openai" ? "gpt-image-2.5-flare" : "gemini-nano-banana-2.1"), generate: (prompt) => fn(prompt, cfg) };
 }
 
 // ---------------------------------------------------------------------------
