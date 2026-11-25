@@ -69,7 +69,105 @@ const monthWord = (m) =>
   ["early ", "mid-", "late "][m.phase] +
   ["January","February","March","April","May","June","July","August","September","October","November","December"][m.month];
 
-// Where we are relative to sunrise/sunset, and what the light looks like.
+// What each reading *looks like*. Image models paint descriptions far better
+// than they paint numbers, and a list of figures ("Humidity 70%", "UV 0")
+// mostly just tempts them to draw text.
+const TEMP_LOOK = [
+  [15, "Bitter cold: thick white steam plumes pouring from rooftop vents and chimneys, ice at the water's edge, frost on railings."],
+  [32, "Freezing: white steam rising from rooftops, frost on surfaces, a hard brittle clarity."],
+  [45, "Cold: thin steam drifting from a few rooftop vents, a raw wintry feel."],
+  [58, "Chilly: cool, fresh-looking air."],
+  [68, "Mild and comfortable."],
+  [78, "Warm: a soft, pleasant warmth in the light."],
+  [88, "Hot: a hazy heat softening the distance."],
+  [Infinity, "Sweltering: heavy shimmering heat haze and bleached light."],
+];
+const WIND_LOOK = [
+  [4, "Still air: the water glassy with clean reflections, steam rising straight up."],
+  [11, "A light breeze: small ripples on the water, flags barely stirring."],
+  [19, "A steady breeze: choppy water, flags standing out, clouds visibly on the move."],
+  [29, "Gusty: whitecaps on the river, trees bending, clouds torn and streaming."],
+  [Infinity, "A gale: spray off the river, trees and flags thrashing, ragged racing clouds."],
+];
+const SEASON = [
+  "deep winter, bare trees",
+  "deep winter, bare trees",
+  "late winter turning to spring, trees still bare",
+  "spring, trees in fresh pale-green leaf and blossom",
+  "late spring, full fresh green foliage",
+  "early summer, lush green foliage",
+  "high summer, heavy dark-green foliage",
+  "high summer, heavy dark-green foliage",
+  "late summer, foliage just starting to tire",
+  "autumn, trees in orange, rust and yellow",
+  "late autumn, trees bare or holding their last brown leaves",
+  "early winter, bare trees",
+];
+
+// The light depends on both where the sun is and how much cloud is in the way.
+// (Telling the model "golden hour, long shadows" under a 100% overcast gets a
+// muddled picture that is neither.)
+const LIGHT = {
+  day: {
+    clear: "bright direct sunlight from a clear blue sky, crisp hard-edged shadows, strong saturated color",
+    broken: "sun coming and going between clouds, patches of sunlight and shadow across the buildings and water, bright blue gaps between well-defined clouds",
+    overcast: "soft, even, shadowless daylight under a solid cloud deck: no sun disc, no cast shadows",
+  },
+  golden: {
+    clear: "low golden-hour sun raking in from the west just above the horizon, long shadows, warm light on every west-facing surface, the sky grading from pale gold at the horizon to deep blue overhead",
+    broken: "low sun slipping under the clouds and lighting their undersides orange and rose, shafts of warm light, long shadows, cool blue-grey cloud tops",
+    overcast: "dim, flat late-afternoon light under a solid overcast, the day visibly draining away: no sun disc, no cast shadows and no sunset colors, only a slightly paler band of cloud low on the western horizon, with the first windows and street lamps beginning to glow warm against the grey",
+  },
+  sunrise: {
+    clear: "the first low golden light just after sunrise coming from the east, long shadows, the sky pale peach at the horizon rising to clear blue",
+    broken: "just after sunrise, low eastern sun catching the cloud undersides in pink and gold, long cool shadows",
+    overcast: "a grey dawn just after sunrise under a solid overcast: flat, cool, slowly brightening light, no sun disc, no shadows, a few lights still on",
+  },
+  dusk: {
+    clear: "blue hour right after sunset: a deep cobalt sky, a last thin band of orange on the western horizon, city lights on and reflecting in the water",
+    broken: "blue hour right after sunset: dark clouds with a last smoulder of red on their western edges, deep blue gaps between them, city lights on",
+    overcast: "heavy blue-grey dusk right after sunset under a solid overcast: no sunset color, the cloud base starting to glow from the city below, lights on everywhere",
+  },
+  dawn: {
+    clear: "pre-dawn twilight: a dark blue sky paling to a thin cold glow on the eastern horizon, city lights still on",
+    broken: "pre-dawn twilight: dark clouds against a slowly paling blue sky, city lights still on",
+    overcast: "pre-dawn under a solid overcast: near-dark, the cloud base faintly lit by the city, the first cold grey just arriving",
+  },
+  night: {
+    clear: "full night: a dark clear sky, the city fully lit, windows and bridge lights reflecting in the water",
+    broken: "full night: ragged clouds lit dull orange from below drifting across a dark sky, the city fully lit",
+    overcast: "full night under low cloud: the whole cloud deck glowing a dull orange-mauve with reflected city light, the city fully lit",
+  },
+};
+
+const PRECIP_LOOK = {
+  drizzle: "A fine drizzle is falling: glistening wet surfaces, soft reflections, the distance veiled.",
+  rain: "It is raining: visible rain streaks, wet reflective ground, the distant skyline greyed out behind the rain.",
+  "freezing rain": "Freezing rain is falling: everything glazed with ice, wet reflective ground, the distance greyed out.",
+  snow: "It is snowing: flakes in the air, snow settling on ledges, railings and the ground, the distance fading into white.",
+  thunderstorm: "A thunderstorm: dark towering cloud, heavy sheets of rain, a fork of lightning in the distance.",
+};
+
+function precipKind(code, precip, feels) {
+  if ([71, 73, 75, 77, 85, 86].includes(code)) return "snow";
+  if ([56, 57, 66, 67].includes(code)) return "freezing rain";
+  if ([95, 96, 99].includes(code)) return "thunderstorm";
+  if ([51, 53, 55].includes(code)) return "drizzle";
+  if ([61, 63, 65, 80, 81, 82].includes(code)) return "rain";
+  if (precip > 0) return feels <= 32 ? "snow" : "rain";
+  return null;
+}
+
+function skyLook(cloud, fog) {
+  if (fog) return "thick fog: the tops of the towers vanish into it and the far shore is barely there";
+  if (cloud < 10) return "cloudless";
+  if (cloud < 30) return "almost clear, only a few small clouds";
+  if (cloud < 60) return "about half cloud: well-defined clouds with open sky between them";
+  if (cloud < 85) return "mostly cloudy with a few breaks";
+  return "fully overcast, a continuous cloud deck from horizon to horizon. Give the deck real structure (layered bands, darker bellies, soft rifts, subtle shifts of grey) rather than a flat blank fill";
+}
+
+// Where we are relative to sunrise/sunset.
 function sunContext(daily, now) {
   const events = [];
   (daily?.sunrise || []).forEach((t) => events.push({ label: "sunrise", at: toDate(t) }));
@@ -80,198 +178,245 @@ function sunContext(daily, now) {
   const mins = (e) => Math.abs(Math.round((e.at - now) / 60000));
   const plural = (n, unit) => `${n} ${unit}${n === 1 ? "" : "s"}`;
   const fmt = (m) => (m >= 60 ? `${plural(Math.floor(m / 60), "hour")} ${plural(m % 60, "minute")}` : plural(m, "minute"));
-  if (!next) return { light: "daylight", sentence: "" };
+  if (!next) return { phase: "day", sentence: "" };
   const toNext = mins(next);
   const sincePrev = prev ? mins(prev) : null;
-  let light;
+  let phase;
   if (next.label === "sunset") {
-    if (sincePrev != null && sincePrev < 45) light = "the first low golden light just after sunrise";
-    else if (toNext < 60) light = "low, warm golden-hour light with long shadows, the sun close to setting";
-    else light = "full daylight";
+    if (sincePrev != null && sincePrev < 45) phase = "sunrise";
+    else if (toNext < 60) phase = "golden";
+    else phase = "day";
   } else {
-    if (sincePrev != null && sincePrev < 40) light = "deep blue dusk right after sunset, a last band of color on the horizon";
-    else if (toNext < 40) light = "pre-dawn twilight, the sky just starting to lighten";
-    else light = "full night, city lights on";
+    if (sincePrev != null && sincePrev < 40) phase = "dusk";
+    else if (toNext < 40) phase = "dawn";
+    else phase = "night";
   }
   return {
-    light,
+    phase,
     sentence: `It is ${fmt(toNext)} before ${next.label}` + (prev ? ` and ${fmt(sincePrev)} after ${prev.label}` : "") + ".",
   };
 }
 
-// Turn a weather reading + timestamp into the facts every style shares.
+// Turn a weather reading + timestamp into what every style shares:
+//   scene: a visual description of the conditions, for the pictorial styles
+//   facts: the raw figures, for the styles that encode data as shapes
 export function describe(w, now = new Date()) {
   const time = now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: TZ });
   const date = now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: TZ });
   const month = Number(now.toLocaleString("en-US", { month: "numeric", timeZone: TZ })) - 1;
   const day = Number(now.toLocaleString("en-US", { day: "numeric", timeZone: TZ }));
+  const hour = Number(now.toLocaleString("en-US", { hour: "numeric", hour12: false, timeZone: TZ })) % 24;
   const temp = Math.round(w.temperature_2m);
   const feels = Math.round(w.apparent_temperature ?? w.temperature_2m);
   const wind = Math.round(w.wind_speed_10m ?? 0);
-  const [, skyLabel] = WMO[w.weather_code] || ["", "unsettled sky"];
+  const humidity = Math.round(w.relative_humidity_2m ?? 0);
+  const code = w.weather_code;
+  const [, skyLabel] = WMO[code] || ["", "unsettled sky"];
   const sun = sunContext(w.daily, now);
   const moon = moonPhase(now);
   const aqi = w.aqi;
   const uv = Math.round(w.uv_index ?? 0);
   const precip = w.precipitation ?? 0;
   const cloud = Math.round(w.cloud_cover ?? 0);
-  const isDark = /night|dusk|twilight/.test(sun.light);
+  const fog = code === 45 || code === 48;
+  const falling = precipKind(code, precip, feels); // null when dry
+  const bucket = cloud >= 85 || fog || falling ? "overcast" : cloud >= 30 ? "broken" : "clear";
+  const isDark = ["dusk", "dawn", "night"].includes(sun.phase);
+  const light = LIGHT[sun.phase][bucket];
+  const season = monthWord({ month, phase: day <= 10 ? 0 : day <= 20 ? 1 : 2 });
+  const partOfDay =
+    hour < 5 ? "The middle of the night" : hour < 8 ? "Early morning" : hour < 11 ? "Morning" : hour < 14 ? "Midday" :
+    hour < 16 ? "Afternoon" : hour < 18 ? "Late afternoon" : hour < 21 ? "Evening" : "Night";
 
-  const facts = [
-    `${date}, ${time}, ${monthWord({ month, phase: day <= 10 ? 0 : day <= 20 ? 1 : 2 })} in Long Island City, Queens, New York.`,
+  // Only something that could really be seen gets drawn.
+  const moonVisible = isDark && bucket !== "overcast" && moon !== "New Moon";
+  const sunVisible = !isDark && bucket !== "overcast";
+  const skyObject = moonVisible ? MOON_WORDS[moon] : sunVisible ? (sun.phase === "day" ? "the sun" : "a low sun near the horizon") : null;
+
+  const scene = [
+    `${partOfDay} in ${season} in New York City (${SEASON[month]}).`,
     sun.sentence,
-    `The light is ${sun.light}.`,
-    `Sky: ${skyLabel.toLowerCase()}, ${Math.round(w.cloud_cover ?? 0)}% cloud cover.`,
-    precip > 0 ? `Precipitation is falling right now (${precip} mm in the last hour).` : "",
-    `Temperature ${temp}°F, feels like ${feels}°F: ${pick(feels, TEMP_WORDS)}.`,
-    `Wind ${wind} mph: ${pick(wind, WIND_WORDS)}.`,
-    `Humidity ${Math.round(w.relative_humidity_2m ?? 0)}%.`,
-    aqi != null ? `Air quality index ${aqi}: ${pick(aqi, AQI_WORDS)}.` : "",
-    isDark ? `UV index ${uv} (night).` : `UV index ${uv}${uv <= 2 ? ", very weak sun" : uv >= 8 ? ", harsh bright sun" : ""}.`,
-    `Moon phase: ${moon}, ${MOON_WORDS[moon]}` +
-      (cloud >= 85 ? ", hidden behind the cloud deck" : isDark ? " visible in the sky" : ", faint in the daytime sky if visible at all") +
-      ".",
+    `Light: ${light}.`,
+    `Sky: ${skyLook(cloud, fog)}.`,
+    falling ? PRECIP_LOOK[falling] : "It is completely dry: no rain, no snow, no falling streaks of any kind.",
+    pick(feels, TEMP_LOOK),
+    pick(wind, WIND_LOOK),
+    aqi != null ? `Air: ${pick(aqi, AQI_WORDS)}.` : "",
+    humidity >= 88 && !falling && !fog ? "Humid, with a thin mist low over the water." : "",
+    moonVisible
+      ? `The moon is out: ${MOON_WORDS[moon]}, drawn with exactly that shape${bucket === "broken" ? ", glimpsed between clouds" : ""}.`
+      : "Do not draw a moon.",
   ]
     .filter(Boolean)
     .join(" ");
 
-  return { facts, temp, feels, wind, aqi, uv, moon, skyLabel, cloud: Math.round(w.cloud_cover ?? 0), precip, light: sun.light, humidity: Math.round(w.relative_humidity_2m ?? 0) };
+  const facts = [
+    `${date}, ${time}, ${season} in Long Island City, Queens, New York.`,
+    sun.sentence,
+    `Sky: ${skyLabel.toLowerCase()}, ${cloud}% cloud cover.`,
+    falling ? `${falling} is falling right now.` : "No precipitation.",
+    `Temperature ${temp}°F, feels like ${feels}°F: ${pick(feels, TEMP_WORDS)}.`,
+    `Wind ${wind} mph: ${pick(wind, WIND_WORDS)}.`,
+    `Humidity ${humidity}%.`,
+    aqi != null ? `Air quality index ${aqi}.` : "",
+    `UV index ${uv}.`,
+    `Moon phase: ${moon}.`,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return { scene, facts, temp, feels, wind, aqi, uv, moon, skyLabel, cloud, precip, falling, fog, light, humidity, isDark, moonVisible, sunVisible, skyObject, phase: sun.phase };
 }
 
-const NO_TEXT =
-  "Absolutely no text, letters, numerals, words, logos or watermarks anywhere in the image. " +
-  "Keep the upper half and the center of the frame calm and uncluttered so large text overlaid on top stays legible.";
+// The display lays large white text over the whole height of the image, so
+// every style has to stay legible under it: deep enough tones, no fussy detail
+// behind the text, nothing the model might mistake for a place to write.
+const TONE =
+  "Keep overall values mid to deep, with nothing blown out to white or pale cream, because large white text is overlaid on this image and must stay legible. " +
+  "Full bleed to every edge: no border, frame, mat, paper margin or vignette.";
+const NO_TEXT = "Absolutely no text, letters, numerals, words, captions, signatures, logos or watermarks anywhere in the image.";
+// For the landscape-like styles: subject low, sky doing the work above.
+const LOW_SUBJECT =
+  "Composition: the subject and all fine detail sit in the bottom third of the tall frame; the upper two thirds is sky, " +
+  "rendered with real tonal depth and character but without small busy high-contrast detail.";
+const FINISH = `${TONE} ${NO_TEXT}`;
 
-// Each style turns the shared facts into a very different picture. They are
-// deliberately far apart (medium, era, viewpoint, palette) so a day of slots
-// doesn't blur together. Every one ends with NO_TEXT and keeps the upper and
-// middle of the frame quiet for the overlaid readouts.
+// Symbol styles draw the sun/moon only when it would really be visible.
+const symbol = (d, how) => (d.skyObject ? `${d.skyObject} ${how}` : "no sun or moon at all (hidden by cloud)");
+
+// Each style turns the shared conditions into a very different picture. They
+// are deliberately far apart (medium, era, viewpoint, palette) so a day of
+// slots doesn't blur together.
 export const STYLES = {
   // Painterly view of the LIC waterfront looking at Manhattan.
   skyline: (d) =>
-    `Tall vertical painterly illustration, gouache and soft pastel texture, of the Long Island City waterfront in Queens, New York, ` +
-    `looking west across the East River toward the Manhattan skyline, with the red Pepsi-Cola sign and the Gantry Plaza cranes small in the lower third. ` +
-    `Depict these exact conditions faithfully: ${d.facts} ` +
-    `Muted, desaturated palette appropriate to the season and light. Large calm areas of sky in the upper two thirds. ` +
-    `No people in the foreground. ${NO_TEXT}`,
+    `Tall vertical painting in rich opaque gouache with confident visible brushwork and a bold, considered color scheme, the craft of a classic mid-century travel poster crossed with an Edward Hopper cityscape. ` +
+    `Subject: Gantry Plaza State Park on the Long Island City waterfront in Queens, New York, seen from the shore at eye level, looking west across the East River to the Midtown Manhattan skyline ` +
+    `(the Empire State Building, the Chrysler Building's spire, the slab of the UN Secretariat at the water's edge). ` +
+    `In the foreground: the two squat black riveted-steel gantry towers standing on their wooden piers, and the vintage Pepsi-Cola sign as a small glowing red neon scrawl, too far away to read. ` +
+    `Conditions to paint faithfully: ${d.scene} ` +
+    `The sky is the star of the picture. ${LOW_SUBJECT} No people. ${FINISH}`,
 
   // Abstract poster that encodes each metric as geometry.
   poster: (d) =>
-    `Tall vertical abstract generative-art poster encoding weather data as geometry, in the style of a screen-printed risograph data visualization with slight ink misregistration. ` +
-    `Background: a soft vertical gradient of the actual sky right now in New York, matching ${d.light}, ${d.skyLabel.toLowerCase()}. ` +
-    `A large thin-lined circle near the top represents the moon: ${MOON_WORDS[d.moon]}, filled in proportion to the phase. ` +
-    `A horizontal row of exactly ${Math.max(1, Math.min(200, d.aqi ?? 50))} tiny evenly spaced dots represents the air quality index of ${d.aqi ?? 50}. ` +
-    `${Math.max(0, Math.min(40, d.wind))} long diagonal streaks sweep across the frame representing a ${d.wind} mph wind${d.wind < 4 ? " (so almost no streaks)" : ""}. ` +
-    `A small sun glyph at the bottom edge with ${d.uv} rays represents a UV index of ${d.uv}. ` +
-    `A thermometer-like vertical bar on one side filled to about ${Math.max(0, Math.min(100, d.temp))} percent represents ${d.temp}°F. ` +
-    `Soft overlapping horizontal cloud bands cover about ${d.cloud} percent of the middle of the frame. ` +
-    `${d.precip > 0 ? "Fine vertical rain or snow lines fall across the whole composition. " : ""}` +
-    `Context: ${d.facts} ${NO_TEXT}`,
+    `Tall vertical abstract data-art poster, a two-color-plus-black risograph print on deep-toned paper with visible grain, halftone and slight ink misregistration; elegant Swiss modernist composition with generous empty space. ` +
+    `It encodes the weather as pure geometry, with no labels: ` +
+    `the background is a smooth vertical gradient in the real color of the sky right now (${d.light}); ` +
+    `a large thin-lined circle in the upper third stands for the moon (${MOON_WORDS[d.moon]}), filled in proportion to its phase; ` +
+    `${d.wind < 4 ? "almost no diagonal lines, because the air is still; " : `${Math.min(40, d.wind)} long thin parallel diagonal lines sweep across the frame for a ${d.wind} mph wind; `}` +
+    `soft overlapping horizontal bands cover about ${d.cloud} percent of the frame for the cloud cover; ` +
+    `one tall narrow vertical bar on the left edge is filled about ${Math.max(0, Math.min(100, d.temp))} percent of its height for the temperature, in ${d.feels <= 45 ? "a cold blue" : d.feels <= 68 ? "a soft green-yellow" : "a hot orange-red"}; ` +
+    `a small semicircle on the bottom edge with ${d.uv} short rays stands for the UV index; ` +
+    `a single horizontal row of small dots near the bottom, ${d.aqi == null || d.aqi <= 50 ? "sparse and evenly spaced for clean air" : d.aqi <= 100 ? "moderately dense for slightly hazy air" : "dense and crowded for polluted air"}` +
+    `${d.falling ? `; fine falling ${d.falling === "snow" ? "dots" : "vertical lines"} over the whole composition for the ${d.falling}` : ""}. ` +
+    `${FINISH}`,
 
   // Cinematic shot looking straight up between LIC towers.
   lookup: (d) =>
-    `Tall vertical cinematic photograph on medium format film with soft grain, looking straight up from a Long Island City street in Queens, New York, ` +
-    `between the glass facades of tall residential towers so the buildings converge toward a narrow slice of sky at the top of the frame. ` +
-    `Render these exact conditions: ${d.facts} ` +
-    `Dark, moody tones with the facades reflecting the real sky, the frame mostly dark so bright overlaid text reads clearly. ` +
-    `No signage, no people. ${NO_TEXT}`,
+    `Tall vertical architectural photograph on medium-format film with fine grain, shot looking straight up from a Long Island City street in Queens, New York, ` +
+    `between glass and steel residential towers whose facades converge dramatically toward an irregular opening of sky. Strong graphic composition, deep rich blacks. ` +
+    `The sky seen in the opening, and reflected in the glass, shows these conditions exactly: ${d.scene} ` +
+    `The facades are dark and moody, picking up the real color of the sky${d.isDark ? ", with a scatter of warm lit windows" : ""}. No signage, no people. ${FINISH}`,
 
   // Looking out from inside an apartment.
   window: (d) =>
-    `Tall vertical photograph from inside a quiet Long Island City apartment, looking out through a large window at the Queens rooftops and water towers, ` +
-    `the Manhattan skyline faint in the distance. The window glass fills most of the frame; the room edge (a radiator, a plant on the sill, a mug) is small and dark at the bottom. ` +
-    `What is seen through the glass must match these exact conditions: ${d.facts} ` +
-    `${d.precip > 0 ? "Rain or snow streaks and droplets on the glass, the view beyond softened. " : ""}` +
-    `${d.humidity > 80 ? "A little condensation fogging the corners of the pane. " : ""}` +
-    `Soft natural light, warm interior shadow, cool exterior. ${NO_TEXT}`,
+    `Tall vertical photograph taken inside a dim, quiet Long Island City apartment, looking out through one large steel-framed window over Queens rooftops and wooden water towers ` +
+    `to the Manhattan skyline in the distance. Shot on 35mm film, natural light only, beautifully exposed for the view outside so the room falls into deep warm shadow. ` +
+    `The window fills nearly the whole frame; a radiator, a trailing plant and a mug on the sill are small dark shapes along the bottom edge. ` +
+    `Everything seen through the glass matches these conditions: ${d.scene} ` +
+    `${d.falling === "snow" ? "Snow gathering on the outer sill. " : d.falling ? "Raindrops and running streaks on the glass, the view softened behind them. " : ""}` +
+    `${d.humidity > 80 && d.feels < 50 ? "A little condensation fogging the corners of the pane. " : ""}` +
+    `The sky takes up the upper two thirds of the window. ${FINISH}`,
 
   // Elevated 7 train platform.
   platform: (d) =>
-    `Tall vertical photograph from the elevated 7 train platform at Queensboro Plaza in Long Island City, looking down the tracks toward Manhattan, ` +
-    `steel canopy and rails leading into the distance, a purple 7 train small and far off. ` +
-    `The sky, light and weather must match these exact conditions: ${d.facts} ` +
-    `Long exposure feel, wet or dry platform as the weather dictates, 35mm color negative film look. ` +
-    `The upper half of the frame is open sky above the canopy. No people, no signage. ${NO_TEXT}`,
+    `Tall vertical photograph on 35mm color negative film from the end of the elevated 7 train platform at Queensboro Plaza in Long Island City, looking down the tracks toward Manhattan: ` +
+    `steel rails and riveted elevated structure converging into the distance, signal lights glowing, a subway train small and far off, the skyline beyond. Cinematic, patient, beautifully composed. ` +
+    `Sky, light and weather match these conditions: ${d.scene} ` +
+    `${d.falling === "snow" ? "Snow on the platform edge and sleepers. " : d.falling ? "The platform wet and reflective. " : "The platform dry. "}` +
+    `${LOW_SUBJECT} No people, no signs. ${FINISH}`,
 
   // Japanese woodblock print.
   woodblock: (d) =>
-    `Tall vertical ukiyo-e woodblock print in the manner of Hiroshige, flat colors with visible wood grain and bokashi gradients, ` +
-    `depicting the East River and the Queensboro Bridge seen from the Long Island City shore. ` +
-    `Translate these exact conditions into the print's visual language: ${d.facts} ` +
-    `Rain as fine diagonal lines, wind as bent reeds and stretched clouds, cold as pale indigo and white, warmth as ochre and vermilion, ` +
-    `the moon phase shown exactly in the sky, clouds as flat stylized bands. Large areas of plain paper-colored sky at the top. ${NO_TEXT}`,
+    `Tall vertical ukiyo-e woodblock print in the manner of Hiroshige's One Hundred Famous Views of Edo: flat areas of color with visible wood grain, strong dark keyline, ` +
+    `and a deep bokashi gradient across the top of the sky. It depicts the East River and the Queensboro Bridge seen from the Long Island City shore, a bare branch or pier post cutting boldly across the foreground. ` +
+    `Translate these conditions into the print's visual language: ${d.scene} ` +
+    `${d.falling === "snow" ? "Snow as scattered white dots and soft caps on every surface. " : d.falling ? "Rain as fine dark parallel diagonal lines across the whole image. " : ""}` +
+    `Clouds as flat stylized bands; the sky in saturated indigo, slate and smoke tones rather than bare paper. ${LOW_SUBJECT} ${FINISH}`,
 
   // Pixel art.
   pixel: (d) =>
-    `Tall vertical 16-bit pixel art scene, chunky visible pixels, limited 32-color palette, of a Long Island City street corner in Queens, New York ` +
-    `with a bodega awning, a fire hydrant, a brick walk-up and the Manhattan skyline on the horizon. ` +
-    `The weather and light must match these exact conditions, drawn with pixel-art sprites (pixel raindrops, pixel snow, pixel clouds, a pixel sun or moon of the right phase): ${d.facts} ` +
-    `Mostly flat sky in the upper two thirds so overlaid text reads. No people, no signage. ${NO_TEXT}`,
+    `Tall vertical 16-bit pixel art scene with crisp chunky pixels, a carefully chosen limited palette and beautiful dithered gradients, in the style of a lovingly made 1990s adventure game background: ` +
+    `a Long Island City street corner in Queens, New York with a brick walk-up, a corner bodega with a striped awning, a fire hydrant and a street tree, the Manhattan skyline small on the horizon. ` +
+    `Weather and light match these conditions, drawn in pixels: ${d.scene} ` +
+    `The sky above the rooftops is a big dithered gradient with pixel clouds, and ${symbol(d, "as a clean pixel disc")}. ${LOW_SUBJECT} No people, blank signs. ${FINISH}`,
 
   // Satellite view.
   satellite: (d) =>
-    `Tall vertical satellite image looking straight down at the East River with Long Island City, Queens on the right and Midtown Manhattan on the left, ` +
-    `Roosevelt Island in the channel, the Queensboro Bridge crossing the frame. Photorealistic earth-observation rendering. ` +
-    `The cloud layer, haze, shadows and lighting must match these exact conditions: ${d.facts} ` +
-    `${d.cloud >= 70 ? "Thick cloud cover hides most of the ground, with only breaks showing the river. " : d.cloud >= 30 ? "Scattered clouds casting shadows on the city. " : "Clear view of the whole city grid. "}` +
-    `${d.light.includes("night") ? "Night: the city is a lattice of warm lights, the river black. " : ""}` +
-    `Keep the center of the frame relatively even in tone. ${NO_TEXT}`,
+    `Tall vertical aerial photograph from a high-altitude aircraft looking straight down on the East River, with Midtown Manhattan's street grid on the left, Long Island City, Queens on the right, ` +
+    `Roosevelt Island a long sliver in the channel and the Queensboro Bridge crossing it. Photorealistic, razor-sharp, rich color. ` +
+    `${d.fog ? "Fog fills the river and streets, with only the tallest towers poking through. " : d.cloud >= 85 ? "A textured cloud deck covers most of the frame, with ragged openings through which the river, the bridge and patches of the grid are clearly visible. " : d.cloud >= 30 ? "Scattered clouds float below the camera, casting sharp shadows on the city. " : "A completely clear view of the whole city grid. "}` +
+    `${d.isDark ? "It is dark: the city is a lattice of warm amber street lights, the river black, the bridge a string of lights. " : d.phase === "day" ? "" : "The sun is very low: long shadows stretch from every tower. "}` +
+    `Conditions: ${d.scene} ${FINISH}`,
 
   // Cut-paper collage.
   collage: (d) =>
-    `Tall vertical cut-paper collage in a mid-century modern style, layered colored papers with visible torn and cut edges and subtle shadows, ` +
-    `of the Long Island City skyline, the Pepsi-Cola sign and the river. ` +
-    `Every weather fact is a paper shape: ${d.facts} ` +
-    `Clouds as torn grey paper, rain as thin paper strips, the sun or moon as a punched circle of the right phase, wind as curled paper ribbons, cold as blues and whites, warmth as oranges. ` +
-    `Big plain paper sky at the top. ${NO_TEXT}`,
+    `Tall vertical cut-paper collage in the spirit of Matisse's cut-outs and mid-century children's book illustration: layered matte colored papers with crisp cut and soft torn edges casting small real shadows, ` +
+    `a bold and harmonious palette. It shows the Long Island City waterfront: a row of towers, the gantries, a small red sign shape, the river in the bottom third, the Manhattan skyline as a single cut silhouette. ` +
+    `Every condition becomes a paper shape: ${d.scene} ` +
+    `Clouds as overlapping torn papers, ${symbol(d, "as one cleanly cut paper shape")}` +
+    `${d.falling === "snow" ? ", snow as punched white confetti" : d.falling ? ", rain as thin cut paper strips" : ""}${d.wind >= 12 ? ", wind as long curled paper ribbons" : ""}. ` +
+    `The sky is a large sheet of deep-colored paper filling the upper two thirds. ${FINISH}`,
 
   // Loose watercolor.
   watercolor: (d) =>
-    `Tall vertical loose watercolor painting on cold-pressed paper, wet-on-wet washes, bleeding edges, lots of untouched white paper, ` +
-    `of the Gantry Plaza gantries and pier in Long Island City with the Manhattan skyline as a faint wash behind. ` +
-    `The washes must carry these exact conditions: ${d.facts} ` +
-    `${d.precip > 0 ? "Drips and spatters of rain running down the sheet. " : ""}` +
-    `Sky as one big expressive wash covering the top two thirds. No people. ${NO_TEXT}`,
+    `Tall vertical watercolor on rough cold-pressed paper by a master of the medium: big confident wet-on-wet washes, granulating pigment, soft blooms and a few crisp dry-brush accents, ` +
+    `painted to the edges of the sheet in rich saturated washes. Subject: the black gantry towers and wooden pier of Gantry Plaza State Park in Long Island City, with the Manhattan skyline as a soft wash across the river. ` +
+    `The washes carry these conditions: ${d.scene} ` +
+    `${d.falling && d.falling !== "snow" ? "Rain suggested by pigment dragged down the wet sheet. " : ""}` +
+    `The sky is one big expressive wash. ${LOW_SUBJECT} No people. ${FINISH}`,
 
   // Neon synthwave.
   neon: (d) =>
-    `Tall vertical 1980s synthwave illustration: a glowing neon outline of the Manhattan skyline seen from Long Island City, a chrome-reflective East River, ` +
-    `a perspective grid floor fading into the distance, and a huge sun or moon disc behind the skyline showing the exact phase. ` +
-    `Palette and sky derived from these exact conditions: ${d.facts} ` +
-    `Cold weather shifts the palette to electric blue and violet, warm weather to magenta and orange; clouds as glowing horizontal neon bands covering ${d.cloud} percent of the sky; ` +
-    `rain as falling neon lines. Dark background overall so overlaid text glows. ${NO_TEXT}`,
+    `Tall vertical 1980s synthwave illustration, airbrushed and glossy: the Manhattan skyline seen from Long Island City as a glowing neon outline, a chrome-dark East River mirroring it, ` +
+    `a perspective grid receding across the water, and ${d.skyObject ? `${d.skyObject} as a huge glowing disc behind the skyline` : "a wide soft glow behind the skyline with no sun or moon disc"}. ` +
+    `Palette and sky derived from these conditions: ${d.scene} ` +
+    `${d.feels <= 50 ? "Cold palette: electric blue, violet and ice cyan. " : d.feels <= 72 ? "Balanced palette: teal, violet and pink. " : "Hot palette: magenta, orange and gold. "}` +
+    `Clouds as soft glowing horizontal bands covering about ${d.cloud} percent of the sky${d.falling ? `; ${d.falling === "snow" ? "snow as drifting neon specks" : "rain as fine falling neon lines"}` : ""}. ` +
+    `Very dark background. ${LOW_SUBJECT} ${FINISH}`,
 
   // Charcoal sketch.
   charcoal: (d) =>
-    `Tall vertical charcoal and graphite sketch on toned paper, loose expressive strokes, smudged shading, white chalk highlights, ` +
-    `of the Queensboro Bridge from the Long Island City waterfront. Monochrome except for one accent color chosen by the weather. ` +
-    `The sketch depicts these exact conditions: ${d.facts} ` +
-    `Rain as vigorous diagonal hatching, wind as swept smudges, the moon phase drawn precisely in chalk, clouds as soft rubbed charcoal. ` +
-    `Leave the upper half of the paper mostly bare. ${NO_TEXT}`,
+    `Tall vertical drawing in charcoal and white chalk on dark slate-grey paper by a superb draughtsman: loose expressive strokes, smudged atmospheric shading, bright chalk for the lights and highlights, ` +
+    `plus one single accent color (${d.feels <= 45 ? "a cold blue" : d.feels <= 68 ? "an ochre" : "a warm red-orange"}) used sparingly. Subject: the Queensboro Bridge seen from the Long Island City waterfront, its cantilever trusses crossing the lower third. ` +
+    `The drawing depicts these conditions: ${d.scene} ` +
+    `Clouds as soft rubbed charcoal and chalk${d.falling === "snow" ? ", snow as stippled chalk dots" : d.falling ? ", rain as vigorous diagonal hatching" : ""}${d.wind >= 12 ? ", wind as swept smudges" : ""}. ` +
+    `${LOW_SUBJECT} ${FINISH}`,
 
   // Flat vector.
   flat: (d) =>
-    `Tall vertical flat vector illustration, bold simple geometric shapes, no outlines, no gradients, a strict six-color palette, ` +
-    `of the Long Island City waterfront: a few stylized towers, the Pepsi-Cola sign as a red shape, the river as a flat band, the skyline as a silhouette. ` +
-    `Weather and light as simple symbols that match these exact conditions: ${d.facts} ` +
-    `A sun or moon circle with the exact phase, clouds as rounded blobs covering ${d.cloud} percent of the sky, rain as short dashes, wind as curved lines. ` +
-    `Large flat sky color at the top. ${NO_TEXT}`,
+    `Tall vertical flat vector illustration in the style of a contemporary editorial poster: bold simple geometric shapes, no outlines, a strict palette of six sophisticated colors, subtle grain texture. ` +
+    `The Long Island City waterfront reduced to essentials: a few stylized towers, the gantries, one small red sign shape, the river as a flat band, the Manhattan skyline as a single silhouette. ` +
+    `Weather and light as simple shapes matching these conditions: ${d.scene} ` +
+    `In the sky: ${symbol(d, "as a perfect flat shape")}; clouds as rounded flat shapes covering about ${d.cloud} percent of it` +
+    `${d.falling === "snow" ? "; snow as small dots" : d.falling ? "; rain as short diagonal dashes" : ""}${d.wind >= 12 ? "; wind as a few curved lines" : ""}. ` +
+    `${LOW_SUBJECT} ${FINISH}`,
 
   // Blueprint / cyanotype.
   blueprint: (d) =>
-    `Tall vertical cyanotype blueprint, white line drawing on deep Prussian blue paper with faint grid, ` +
-    `an engineer's elevation drawing of a rooftop weather station in Long Island City: an anemometer, a wind vane, a rain gauge, a thermometer, a barometer, ` +
-    `with the skyline as a thin outline behind. ` +
-    `Each instrument is drawn in the state matching these exact conditions, using needle positions, fill levels and vane direction rather than labels: ${d.facts} ` +
-    `The moon drawn as a precise astronomical diagram of its current phase in the upper corner. Keep the upper center empty blue paper. ${NO_TEXT}`,
+    `Tall vertical cyanotype blueprint: fine white technical line drawing on deep Prussian blue paper with a faint grid and the mottled texture of a real sun print. ` +
+    `An engineer's elevation of a rooftop weather station in Long Island City, drawn with exquisite precision in the bottom third: a cup anemometer, a wind vane, a rain gauge, a thermometer and an aneroid barometer on a mast, ` +
+    `with the Manhattan skyline as a thin outline behind. ` +
+    `Each instrument is drawn in the state matching these readings, shown by needle positions, fill levels and motion lines, never by labels: ${d.facts} ` +
+    `In the upper third, a precise astronomical diagram of the moon at its current phase (${MOON_WORDS[d.moon]}). The rest is empty blue paper. ${FINISH}`,
 
-  // Long-exposure night / day street photo.
+  // Street photo.
   street: (d) =>
-    `Tall vertical street photograph on Vernon Boulevard in Long Island City, Queens: a low brick block, a corner deli awning, parked cars, bare or leafy trees as the season dictates, ` +
-    `shot on a 28mm lens with a slightly tilted horizon, documentary color film look. ` +
-    `Light and weather must match these exact conditions: ${d.facts} ` +
-    `${d.precip > 0 ? "Wet asphalt reflecting the lights, umbrellas absent, puddles. " : ""}` +
-    `The street sits in the lower third; the upper two thirds is sky and building tops. No readable signage, no people's faces. ${NO_TEXT}`,
+    `Tall vertical documentary street photograph on Vernon Boulevard in Long Island City, Queens, on 35mm color film with a 28mm lens, by a great color street photographer: ` +
+    `a low brick block with a corner deli awning, parked cars, a street tree, fire escapes, the elevated sense of a real, specific New York corner. ` +
+    `Light and weather match these conditions: ${d.scene} ` +
+    `${d.falling === "snow" ? "Fresh snow on the cars and sidewalk. " : d.falling ? "Wet asphalt and puddles reflecting the lights. " : "Dry pavement. "}` +
+    `${LOW_SUBJECT} No readable signage, no faces. ${FINISH}`,
 };
 
 // Picks the prompt style. "random" chooses any style other than `avoid` (the
@@ -314,7 +459,7 @@ export async function vertexGenerate(prompt, cfg, fetchFn = fetch) {
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       generationConfig: {
         responseModalities: ["TEXT", "IMAGE"],
-        imageConfig: { aspectRatio: "9:16", imageSize: "1K" },
+        imageConfig: { aspectRatio: "9:16", imageSize: cfg.size },
       },
     }),
   });
@@ -337,6 +482,7 @@ export async function createProvider(env = process.env, log = console.log) {
     project: env.GOOGLE_CLOUD_PROJECT || env.GCLOUD_PROJECT,
     location: env.GOOGLE_CLOUD_LOCATION || "global",
     model: env.IMAGE_MODEL || "gemini-nano-banana-2.1",
+    size: env.IMAGE_SIZE || "1K", // "2K" is sharper on a 4K panel but costs more per image
   };
   try {
     cfg.auth = new GoogleAuth({ scopes: SCOPES });
