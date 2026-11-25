@@ -503,7 +503,7 @@ export async function createProvider(env = process.env, log = console.log) {
 // Slot manager
 // ---------------------------------------------------------------------------
 
-export function createVisuals({ dir, provider, style = "random", log = console.log }) {
+export function createVisuals({ dir, provider, designer = null, style = "random", log = console.log }) {
   const images = new Map(); // slot -> meta
   let lastSeen = 0;
   let generating = null; // slot currently being generated
@@ -550,7 +550,19 @@ export function createVisuals({ dir, provider, style = "random", log = console.l
       log(`[visuals] generating slot ${new Date(slot).toISOString()} (${used}, ${provider.name}/${provider.model})`);
       const { buffer, ext, tokens, usd } = await provider.generate(prompt);
       const file = `${slot}.${ext}`;
-      const meta = { slot, file, url: `/generated/${file}`, style: used, prompt, provider: provider.name, model: provider.model, createdAt: new Date().toISOString(), ms: Date.now() - started, tokens, usd };
+      // Have the readout layout designed for this particular image. Optional:
+      // without it the display uses the built-in layout for the style.
+      let layout = null;
+      if (designer) {
+        try {
+          const d = await designer.design({ buffer, ext, style: used });
+          layout = d.layout;
+          log(`[layout] ${designer.name} (~$${d.usd.toFixed(4)}): ${d.rationale}`);
+        } catch (err) {
+          log(`[layout] failed, using the built-in ${used} layout: ${String(err.message || err).slice(0, 200)}`);
+        }
+      }
+      const meta = { slot, file, url: `/generated/${file}?v=${Date.now().toString(36)}`, style: used, layout, prompt, provider: provider.name, model: provider.model, createdAt: new Date().toISOString(), ms: Date.now() - started, tokens, usd };
       await writeFile(join(dir, file), buffer);
       await writeFile(join(dir, `${slot}.json`), JSON.stringify(meta, null, 2));
       images.set(slot, meta);
@@ -588,7 +600,7 @@ export function createVisuals({ dir, provider, style = "random", log = console.l
   function snapshot() {
     lastSeen = Date.now();
     const cur = slotOf(lastSeen);
-    const strip = (m) => m && { slot: m.slot, url: m.url, style: m.style, createdAt: m.createdAt };
+    const strip = (m) => m && { slot: m.slot, url: m.url, style: m.style, layout: m.layout || null, createdAt: m.createdAt };
     return {
       enabled: Boolean(provider),
       now: lastSeen,

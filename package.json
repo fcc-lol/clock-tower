@@ -11,6 +11,7 @@
     "visual:test": "node scripts/visual-test.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.14.0",
     "better-sqlite3": "^11.0.0",
     "express": "^4.19.2",
     "google-auth-library": "^11.3.4",

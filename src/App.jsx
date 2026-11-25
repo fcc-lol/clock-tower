@@ -1,79 +1,69 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import styled from "styled-components";
 import { WMO, moonPhase, nextSunEvent, fetchWeather } from "./lib/sky.js";
+import { FONTS, resolveLayout } from "./lib/layout.js";
 
 // Fixed design dimensions — everything is authored at this exact size.
 const STAGE_W = 1080;
 const STAGE_H = 1920;
 
 // ---------------------------------------------------------------------------
-// Typography themes
+// Readout layout
 //
-// The readouts are set to suit the backdrop they sit on: each image style from
-// visuals.js has a matching theme here (typeface, weight, case, alignment,
-// colors), and the theme switches in the same frame as the image. Fonts are
-// loaded in index.html; add a family there before using it here.
-//   display/body  font stacks for the time and for everything else
-//   timeSize      px size of the time digits (wide faces need a smaller size)
-//   upper         set labels and lines in capitals
-//   track         letter-spacing (em) for the small lines
-//   align         "center" or "left"
-//   ink/accent    main text color and the color of the labels + rule
-//   shadow        text-shadow that keeps the text legible on the artwork
+// How the time and weather are set on the backdrop comes with each image: the
+// server asks Claude to design a layout for it (layout.js), and falls back to
+// a built-in layout per image style (src/lib/layout.js). The layout switches
+// in the same frame as the image. Here it is turned into concrete CSS values.
 // ---------------------------------------------------------------------------
-const SOFT = "0 2px 28px rgba(0,0,0,.6), 0 0 3px rgba(0,0,0,.55)";
-const HARD = "0 3px 0 rgba(0,0,0,.55), 0 0 24px rgba(0,0,0,.5)";
+const PAD_X = 96;
+const WEIGHT = { light: 0, regular: 1, bold: 2 };
+const TRACK = { tight: -0.01, normal: 0.02, wide: 0.14 };
+const TIME_TRACK = { tight: -0.04, normal: -0.02, wide: 0.02 };
+const SCRIM = { light: 0.22, medium: 0.4, strong: 0.58 };
+const FLEX = { left: "flex-start", center: "center", right: "flex-end" };
+const JUSTIFY = { stack_top: "flex-start", stack_center: "center", stack_bottom: "flex-end", split: "space-between" };
 
-const BASE = {
-  display: `"Space Grotesk", sans-serif`,
-  body: `"Space Grotesk", sans-serif`,
-  timeSize: 250,
-  timeWeight: 600,
-  bodyWeight: 500,
-  upper: true,
-  track: 0.12,
-  timeTrack: -0.02,
-  align: "center",
-  ink: "#f7f6f2",
-  accent: "rgba(247,246,242,.72)",
-  shadow: SOFT,
-  italic: false,
-};
+function scrimOf(where, strength) {
+  const s = SCRIM[strength];
+  const k = (a) => `rgba(0,0,0,${a.toFixed(3)})`;
+  if (where === "top") return `linear-gradient(180deg, ${k(s)} 0%, ${k(s * 0.6)} 45%, ${k(0)} 72%)`;
+  if (where === "bottom") return `linear-gradient(0deg, ${k(s)} 0%, ${k(s * 0.6)} 45%, ${k(0)} 72%)`;
+  if (where === "both") return `linear-gradient(180deg, ${k(s)} 0%, ${k(s * 0.5)} 30%, ${k(0)} 45%, ${k(0)} 55%, ${k(s * 0.5)} 70%, ${k(s)} 100%)`;
+  if (where === "full") return k(s * 0.75);
+  return "none";
+}
 
-const THEMES = {
-  // Gouache travel poster: a high-contrast serif, centered.
-  skyline: { display: `"Playfair Display", serif`, body: `"Playfair Display", serif`, timeSize: 270, timeWeight: 700, bodyWeight: 400, upper: false, track: 0.02, ink: "#fbf3e4", accent: "#f0c9a0" },
-  // Swiss risograph poster: heavy grotesque, flush left.
-  poster: { display: `"Archivo", sans-serif`, body: `"Archivo", sans-serif`, timeSize: 270, timeWeight: 800, timeTrack: -0.04, align: "left", track: 0.08, accent: "#ffd166", shadow: HARD },
-  // Looking up between towers: thin, wide, cinematic.
-  lookup: { display: `"Inter", sans-serif`, body: `"Inter", sans-serif`, timeSize: 250, timeWeight: 200, bodyWeight: 400, track: 0.32, timeTrack: 0.02 },
-  // Apartment window: a quiet italic book face.
-  window: { display: `"Cormorant Garamond", serif`, body: `"Cormorant Garamond", serif`, timeSize: 300, timeWeight: 400, bodyWeight: 500, upper: false, italic: true, track: 0.02, ink: "#fff6e6", accent: "#f2d3a8" },
-  // Subway platform: signage grotesque, flush left.
-  platform: { display: `"Inter", sans-serif`, body: `"Inter", sans-serif`, timeSize: 250, timeWeight: 700, timeTrack: -0.04, bodyWeight: 500, upper: false, track: 0, align: "left", accent: "#c79bf2", shadow: HARD },
-  // Ukiyo-e print: a Mincho face with a vermilion seal color.
-  woodblock: { display: `"Shippori Mincho", serif`, body: `"Shippori Mincho", serif`, timeSize: 250, timeWeight: 800, bodyWeight: 500, track: 0.14, ink: "#f6ecd9", accent: "#f08a6b" },
-  // Pixel art: a bitmap face with a hard drop shadow.
-  pixel: { display: `"Press Start 2P", monospace`, body: `"Press Start 2P", monospace`, timeSize: 128, timeWeight: 400, bodyWeight: 400, track: 0, timeTrack: 0, scale: 0.6, ink: "#ffffff", accent: "#ffe45c", shadow: "5px 5px 0 #000" },
-  // Aerial view: instrument-panel monospace, flush left.
-  satellite: { display: `"IBM Plex Mono", monospace`, body: `"IBM Plex Mono", monospace`, timeSize: 215, timeWeight: 300, bodyWeight: 500, track: 0.1, align: "left", ink: "#eafff4", accent: "#7df0b0", shadow: HARD },
-  // Cut paper: a fat display face.
-  collage: { display: `"Abril Fatface", serif`, body: `"Outfit", sans-serif`, timeSize: 250, timeWeight: 400, bodyWeight: 700, track: 0.14, ink: "#fff8ea", accent: "#ffcf5c", shadow: HARD },
-  // Watercolor: light italic serif.
-  watercolor: { display: `"Cormorant Garamond", serif`, body: `"Cormorant Garamond", serif`, timeSize: 300, timeWeight: 400, bodyWeight: 600, upper: false, italic: true, track: 0.02 },
-  // Synthwave: glowing wide sans.
-  neon: { display: `"Orbitron", sans-serif`, body: `"Orbitron", sans-serif`, timeSize: 180, timeWeight: 800, timeTrack: 0.02, track: 0.16, scale: 0.82, ink: "#ffffff", accent: "#7ef9ff", shadow: "0 0 10px #ff4fd8, 0 0 34px #ff2bd0, 0 0 70px rgba(255,43,208,.6), 0 2px 4px rgba(0,0,0,.7)" },
-  // Charcoal drawing: chalk handwriting.
-  charcoal: { display: `"Caveat", cursive`, body: `"Caveat", cursive`, timeSize: 320, timeWeight: 700, bodyWeight: 500, upper: false, track: 0.01, scale: 1.25, ink: "#f4f1ea", accent: "#d9d4c8" },
-  // Flat vector: friendly geometric sans.
-  flat: { display: `"Outfit", sans-serif`, body: `"Outfit", sans-serif`, timeSize: 270, timeWeight: 700, timeTrack: -0.03, bodyWeight: 300, upper: false, track: 0.01, align: "left", shadow: HARD },
-  // Blueprint: drafting monospace in white line.
-  blueprint: { display: `"Share Tech Mono", monospace`, body: `"Share Tech Mono", monospace`, timeSize: 230, timeWeight: 400, bodyWeight: 400, track: 0.14, ink: "#eaf4ff", accent: "#a9cdf5", shadow: "0 0 18px rgba(4,24,66,.9)" },
-  // Street photo: the amber date stamp of a film camera.
-  street: { display: `"DM Mono", monospace`, body: `"DM Mono", monospace`, timeSize: 215, timeWeight: 500, bodyWeight: 400, track: 0.08, align: "left", ink: "#ffb84a", accent: "#ffd79a", shadow: "0 0 18px rgba(255,120,0,.45), 0 2px 10px rgba(0,0,0,.75)" },
-};
-
-const themeFor = (style) => ({ ...BASE, scale: 1, ...(THEMES[style] || {}) });
+function themeOf(l) {
+  const d = FONTS[l.display_font];
+  const b = FONTS[l.body_font];
+  const g = l.glow;
+  return {
+    display: d.stack,
+    body: b.stack,
+    timeWeight: d.weights[WEIGHT[l.time_weight]],
+    bodyWeight: b.weights[WEIGHT[l.body_weight]],
+    timeSize: l.time_size,
+    upper: l.uppercase,
+    italic: l.italic && Boolean(b.italic),
+    track: TRACK[l.tracking],
+    timeTrack: TIME_TRACK[l.tracking],
+    scale: b.scale,
+    align: l.align,
+    flex: FLEX[l.align],
+    justify: JUSTIFY[l.arrangement],
+    split: l.arrangement === "split",
+    row: l.stats === "row",
+    ink: l.ink,
+    accent: l.accent,
+    shadow: {
+      soft: "0 2px 28px rgba(0,0,0,.6), 0 0 3px rgba(0,0,0,.55)",
+      hard: "0 3px 0 rgba(0,0,0,.55), 0 0 24px rgba(0,0,0,.5)",
+      glow: `0 0 10px ${g}, 0 0 34px ${g}, 0 0 70px ${g}99, 0 2px 4px rgba(0,0,0,.7)`,
+      none: "0 1px 3px rgba(0,0,0,.35)",
+    }[l.shadow],
+    scrim: scrimOf(l.scrim, l.scrim_strength),
+  };
+}
 
 // Dark backdrop fills the browser; the stage is centered within it.
 const Viewport = styled.div`
@@ -102,17 +92,16 @@ const Stage = styled.div`
   user-select: none;
 `;
 
-// All the readouts live in the upper part of the frame (the images keep their
-// sky there) so the subject of the artwork at the bottom stays uncovered.
+// The readouts: a clock block and a weather block, placed where the layout
+// says (together at the top, middle or bottom, or split to both ends).
 const Content = styled.div`
   position: absolute;
   inset: 0;
   z-index: 1;
   display: flex;
   flex-direction: column;
-  align-items: ${(p) => (p.$t.align === "left" ? "flex-start" : "center")};
-  text-align: ${(p) => p.$t.align};
-  padding: 150px 96px 0;
+  justify-content: ${(p) => p.$t.justify};
+  padding: 150px ${PAD_X}px;
   font-family: ${(p) => p.$t.body};
   font-weight: ${(p) => p.$t.bodyWeight};
   font-style: ${(p) => (p.$t.italic ? "italic" : "normal")};
@@ -123,9 +112,15 @@ const Content = styled.div`
   font-variant-numeric: lining-nums tabular-nums;
 `;
 
+const Block = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: ${(p) => p.$t.flex};
+  text-align: ${(p) => p.$t.align};
+`;
+
 const Time = styled.div`
   font-family: ${(p) => p.$t.display};
-  font-size: ${(p) => p.$t.timeSize}px;
   font-weight: ${(p) => p.$t.timeWeight};
   font-style: normal;
   letter-spacing: ${(p) => p.$t.timeTrack}em;
@@ -151,7 +146,7 @@ const DateLine = styled.div`
 const Rule = styled.div`
   width: 120px;
   height: 4px;
-  margin: 70px 0 62px;
+  margin: ${(p) => (p.$t.split ? 0 : 70)}px 0 62px;
   background: ${(p) => p.$t.accent};
   box-shadow: 0 2px 18px rgba(0, 0, 0, 0.5);
 `;
@@ -159,7 +154,7 @@ const Rule = styled.div`
 const Now = styled.div`
   display: flex;
   align-items: baseline;
-  justify-content: ${(p) => (p.$t.align === "left" ? "flex-start" : "center")};
+  justify-content: ${(p) => p.$t.flex};
   flex-wrap: wrap;
   gap: 0 36px;
   line-height: 1.05;
@@ -179,10 +174,11 @@ const Cond = styled.span`
 
 const Stats = styled.div`
   margin-top: 64px;
-  display: grid;
+  display: ${(p) => (p.$t.row ? "flex" : "grid")};
+  flex-wrap: wrap;
   grid-template-columns: repeat(2, auto);
-  justify-content: ${(p) => (p.$t.align === "left" ? "start" : "center")};
-  gap: 46px 110px;
+  justify-content: ${(p) => p.$t.flex};
+  gap: ${(p) => (p.$t.row ? "40px 64px" : "46px 110px")};
 `;
 
 const Stat = styled.div`
@@ -203,8 +199,8 @@ const Stat = styled.div`
 `;
 
 // Full-stage backdrop: the AI-generated image for the current 15-minute slot
-// (see visuals.js on the server). A scrim, strongest behind the readouts at
-// the top, keeps the text readable on bright renders. Swaps are a hard cut, so
+// (see visuals.js on the server). The layout's scrim darkens it behind the
+// readouts where needed. Swaps are a hard cut, so
 // the change on the quarter-hour is visible.
 const Backdrop = styled.div`
   position: absolute;
@@ -224,13 +220,7 @@ const Backdrop = styled.div`
     content: "";
     position: absolute;
     inset: 0;
-    background: linear-gradient(
-      180deg,
-      rgba(0, 0, 0, 0.42) 0%,
-      rgba(0, 0, 0, 0.26) 45%,
-      rgba(0, 0, 0, 0.06) 68%,
-      rgba(0, 0, 0, 0.1) 100%
-    );
+    background: ${(p) => p.$scrim};
   }
 `;
 
@@ -281,17 +271,38 @@ function useWeather() {
   return weather;
 }
 
-// Ask the browser to fetch every theme's typeface up front, so the first time
-// a style comes up its text doesn't flash in a fallback font.
-function usePreloadFonts() {
+// Ask the browser to fetch every typeface up front, so the first time a layout
+// uses one its text doesn't flash in a fallback font. Returns a counter that
+// bumps when fonts finish loading (text widths change then).
+function useFonts() {
+  const [loaded, setLoaded] = useState(0);
   useEffect(() => {
     if (!document.fonts?.load) return;
-    for (const name of Object.keys(THEMES)) {
-      const t = themeFor(name);
-      document.fonts.load(`${t.timeWeight} 40px ${t.display}`).catch(() => {});
-      document.fonts.load(`${t.italic ? "italic " : ""}${t.bodyWeight} 40px ${t.body}`).catch(() => {});
+    const bump = () => setLoaded((n) => n + 1);
+    document.fonts.addEventListener?.("loadingdone", bump);
+    for (const f of Object.values(FONTS)) {
+      for (const w of new Set(f.weights)) {
+        document.fonts.load(`${w} 40px ${f.stack}`).catch(() => {});
+        if (f.italic) document.fonts.load(`italic ${w} 40px ${f.stack}`).catch(() => {});
+      }
     }
+    return () => document.fonts.removeEventListener?.("loadingdone", bump);
   }, []);
+  return loaded;
+}
+
+// Sets an element's font size, shrinking it if the line would be wider than
+// the stage allows (a wide face at "12:00 PM" can otherwise run off the edge).
+function useFitFontSize(size, deps) {
+  const ref = useRef(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const max = STAGE_W - PAD_X * 2;
+    el.style.fontSize = `${size}px`;
+    if (el.offsetWidth > max) el.style.fontSize = `${Math.floor((size * max) / el.offsetWidth)}px`;
+  }, [size, ...deps]); // eslint-disable-line react-hooks/exhaustive-deps
+  return ref;
 }
 
 // If the server is running a newer build than this page, reload once to pick
@@ -359,11 +370,14 @@ function App() {
   const now = useNow();
   const weather = useWeather();
   const backdrop = useBackdrop(now);
-  usePreloadFonts();
+  const fontsLoaded = useFonts();
   const params = new URLSearchParams(window.location.search);
   const onDevice = params.get("onDevice") === "true";
-  // ?theme=neon previews a theme on whatever image is showing.
-  const t = themeFor(params.get("theme") || backdrop?.style);
+  // The layout designed for this image, or the built-in one for its style.
+  // ?theme=neon previews a built-in layout on whatever image is showing.
+  const preview = params.get("theme");
+  const layout = resolveLayout(preview ? null : backdrop?.layout, preview || backdrop?.style);
+  const t = themeOf(layout);
 
   const [clock, ampm] = now
     .toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
@@ -374,6 +388,8 @@ function App() {
     day: "numeric",
   });
 
+  const timeRef = useFitFontSize(t.timeSize, [clock, ampm, t.display, t.timeWeight, t.timeTrack, fontsLoaded]);
+
   const [, label] = (weather && WMO[weather.weather_code]) || ["", ""];
   const sun = weather && nextSunEvent(weather.daily, now);
   const moon = moonPhase(now);
@@ -381,51 +397,55 @@ function App() {
   return (
     <Viewport $onDevice={onDevice}>
       <Stage $scale={scale}>
-        <Backdrop>{backdrop && <img key={backdrop.url} src={backdrop.url} alt="" />}</Backdrop>
+        <Backdrop $scrim={t.scrim}>{backdrop && <img key={backdrop.url} src={backdrop.url} alt="" />}</Backdrop>
         <Content $t={t}>
-          <Time $t={t}>
-            {clock}
-            <small>{ampm}</small>
-          </Time>
-          <DateLine $t={t}>{date}</DateLine>
-          <Rule $t={t} />
-          {weather ? (
-            <>
-              <Now $t={t}>
-                <Temp $t={t}>{Math.round(weather.temperature_2m)}°</Temp>
-                <Cond $t={t}>{label}</Cond>
-              </Now>
-              <Stats $t={t}>
-                {sun && (
+          <Block $t={t}>
+            <Time $t={t} ref={timeRef}>
+              {clock}
+              <small>{ampm}</small>
+            </Time>
+            <DateLine $t={t}>{date}</DateLine>
+          </Block>
+          <Block $t={t}>
+            <Rule $t={t} />
+            {weather ? (
+              <>
+                <Now $t={t}>
+                  <Temp $t={t}>{Math.round(weather.temperature_2m)}°</Temp>
+                  <Cond $t={t}>{label}</Cond>
+                </Now>
+                <Stats $t={t}>
+                  {sun && (
+                    <Stat $t={t}>
+                      <span>{sun.label} in</span>
+                      <b>
+                        {sun.h > 0 ? `${sun.h}h ` : ""}
+                        {sun.m}m
+                      </b>
+                    </Stat>
+                  )}
                   <Stat $t={t}>
-                    <span>{sun.label} in</span>
-                    <b>
-                      {sun.h > 0 ? `${sun.h}h ` : ""}
-                      {sun.m}m
-                    </b>
+                    <span>Moon</span>
+                    <b>{moon}</b>
                   </Stat>
-                )}
-                <Stat $t={t}>
-                  <span>Moon</span>
-                  <b>{moon}</b>
-                </Stat>
-                {weather.aqi != null && (
-                  <Stat $t={t}>
-                    <span>Air quality</span>
-                    <b>{weather.aqi}</b>
-                  </Stat>
-                )}
-                {weather.uv_index != null && (
-                  <Stat $t={t}>
-                    <span>UV index</span>
-                    <b>{Math.round(weather.uv_index)}</b>
-                  </Stat>
-                )}
-              </Stats>
-            </>
-          ) : (
-            <Cond $t={t}>Loading weather…</Cond>
-          )}
+                  {weather.aqi != null && (
+                    <Stat $t={t}>
+                      <span>Air quality</span>
+                      <b>{weather.aqi}</b>
+                    </Stat>
+                  )}
+                  {weather.uv_index != null && (
+                    <Stat $t={t}>
+                      <span>UV index</span>
+                      <b>{Math.round(weather.uv_index)}</b>
+                    </Stat>
+                  )}
+                </Stats>
+              </>
+            ) : (
+              <Cond $t={t}>Loading weather…</Cond>
+            )}
+          </Block>
         </Content>
       </Stage>
     </Viewport>

@@ -4,6 +4,7 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { readFile } from "fs/promises";
 import { createVisuals, createProvider, loadDotenv } from "./visuals.js";
+import { createLayoutDesigner } from "./layout.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -21,9 +22,12 @@ db.pragma("journal_mode = WAL");
 // endpoint still answers, with enabled:false, and the display shows a plain
 // background.
 const provider = await createProvider();
+// Claude designs the readout layout for each image (needs ANTHROPIC_API_KEY).
+const designer = provider ? createLayoutDesigner() : null;
 const visuals = createVisuals({
   dir: join(__dirname, "generated"),
   provider,
+  designer,
   style: process.env.IMAGE_STYLE || "random",
 });
 await visuals.load();

@@ -1,6 +1,6 @@
 # Clock Tower
 
-Portrait clock/weather signage display for Long Island City. Shows the time, date, and current conditions (temperature, sky, sunrise/sunset countdown, AQI, UV, moon phase) over an AI-generated backdrop that depicts those same conditions, regenerated every 15 minutes. The readouts are set straight in a typographic theme that matches each backdrop style (see THEMES in src/App.jsx) and switches with the image.
+Portrait clock/weather signage display for Long Island City. Shows the time, date, and current conditions (temperature, sky, sunrise/sunset countdown, AQI, UV, moon phase) over an AI-generated backdrop that depicts those same conditions, regenerated every 15 minutes. The readouts are set straight in a layout (typeface, colors, placement) that Claude designs for each image by looking at it (layout.js, needs ANTHROPIC_API_KEY), with a built-in layout per backdrop style as the fallback (src/lib/layout.js). The layout switches with the image.
 
 Deployed at https://clock-tower.fcc.lol (pushes to `main` auto-deploy via GitHub Actions). It can also run standalone on a device such as a Raspberry Pi.
 
