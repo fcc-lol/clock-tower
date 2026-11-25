@@ -114,6 +114,8 @@ export function describe(w, now = new Date()) {
   const aqi = w.aqi;
   const uv = Math.round(w.uv_index ?? 0);
   const precip = w.precipitation ?? 0;
+  const cloud = Math.round(w.cloud_cover ?? 0);
+  const isDark = /night|dusk|twilight/.test(sun.light);
 
   const facts = [
     `${date}, ${time}, ${monthWord({ month, phase: day <= 10 ? 0 : day <= 20 ? 1 : 2 })} in Long Island City, Queens, New York.`,
@@ -125,8 +127,10 @@ export function describe(w, now = new Date()) {
     `Wind ${wind} mph: ${pick(wind, WIND_WORDS)}.`,
     `Humidity ${Math.round(w.relative_humidity_2m ?? 0)}%.`,
     aqi != null ? `Air quality index ${aqi}: ${pick(aqi, AQI_WORDS)}.` : "",
-    `UV index ${uv}${uv <= 2 ? ", very weak sun" : uv >= 8 ? ", harsh bright sun" : ""}.`,
-    `Moon phase: ${moon}, ${MOON_WORDS[moon]}${sun.light.includes("night") || sun.light.includes("dusk") ? " visible in the sky" : ", faint in the daytime sky if visible at all"}.`,
+    isDark ? `UV index ${uv} (night).` : `UV index ${uv}${uv <= 2 ? ", very weak sun" : uv >= 8 ? ", harsh bright sun" : ""}.`,
+    `Moon phase: ${moon}, ${MOON_WORDS[moon]}` +
+      (cloud >= 85 ? ", hidden behind the cloud deck" : isDark ? " visible in the sky" : ", faint in the daytime sky if visible at all") +
+      ".",
   ]
     .filter(Boolean)
     .join(" ");
@@ -138,6 +142,10 @@ const NO_TEXT =
   "Absolutely no text, letters, numerals, words, logos or watermarks anywhere in the image. " +
   "Keep the upper half and the center of the frame calm and uncluttered so large text overlaid on top stays legible.";
 
+// Each style turns the shared facts into a very different picture. They are
+// deliberately far apart (medium, era, viewpoint, palette) so a day of slots
+// doesn't blur together. Every one ends with NO_TEXT and keeps the upper and
+// middle of the frame quiet for the overlaid readouts.
 export const STYLES = {
   // Painterly view of the LIC waterfront looking at Manhattan.
   skyline: (d) =>
@@ -167,11 +175,114 @@ export const STYLES = {
     `Render these exact conditions: ${d.facts} ` +
     `Dark, moody tones with the facades reflecting the real sky, the frame mostly dark so bright overlaid text reads clearly. ` +
     `No signage, no people. ${NO_TEXT}`,
+
+  // Looking out from inside an apartment.
+  window: (d) =>
+    `Tall vertical photograph from inside a quiet Long Island City apartment, looking out through a large window at the Queens rooftops and water towers, ` +
+    `the Manhattan skyline faint in the distance. The window glass fills most of the frame; the room edge (a radiator, a plant on the sill, a mug) is small and dark at the bottom. ` +
+    `What is seen through the glass must match these exact conditions: ${d.facts} ` +
+    `${d.precip > 0 ? "Rain or snow streaks and droplets on the glass, the view beyond softened. " : ""}` +
+    `${d.humidity > 80 ? "A little condensation fogging the corners of the pane. " : ""}` +
+    `Soft natural light, warm interior shadow, cool exterior. ${NO_TEXT}`,
+
+  // Elevated 7 train platform.
+  platform: (d) =>
+    `Tall vertical photograph from the elevated 7 train platform at Queensboro Plaza in Long Island City, looking down the tracks toward Manhattan, ` +
+    `steel canopy and rails leading into the distance, a purple 7 train small and far off. ` +
+    `The sky, light and weather must match these exact conditions: ${d.facts} ` +
+    `Long exposure feel, wet or dry platform as the weather dictates, 35mm color negative film look. ` +
+    `The upper half of the frame is open sky above the canopy. No people, no signage. ${NO_TEXT}`,
+
+  // Japanese woodblock print.
+  woodblock: (d) =>
+    `Tall vertical ukiyo-e woodblock print in the manner of Hiroshige, flat colors with visible wood grain and bokashi gradients, ` +
+    `depicting the East River and the Queensboro Bridge seen from the Long Island City shore. ` +
+    `Translate these exact conditions into the print's visual language: ${d.facts} ` +
+    `Rain as fine diagonal lines, wind as bent reeds and stretched clouds, cold as pale indigo and white, warmth as ochre and vermilion, ` +
+    `the moon phase shown exactly in the sky, clouds as flat stylized bands. Large areas of plain paper-colored sky at the top. ${NO_TEXT}`,
+
+  // Pixel art.
+  pixel: (d) =>
+    `Tall vertical 16-bit pixel art scene, chunky visible pixels, limited 32-color palette, of a Long Island City street corner in Queens, New York ` +
+    `with a bodega awning, a fire hydrant, a brick walk-up and the Manhattan skyline on the horizon. ` +
+    `The weather and light must match these exact conditions, drawn with pixel-art sprites (pixel raindrops, pixel snow, pixel clouds, a pixel sun or moon of the right phase): ${d.facts} ` +
+    `Mostly flat sky in the upper two thirds so overlaid text reads. No people, no signage. ${NO_TEXT}`,
+
+  // Satellite view.
+  satellite: (d) =>
+    `Tall vertical satellite image looking straight down at the East River with Long Island City, Queens on the right and Midtown Manhattan on the left, ` +
+    `Roosevelt Island in the channel, the Queensboro Bridge crossing the frame. Photorealistic earth-observation rendering. ` +
+    `The cloud layer, haze, shadows and lighting must match these exact conditions: ${d.facts} ` +
+    `${d.cloud >= 70 ? "Thick cloud cover hides most of the ground, with only breaks showing the river. " : d.cloud >= 30 ? "Scattered clouds casting shadows on the city. " : "Clear view of the whole city grid. "}` +
+    `${d.light.includes("night") ? "Night: the city is a lattice of warm lights, the river black. " : ""}` +
+    `Keep the center of the frame relatively even in tone. ${NO_TEXT}`,
+
+  // Cut-paper collage.
+  collage: (d) =>
+    `Tall vertical cut-paper collage in a mid-century modern style, layered colored papers with visible torn and cut edges and subtle shadows, ` +
+    `of the Long Island City skyline, the Pepsi-Cola sign and the river. ` +
+    `Every weather fact is a paper shape: ${d.facts} ` +
+    `Clouds as torn grey paper, rain as thin paper strips, the sun or moon as a punched circle of the right phase, wind as curled paper ribbons, cold as blues and whites, warmth as oranges. ` +
+    `Big plain paper sky at the top. ${NO_TEXT}`,
+
+  // Loose watercolor.
+  watercolor: (d) =>
+    `Tall vertical loose watercolor painting on cold-pressed paper, wet-on-wet washes, bleeding edges, lots of untouched white paper, ` +
+    `of the Gantry Plaza gantries and pier in Long Island City with the Manhattan skyline as a faint wash behind. ` +
+    `The washes must carry these exact conditions: ${d.facts} ` +
+    `${d.precip > 0 ? "Drips and spatters of rain running down the sheet. " : ""}` +
+    `Sky as one big expressive wash covering the top two thirds. No people. ${NO_TEXT}`,
+
+  // Neon synthwave.
+  neon: (d) =>
+    `Tall vertical 1980s synthwave illustration: a glowing neon outline of the Manhattan skyline seen from Long Island City, a chrome-reflective East River, ` +
+    `a perspective grid floor fading into the distance, and a huge sun or moon disc behind the skyline showing the exact phase. ` +
+    `Palette and sky derived from these exact conditions: ${d.facts} ` +
+    `Cold weather shifts the palette to electric blue and violet, warm weather to magenta and orange; clouds as glowing horizontal neon bands covering ${d.cloud} percent of the sky; ` +
+    `rain as falling neon lines. Dark background overall so overlaid text glows. ${NO_TEXT}`,
+
+  // Charcoal sketch.
+  charcoal: (d) =>
+    `Tall vertical charcoal and graphite sketch on toned paper, loose expressive strokes, smudged shading, white chalk highlights, ` +
+    `of the Queensboro Bridge from the Long Island City waterfront. Monochrome except for one accent color chosen by the weather. ` +
+    `The sketch depicts these exact conditions: ${d.facts} ` +
+    `Rain as vigorous diagonal hatching, wind as swept smudges, the moon phase drawn precisely in chalk, clouds as soft rubbed charcoal. ` +
+    `Leave the upper half of the paper mostly bare. ${NO_TEXT}`,
+
+  // Flat vector.
+  flat: (d) =>
+    `Tall vertical flat vector illustration, bold simple geometric shapes, no outlines, no gradients, a strict six-color palette, ` +
+    `of the Long Island City waterfront: a few stylized towers, the Pepsi-Cola sign as a red shape, the river as a flat band, the skyline as a silhouette. ` +
+    `Weather and light as simple symbols that match these exact conditions: ${d.facts} ` +
+    `A sun or moon circle with the exact phase, clouds as rounded blobs covering ${d.cloud} percent of the sky, rain as short dashes, wind as curved lines. ` +
+    `Large flat sky color at the top. ${NO_TEXT}`,
+
+  // Blueprint / cyanotype.
+  blueprint: (d) =>
+    `Tall vertical cyanotype blueprint, white line drawing on deep Prussian blue paper with faint grid, ` +
+    `an engineer's elevation drawing of a rooftop weather station in Long Island City: an anemometer, a wind vane, a rain gauge, a thermometer, a barometer, ` +
+    `with the skyline as a thin outline behind. ` +
+    `Each instrument is drawn in the state matching these exact conditions, using needle positions, fill levels and vane direction rather than labels: ${d.facts} ` +
+    `The moon drawn as a precise astronomical diagram of its current phase in the upper corner. Keep the upper center empty blue paper. ${NO_TEXT}`,
+
+  // Long-exposure night / day street photo.
+  street: (d) =>
+    `Tall vertical street photograph on Vernon Boulevard in Long Island City, Queens: a low brick block, a corner deli awning, parked cars, bare or leafy trees as the season dictates, ` +
+    `shot on a 28mm lens with a slightly tilted horizon, documentary color film look. ` +
+    `Light and weather must match these exact conditions: ${d.facts} ` +
+    `${d.precip > 0 ? "Wet asphalt reflecting the lights, umbrellas absent, puddles. " : ""}` +
+    `The street sits in the lower third; the upper two thirds is sky and building tops. No readable signage, no people's faces. ${NO_TEXT}`,
 };
 
-export function buildPrompt(weather, now, styleName) {
+// Picks the prompt style. "random" chooses any style other than `avoid` (the
+// previous slot's style) so consecutive slots never look alike.
+export function buildPrompt(weather, now, styleName, avoid) {
   const names = Object.keys(STYLES);
-  const style = STYLES[styleName] ? styleName : names[Math.floor(Math.random() * names.length)];
+  let style = styleName;
+  if (!STYLES[style]) {
+    const pool = names.filter((n) => n !== avoid);
+    style = pool[Math.floor(Math.random() * pool.length)];
+  }
   return { style, prompt: STYLES[style](describe(weather, now)) };
 }
 
@@ -288,7 +399,8 @@ export function createVisuals({ dir, provider, style = "random", log = console.l
       const w = await weather();
       // Describe conditions as of the slot's start (or now, if generating late).
       const at = new Date(Math.max(slot, Date.now()));
-      const { style: used, prompt } = buildPrompt(w, at, style);
+      const previous = latestBefore(slot)?.style;
+      const { style: used, prompt } = buildPrompt(w, at, style, previous);
       log(`[visuals] generating slot ${new Date(slot).toISOString()} (${used}, ${provider.name}/${provider.model})`);
       const { buffer, ext, tokens, usd } = await provider.generate(prompt);
       const file = `${slot}.${ext}`;
