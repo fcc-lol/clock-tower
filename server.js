@@ -2,7 +2,7 @@ import express from "express";
 import Database from "better-sqlite3";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { createVisuals, providerFromEnv, loadDotenv } from "./visuals.js";
+import { createVisuals, createProvider, loadDotenv } from "./visuals.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -16,9 +16,10 @@ const port = 3118;
 const db = new Database(join(__dirname, "data.sqlite"));
 db.pragma("journal_mode = WAL");
 
-// AI-generated backdrops (see visuals.js). Without an API key the endpoint
-// still answers, with enabled:false, and the display shows a plain background.
-const provider = providerFromEnv();
+// AI-generated backdrops (see visuals.js). Without Google credentials the
+// endpoint still answers, with enabled:false, and the display shows a plain
+// background.
+const provider = await createProvider();
 const visuals = createVisuals({
   dir: join(__dirname, "generated"),
   provider,
@@ -29,7 +30,7 @@ visuals.start();
 console.log(
   provider
     ? `Backdrop generation on (${provider.name}/${provider.model}, style=${process.env.IMAGE_STYLE || "random"})`
-    : "Backdrop generation off (no API key; see .env.example)",
+    : "Backdrop generation off",
 );
 
 app.use(express.json());

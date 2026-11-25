@@ -11,6 +11,7 @@
 
 import { readdir, readFile, writeFile, mkdir, unlink } from "fs/promises";
 import { join } from "path";
+import { GoogleAuth } from "google-auth-library";
 import { fetchWeather, WMO, moonPhase, toDate } from "./src/lib/sky.js";
 
 export const SLOT_MS = 15 * 60 * 1000;
@@ -175,28 +176,41 @@ export function buildPrompt(weather, now, styleName) {
 }
 
 // ---------------------------------------------------------------------------
-// Image provider: Google Gemini (Nano Banana)
+// Image provider: Gemini Nano Banana on Vertex AI, authenticated with
+// Application Default Credentials (no API key). ADC is found automatically
+// from GOOGLE_APPLICATION_CREDENTIALS (a service-account JSON file), from
+// `gcloud auth application-default login`, or from the GCE metadata server.
 // ---------------------------------------------------------------------------
 
-async function geminiGenerate(prompt, cfg) {
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${cfg.model}:generateContent`,
-    {
-      method: "POST",
-      headers: { "x-goog-api-key": cfg.key, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          responseModalities: ["IMAGE"],
-          imageConfig: { aspectRatio: "9:16", imageSize: "1K" },
-        },
-      }),
+const SCOPES = ["https://www.googleapis.com/auth/cloud-platform"];
+
+// Vertex endpoint for a model. Nano Banana 2.1 is only served from "global".
+export function vertexUrl({ project, location, model }) {
+  const host = location === "global" ? "aiplatform.googleapis.com" : `${location}-aiplatform.googleapis.com`;
+  return `https://${host}/v1/projects/${project}/locations/${location}/publishers/google/models/${model}:generateContent`;
+}
+
+export async function vertexGenerate(prompt, cfg, fetchFn = fetch) {
+  const token = await cfg.auth.getAccessToken();
+  const res = await fetchFn(vertexUrl(cfg), {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "x-goog-user-project": cfg.project,
+      "Content-Type": "application/json",
     },
-  );
-  if (!res.ok) throw new Error(`gemini ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseModalities: ["TEXT", "IMAGE"],
+        imageConfig: { aspectRatio: "9:16", imageSize: "1K" },
+      },
+    }),
+  });
+  if (!res.ok) throw new Error(`vertex ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const json = await res.json();
   const part = json.candidates?.[0]?.content?.parts?.find((p) => p.inlineData);
-  if (!part) throw new Error("gemini returned no image");
+  if (!part) throw new Error("vertex returned no image: " + JSON.stringify(json).slice(0, 300));
   const ext = /png/.test(part.inlineData.mimeType) ? "png" : "jpg";
   // Image output is billed at $30 per million tokens; a 1K image is a flat
   // 1120 tokens ($0.0336) on Nano Banana 2.1. Prefer the reported count.
@@ -205,12 +219,27 @@ async function geminiGenerate(prompt, cfg) {
   return { buffer: Buffer.from(part.inlineData.data, "base64"), ext, tokens, usd: (tokens / 1e6) * 30 };
 }
 
-// Returns null when no GEMINI_API_KEY is set, which turns generation off.
-export function providerFromEnv(env = process.env) {
-  const key = env.GEMINI_API_KEY;
-  if (!key) return null;
-  const cfg = { key, model: env.IMAGE_MODEL || "gemini-nano-banana-2.1" };
-  return { name: "gemini", model: cfg.model, generate: (prompt) => geminiGenerate(prompt, cfg) };
+// Resolves credentials and project up front. Returns null (generation off)
+// when ADC can't be found or no project is known, and says why.
+export async function createProvider(env = process.env, log = console.log) {
+  const cfg = {
+    project: env.GOOGLE_CLOUD_PROJECT || env.GCLOUD_PROJECT,
+    location: env.GOOGLE_CLOUD_LOCATION || "global",
+    model: env.IMAGE_MODEL || "gemini-nano-banana-2.1",
+  };
+  try {
+    cfg.auth = new GoogleAuth({ scopes: SCOPES });
+    await cfg.auth.getClient();
+    if (!cfg.project) cfg.project = await cfg.auth.getProjectId().catch(() => undefined);
+  } catch (err) {
+    log(`[visuals] no Google credentials found (${err.message}); backdrop generation off. See .env.example.`);
+    return null;
+  }
+  if (!cfg.project) {
+    log("[visuals] credentials found but no project: set GOOGLE_CLOUD_PROJECT in .env. Backdrop generation off.");
+    return null;
+  }
+  return { name: `vertex:${cfg.project}`, model: cfg.model, generate: (prompt) => vertexGenerate(prompt, cfg) };
 }
 
 // ---------------------------------------------------------------------------

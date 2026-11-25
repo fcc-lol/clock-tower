@@ -18,9 +18,9 @@ Deployed at https://clock-tower.fcc.lol (pushes to `main` auto-deploy via GitHub
 - The browser polls `/api/visual` every 30 s. That poll is also the "someone is watching" heartbeat: if nothing has polled for 2 minutes, generation stops, so an idle server costs nothing.
 - Images and their prompts land in `generated/` (gitignored, last 12 kept) and are served at `/generated/<slot>.jpg`.
 - Three prompt styles live in `visuals.js`: `skyline` (painterly LIC waterfront), `poster` (abstract data poster where each metric is a shape) and `lookup` (cinematic shot up between LIC towers). `IMAGE_STYLE` picks one, or `random` rotates per slot.
-- Without an API key the display runs with a plain black backdrop.
+- Without Google credentials the display runs with a plain black backdrop.
 
-Configure via a `.env` file next to `server.js` (see `.env.example`): `GEMINI_API_KEY` for Google's Nano Banana (default, `gemini-nano-banana-2.1`, about $0.034 per image, so roughly $3.20/day if the screen is on around the clock). Check the pipeline end to end with:
+Images come from Google's Nano Banana (`gemini-nano-banana-2.1`) on Vertex AI, about $0.034 per image, so roughly $3.20/day if the screen is on around the clock. Auth is Application Default Credentials, not an API key: either `gcloud auth application-default login` run once as the user that runs `server.js`, or a service-account JSON file named by `GOOGLE_APPLICATION_CREDENTIALS`. The project to bill goes in a `.env` next to `server.js` as `GOOGLE_CLOUD_PROJECT` (see `.env.example`). Check the pipeline end to end with:
 
 ```sh
 npm run visual:test -- poster          # generates generated/test-poster.jpg
@@ -50,20 +50,48 @@ cd clock-tower
 npm install
 ```
 
-### 3. Add the image API key
+### 3. Google Cloud credentials for the backdrops
+
+Skip this whole step to run with a plain black backdrop.
+
+You need a Google Cloud project with billing enabled and the Vertex AI API turned on (`gcloud services enable aiplatform.googleapis.com`, or Console → APIs & Services). Your account needs the Vertex AI User role on it.
+
+Install the gcloud CLI on the Pi:
+
+```sh
+sudo apt install -y apt-transport-https ca-certificates gnupg curl
+curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list
+sudo apt update && sudo apt install -y google-cloud-cli
+```
+
+Log in once, as the same user the service will run as (`pi` in the unit file below), so the credentials land in that user's home:
+
+```sh
+gcloud auth application-default login
+gcloud auth application-default set-quota-project YOUR_PROJECT_ID
+```
+
+Then tell the app which project to bill:
 
 ```sh
 cp .env.example .env
-# then put your key in .env
+# edit .env: GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID
 ```
 
-Skip this to run with a plain black backdrop.
+If your org lets you create service-account keys, you can use one instead of logging in: put the JSON on the Pi and set `GOOGLE_APPLICATION_CREDENTIALS=/path/to/it.json` in `.env`. A service account avoids the periodic re-login some org policies force on user credentials.
 
 ### 4. Build and run
 
 ```sh
 npm run build
 npm start
+```
+
+Before starting the server, prove the credentials work with one real render:
+
+```sh
+npm run visual:test -- skyline
 ```
 
 Then open `http://localhost:3118/?onDevice=true` and confirm the clock is ticking. The first backdrop appears after the first generation finishes (roughly a minute).
