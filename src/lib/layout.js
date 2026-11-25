@@ -81,6 +81,12 @@ export const STYLE_LAYOUTS = {
   flat: L({ display_font: "outfit", body_font: "outfit", body_weight: "light", time_size: 270, uppercase: false, tracking: "normal", align: "left" }),
   blueprint: L({ display_font: "share_tech", body_font: "share_tech", time_size: 230, ink: "#eaf4ff", accent: "#a9cdf5" }),
   street: L({ display_font: "dm_mono", body_font: "dm_mono", time_size: 215, align: "left", ink: "#ffb84a", accent: "#ffd79a" }),
+  artdeco: L({ display_font: "abril", body_font: "outfit", body_weight: "light", ink: "#f8f0dc", accent: "#e2bd6a" }),
+  mosaic: L({ display_font: "archivo", body_font: "archivo", ink: "#f6f1e6", accent: "#e8c98a" }),
+  stainedglass: L({ display_font: "playfair", body_font: "playfair", uppercase: false, tracking: "normal", ink: "#fdf6e3", accent: "#f2c66d", scrim: "full" }),
+  isometric: L({ display_font: "outfit", body_font: "outfit", body_weight: "light", uppercase: false, tracking: "normal", align: "left" }),
+  isobar: L({ display_font: "plex_mono", body_font: "plex_mono", time_weight: "light", time_size: 215, ink: "#eef7f1", accent: "#9fd8bd", scrim: "full" }),
+  engraving: L({ display_font: "cormorant", body_font: "cormorant", time_weight: "regular", time_size: 300, uppercase: false, italic: true, tracking: "normal", ink: "#f4efe2", accent: "#d8c9a3" }),
 };
 
 const HEX = /^#[0-9a-f]{6}$/i;

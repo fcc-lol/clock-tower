@@ -450,6 +450,61 @@ export const STYLES = {
     `Light and weather match these conditions: ${d.scene} ` +
     `${d.falling === "snow" ? "Fresh snow on the cars and sidewalk. " : d.falling ? "Wet asphalt and puddles reflecting the lights. " : "Dry pavement. "}` +
     `${LOW_SUBJECT} Blank signs, no people. ${FINISH}`,
+
+  // 1930s Art Deco poster.
+  artdeco: (d) =>
+    `Tall vertical 1930s Art Deco poster, lithographed in a few flat inks with metallic gold accents and fine airbrushed gradients: ` +
+    `the towers of Long Island City and the Manhattan skyline stylized into stepped, streamlined monumental forms rising from the East River, the Queensboro Bridge as a sweeping geometric arc, ` +
+    `bold symmetry and strong radiating lines in the sky. ` +
+    `The sky's rays, bands and palette express these conditions: ${d.scene} ` +
+    `In the sky: ${symbol(d, "as a stylized Deco disc with radiating lines")}; clouds as layered streamlined bands` +
+    `${d.falling === "snow" ? "; snow as a pattern of small stars" : d.falling ? "; rain as ruled parallel diagonals" : ""}. ` +
+    `${LOW_SUBJECT} ${FINISH}`,
+
+  // Subway-station tile mosaic.
+  mosaic: (d) =>
+    `Tall vertical glazed ceramic tile mosaic in the style of the art mosaics in New York City subway stations: thousands of small hand-cut tesserae with visible grout lines, slight irregularity and a soft glaze sheen. ` +
+    `It depicts the Long Island City waterfront: the gantries, the river in rippling bands of tile, the Manhattan skyline as simple tiled silhouettes. ` +
+    `Tile colors and patterns express these conditions: ${d.scene} ` +
+    `The sky fills the upper two thirds in flowing courses of tile that follow the shapes of the clouds, with ${symbol(d, "as a disc of radiating tiles")}` +
+    `${d.falling === "snow" ? "; snow as scattered white tiles" : d.falling ? "; rain as diagonal lines of pale tiles" : ""}. ` +
+    `${LOW_SUBJECT} ${FINISH}`,
+
+  // Stained glass.
+  stainedglass: (d) =>
+    `Tall vertical stained glass window in the manner of Tiffany studios, lit from behind: richly colored, streaked and mottled glass pieces joined by dark lead came, glowing against a dark surround. ` +
+    `It shows the Queensboro Bridge and the East River from Long Island City, the skyline as faceted glass shapes. ` +
+    `The colors of the glass express these conditions: ${d.scene} ` +
+    `The sky is large flowing pieces of streaky glass following the cloud shapes, with ${symbol(d, "as a single round piece of glowing glass")}` +
+    `${d.falling === "snow" ? "; snow as small white roundels" : d.falling ? "; rain as thin slanted slivers of pale glass" : ""}. ` +
+    `Deep, saturated, jewel-dark glass overall. ${LOW_SUBJECT} ${FINISH}`,
+
+  // Isometric miniature.
+  isometric: (d) =>
+    `Tall vertical isometric illustration, crisp and charming, in the style of a meticulously drawn editorial infographic: a small floating slab of Long Island City seen from above at a 30 degree isometric angle, ` +
+    `with a few towers, a brick warehouse, the gantries on their pier, a slice of the East River and a tiny elevated train, every edge clean, flat colors with soft gradient shading. ` +
+    `The slab sits in the lower third against a big plain backdrop that is the color of the sky. The weather happens over the little city, matching these conditions: ${d.scene} ` +
+    `Small stylized clouds hover over the slab covering about ${d.cloud} percent of it` +
+    `${d.falling === "snow" ? ", dropping tiny snowflakes that settle on the roofs" : d.falling ? ", dropping tiny rain streaks, the streets wet" : ""}` +
+    `${d.isDark ? "; it is dark, so the tiny windows and street lamps are lit" : ""}; ${symbol(d, "as a simple disc above")}. ${FINISH}`,
+
+  // Meteorological chart.
+  isobar: (d) =>
+    `Tall vertical hand-drafted meteorological chart in fine white and pale-colored ink on deep slate-green paper, like a beautiful vintage synoptic weather map: ` +
+    `sweeping concentric isobar contour lines, wind barbs, station-model circles, front lines with their triangles and semicircles, and a faint outline of the New York harbor coastline with Long Island City marked by a small ring. ` +
+    `No labels or figures; everything is line and symbol. The chart is drawn for these readings: ${d.facts} ` +
+    `${d.wind >= 20 ? "The isobars are packed tightly together, with long wind barbs. " : d.wind >= 8 ? "The isobars are moderately spaced, with short wind barbs. " : "The isobars are wide apart and lazy, with almost no wind barbs. "}` +
+    `${d.falling ? `Fine hatching marks the area of ${d.falling}. ` : ""}` +
+    `${d.cloud >= 85 ? "The station circles are fully filled in for overcast sky. " : d.cloud >= 30 ? "The station circles are half filled for partial cloud. " : "The station circles are open for clear sky. "}` +
+    `Elegant, sparse composition with large areas of empty paper. ${FINISH}`,
+
+  // Antique engraved almanac plate.
+  engraving: (d) =>
+    `Tall vertical antique copperplate engraving printed in cream-white ink on very dark indigo paper, like a plate from a 19th century atlas of the heavens and the weather: ` +
+    `exquisitely fine cross-hatching and stipple. In the lower third, an engraved view of the East River with the Queensboro Bridge and the Manhattan skyline. ` +
+    `Above it, the sky is engraved as a study of the atmosphere under these conditions: ${d.scene} ` +
+    `Clouds built from swirling parallel engraved lines${d.falling === "snow" ? ", snow as fine stipple" : d.falling ? ", rain as long ruled diagonals" : ""}${d.wind >= 12 ? ", wind as long flowing streamlines" : ""}, ` +
+    `and ${symbol(d, "engraved with radiating lines")}. One restrained second ink color, used sparingly. ${FINISH}`,
 };
 
 // Picks the prompt style. "random" chooses any style other than `avoid` (the
