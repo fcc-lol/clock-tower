@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import styled from "styled-components";
+import { WMO, moonPhase, nextSunEvent, fetchWeather } from "./lib/sky.js";
 
 // Fixed design dimensions — everything is authored at this exact size.
 const STAGE_W = 1080;
@@ -12,86 +13,6 @@ const tilt = (prev) => {
   const dir = prev === undefined ? (Math.random() < 0.5 ? -1 : 1) : -Math.sign(prev) || 1;
   return dir * (8 + Math.random() * 10);
 };
-
-// Long Island City, NY (ZIP 11101).
-const LAT = 40.7447;
-const LON = -73.9485;
-const WEATHER_URL =
-  `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}` +
-  `&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,uv_index` +
-  `&daily=sunrise,sunset&timezone=America%2FNew_York&forecast_days=2` +
-  `&temperature_unit=fahrenheit&wind_speed_unit=mph`;
-const AQI_URL =
-  `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${LAT}&longitude=${LON}` +
-  `&current=us_aqi&timezone=America%2FNew_York`;
-
-// WMO weather interpretation codes -> icon + label.
-const WMO = {
-  0: ["☀️", "Clear sky"],
-  1: ["🌤️", "Mainly clear"],
-  2: ["⛅", "Partly cloudy"],
-  3: ["☁️", "Overcast"],
-  45: ["🌫️", "Fog"],
-  48: ["🌫️", "Rime fog"],
-  51: ["🌦️", "Light drizzle"],
-  53: ["🌦️", "Drizzle"],
-  55: ["🌦️", "Heavy drizzle"],
-  56: ["🌧️", "Freezing drizzle"],
-  57: ["🌧️", "Freezing drizzle"],
-  61: ["🌧️", "Light rain"],
-  63: ["🌧️", "Rain"],
-  65: ["🌧️", "Heavy rain"],
-  66: ["🌧️", "Freezing rain"],
-  67: ["🌧️", "Freezing rain"],
-  71: ["🌨️", "Light snow"],
-  73: ["🌨️", "Snow"],
-  75: ["❄️", "Heavy snow"],
-  77: ["🌨️", "Snow grains"],
-  80: ["🌦️", "Light showers"],
-  81: ["🌧️", "Showers"],
-  82: ["⛈️", "Violent showers"],
-  85: ["🌨️", "Snow showers"],
-  86: ["❄️", "Snow showers"],
-  95: ["⛈️", "Thunderstorm"],
-  96: ["⛈️", "Thunderstorm, hail"],
-  99: ["⛈️", "Thunderstorm, hail"],
-};
-
-// Current moon phase from the synodic cycle, referenced to a known new moon
-// (2000-01-06 18:14 UTC). Returns a human label.
-const MOON_PHASES = [
-  "New Moon",
-  "Waxing Crescent",
-  "First Quarter",
-  "Waxing Gibbous",
-  "Full Moon",
-  "Waning Gibbous",
-  "Last Quarter",
-  "Waning Crescent",
-];
-function moonPhase(date) {
-  const SYNODIC = 29.530588853;
-  const REF = Date.UTC(2000, 0, 6, 18, 14) / 86400000; // days
-  const days = date.getTime() / 86400000 - REF;
-  const frac = ((days % SYNODIC) + SYNODIC) % SYNODIC / SYNODIC;
-  // 8 segments centered on the named phases.
-  return MOON_PHASES[Math.floor(frac * 8 + 0.5) % 8];
-}
-
-// Given the daily sunrise/sunset arrays (local ISO strings) and now, return the
-// next event and how long until it.
-function nextSunEvent(daily, now) {
-  if (!daily) return null;
-  const events = [];
-  daily.sunrise.forEach((t) => events.push({ label: "Sunrise", at: new Date(t) }));
-  daily.sunset.forEach((t) => events.push({ label: "Sunset", at: new Date(t) }));
-  const upcoming = events
-    .filter((e) => e.at > now)
-    .sort((a, b) => a.at - b.at)[0];
-  if (!upcoming) return null;
-  const mins = Math.round((upcoming.at - now) / 60000);
-  return { label: upcoming.label, h: Math.floor(mins / 60), m: mins % 60 };
-}
 
 // Dark backdrop fills the browser; the stage is centered within it.
 const Viewport = styled.div`
@@ -141,6 +62,7 @@ const Line = styled.div`
   letter-spacing: ${(p) => (p.$big ? "4px" : "2px")};
   font-variant-numeric: tabular-nums;
   text-align: center;
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.55), 0 0 2px rgba(0, 0, 0, 0.6);
   transform: rotate(${(p) => p.$rot}deg);
   transition: transform 1.2s cubic-bezier(0.22, 1, 0.36, 1);
 `;
@@ -158,37 +80,36 @@ function TiltLine({ big, epoch, children }) {
   );
 }
 
-// Full-stage background layer. The 16:9 source is rotated 90° and sized so it
-// covers the 1080x1920 portrait stage (1920x1080 rotated = 1080 wide x 1920 tall).
-const VideoBackground = styled.div`
+// Full-stage backdrop: the AI-generated image for the current 15-minute slot
+// (see visuals.js on the server). A light scrim keeps the text readable on
+// bright renders. Swaps are a hard cut, so the change on the quarter-hour is
+// visible.
+const Backdrop = styled.div`
   position: absolute;
   inset: 0;
   z-index: 0;
-  overflow: hidden;
+  background: #000;
 
-  iframe,
-  video {
+  img {
     position: absolute;
-    top: 50%;
-    left: 50%;
-    width: ${STAGE_H}px;
-    height: ${STAGE_W}px;
-    border: 0;
-    transform: translate(-50%, -50%) rotate(90deg);
-    pointer-events: none;
-  }
-
-  video {
+    inset: 0;
+    width: 100%;
+    height: 100%;
     object-fit: cover;
   }
-`;
 
-const Location = styled.div`
-  font-size: 34px;
-  font-weight: 400;
-  letter-spacing: 3px;
-  text-transform: uppercase;
-  color: #5b6275;
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      180deg,
+      rgba(0, 0, 0, 0.3) 0%,
+      rgba(0, 0, 0, 0.12) 40%,
+      rgba(0, 0, 0, 0.12) 60%,
+      rgba(0, 0, 0, 0.35) 100%
+    );
+  }
 `;
 
 // Scale the stage so it fits inside the current viewport while preserving the
@@ -233,15 +154,8 @@ function useWeather() {
     let active = true;
     const load = async () => {
       try {
-        const [wxRes, aqRes] = await Promise.all([
-          fetch(WEATHER_URL),
-          fetch(AQI_URL),
-        ]);
-        const wx = await wxRes.json();
-        const aq = await aqRes.json();
-        if (active) {
-          setWeather({ ...wx.current, daily: wx.daily, aqi: aq.current?.us_aqi });
-        }
+        const w = await fetchWeather();
+        if (active) setWeather(w);
       } catch {
         // Leave previous reading in place on a failed refresh.
       }
@@ -256,11 +170,72 @@ function useWeather() {
   return weather;
 }
 
+// If the server is running a newer build than this page, reload once to pick
+// it up (the kiosk has no keyboard). The sessionStorage guard stops a reload
+// loop if a stale copy somehow survives the reload.
+function reloadIfNewBuild(serverBuild) {
+  if (!serverBuild || serverBuild === __BUILD_ID__) return;
+  let already = null;
+  try {
+    already = sessionStorage.getItem("reloadedFor");
+    sessionStorage.setItem("reloadedFor", serverBuild);
+  } catch {}
+  if (already !== serverBuild) window.location.reload();
+}
+
+// Polls /api/visual (which also tells the server someone is watching, so it
+// keeps generating), preloads the next slot's image, and returns the one that
+// should be on screen right now. The swap happens on the client's own clock
+// the moment the slot boundary passes, so it's instant rather than waiting for
+// the next poll. Polling pauses while the tab is hidden.
+function useBackdrop(now) {
+  const [visual, setVisual] = useState(null);
+  const [ready, setReady] = useState({}); // url -> true once decoded
+
+  useEffect(() => {
+    let active = true;
+    const poll = async () => {
+      if (document.visibilityState === "hidden") return;
+      try {
+        const res = await fetch("/api/visual", { cache: "no-store" });
+        const v = await res.json();
+        reloadIfNewBuild(v.build);
+        if (active) setVisual(v);
+      } catch {
+        // Keep showing whatever we have.
+      }
+    };
+    poll();
+    const id = setInterval(poll, 30 * 1000);
+    document.addEventListener("visibilitychange", poll);
+    return () => {
+      active = false;
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", poll);
+    };
+  }, []);
+
+  // Decode both images ahead of time so the cut is clean.
+  useEffect(() => {
+    for (const m of [visual?.current, visual?.next]) {
+      if (!m || ready[m.url]) continue;
+      const img = new Image();
+      img.onload = () => setReady((r) => ({ ...r, [m.url]: true }));
+      img.src = m.url;
+    }
+  }, [visual]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const { current, next } = visual || {};
+  const shown = next && now.getTime() >= next.slot && ready[next.url] ? next : current;
+  return shown && ready[shown.url] ? shown : null;
+}
+
 function App() {
   const scale = useStageScale();
   const now = useNow();
   const weather = useWeather();
   const epoch = useTiltEpoch();
+  const backdrop = useBackdrop(now);
   const onDevice =
     new URLSearchParams(window.location.search).get("onDevice") === "true";
 
@@ -283,20 +258,7 @@ function App() {
   return (
     <Viewport $onDevice={onDevice}>
       <Stage $scale={scale}>
-        <VideoBackground>
-          {onDevice ? (
-            // On-device installs play a locally downloaded copy of the video
-            // (see README) instead of streaming the YouTube embed.
-            <video src="/background.mp4" autoPlay muted loop playsInline />
-          ) : (
-            <iframe
-              src="https://www.youtube.com/embed/uejy_W2eD_s?autoplay=1&mute=1&loop=1&playlist=uejy_W2eD_s&controls=0&playsinline=1&rel=0&modestbranding=1&disablekb=1&fs=0&iv_load_policy=3"
-              title="YouTube video"
-              allow="autoplay; encrypted-media"
-              allowFullScreen
-            />
-          )}
-        </VideoBackground>
+        <Backdrop>{backdrop && <img key={backdrop.url} src={backdrop.url} alt="" />}</Backdrop>
         <Content>
           <TiltLine big epoch={epoch}>{time}</TiltLine>
           <TiltLine epoch={epoch}>{date}</TiltLine>
