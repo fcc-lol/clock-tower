@@ -195,7 +195,9 @@ async function openaiGenerate(prompt, cfg) {
   });
   if (!res.ok) throw new Error(`openai ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const json = await res.json();
-  return { buffer: Buffer.from(json.data[0].b64_json, "base64"), ext: "jpg" };
+  // gpt-image-2.5 bills $30 per million image output tokens.
+  const tokens = json.usage?.output_tokens;
+  return { buffer: Buffer.from(json.data[0].b64_json, "base64"), ext: "jpg", tokens, usd: tokens != null ? (tokens / 1e6) * 30 : undefined };
 }
 
 async function geminiGenerate(prompt, cfg) {
@@ -279,14 +281,14 @@ export function createVisuals({ dir, provider, style = "random", log = console.l
       const at = new Date(Math.max(slot, Date.now()));
       const { style: used, prompt } = buildPrompt(w, at, style);
       log(`[visuals] generating slot ${new Date(slot).toISOString()} (${used}, ${provider.name}/${provider.model})`);
-      const { buffer, ext } = await provider.generate(prompt);
+      const { buffer, ext, tokens, usd } = await provider.generate(prompt);
       const file = `${slot}.${ext}`;
-      const meta = { slot, file, url: `/generated/${file}`, style: used, prompt, provider: provider.name, model: provider.model, createdAt: new Date().toISOString(), ms: Date.now() - started };
+      const meta = { slot, file, url: `/generated/${file}`, style: used, prompt, provider: provider.name, model: provider.model, createdAt: new Date().toISOString(), ms: Date.now() - started, tokens, usd };
       await writeFile(join(dir, file), buffer);
       await writeFile(join(dir, `${slot}.json`), JSON.stringify(meta, null, 2));
       images.set(slot, meta);
       lastFailure = null;
-      log(`[visuals] done in ${Math.round(meta.ms / 1000)}s -> ${file}`);
+      log(`[visuals] done in ${Math.round(meta.ms / 1000)}s -> ${file}` + (usd != null ? ` (${tokens} tokens, ~$${usd.toFixed(4)})` : ""));
       await prune();
     } catch (err) {
       lastFailure = { slot, at: Date.now(), error: String(err.message || err) };

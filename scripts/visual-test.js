@@ -28,8 +28,8 @@ if (!provider) {
 }
 console.log(`generating with ${provider.name}/${provider.model}…`);
 const t = Date.now();
-const { buffer, ext } = await provider.generate(prompt);
+const { buffer, ext, tokens, usd } = await provider.generate(prompt);
 await mkdir(join(root, "generated"), { recursive: true });
 const out = join(root, "generated", `test-${used}.${ext}`);
 await writeFile(out, buffer);
-console.log(`wrote ${out} in ${Math.round((Date.now() - t) / 1000)}s`);
+console.log(`wrote ${out} in ${Math.round((Date.now() - t) / 1000)}s` + (usd != null ? ` (${tokens} output tokens, ~$${usd.toFixed(4)} per image, ~$${(usd * 96).toFixed(2)}/day at 96 images)` : ""));
