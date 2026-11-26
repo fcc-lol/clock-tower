@@ -17,15 +17,15 @@ Deployed at https://clock-tower.fcc.lol (pushes to `main` auto-deploy via GitHub
 
 - The browser polls `/api/visual` every 30 s. That poll is also the "someone is watching" heartbeat: if nothing has polled for 2 minutes, generation stops, so an idle server costs nothing.
 - Images and their prompts land in `generated/` (gitignored, last 12 kept) and are served at `/generated/<slot>.jpg`.
-- Fifteen prompt styles live in `visuals.js`, deliberately far apart in medium and viewpoint: painterly skyline, risograph data poster, cinematic look-up between towers, apartment window, 7 train platform, ukiyo-e woodblock, pixel art, satellite view, cut-paper collage, watercolor, neon synthwave, charcoal sketch, flat vector, cyanotype blueprint and street photo. `IMAGE_STYLE` pins one; the default `random` picks a different style from the previous slot every time.
+- Twelve prompt styles live in `visuals.js`. Each is a matched pair of picture and lettering, with the lettering art-directed by hand in `STYLE_TYPE` (`src/lib/layout.js`): a seven-segment LED clock over a neon megacity, pencil handwriting on a sketchbook page, pixel type on isometric pixel art, an LED dot-matrix sign, chalk on a blackboard, terminal text on a phosphor vector display, a typewritten label in a field journal, comic lettering on a pop-art panel, blackletter over a book-of-hours miniature, a four-shade handheld LCD, stencilled numerals on a street-art wall and wood type on a letterpress broadside. `IMAGE_STYLE` pins one; the default `random` picks a different style from the previous slot every time.
 - Without Google credentials the display runs with a plain black backdrop.
 - Each build gets an id (`dist/build-id.txt`) that the server reports from `/api/visual`. A running display reloads itself when that changes, so after `npm run build` + a server restart the kiosk picks up the new version on its next poll (within 30 s) with no keyboard needed.
 
 Images come from Google's Nano Banana (`gemini-nano-banana-2.1`) on Vertex AI, about $0.034 per image, so roughly $3.20/day if the screen is on around the clock. Auth is Application Default Credentials, not an API key: either `gcloud auth application-default login` run once as the user that runs `server.js`, or a service-account JSON file named by `GOOGLE_APPLICATION_CREDENTIALS`. The project to bill goes in a `.env` next to `server.js` as `GOOGLE_CLOUD_PROJECT` (see `.env.example`). Check the pipeline end to end with:
 
 ```sh
-npm run visual:test -- poster          # generates generated/test-poster.jpg
-npm run visual:test -- skyline --dry   # prints the prompt only, no API call
+npm run visual:test -- cyberpunk       # generates generated/test-cyberpunk.jpg
+npm run visual:test -- sketchbook --dry # prints the prompt only, no API call
 ```
 
 ## First-time setup on a new device (Raspberry Pi)
@@ -92,7 +92,7 @@ npm start
 Before starting the server, prove the credentials work with one real render:
 
 ```sh
-npm run visual:test -- skyline
+npm run visual:test -- cyberpunk
 ```
 
 Then open `http://localhost:3118/?onDevice=true` and confirm the clock is ticking. The first backdrop appears after the first generation finishes (roughly a minute).
@@ -157,3 +157,17 @@ npm run dev
 ```
 
 Vite dev server for the display only. The backdrop comes from the Express server, so to see it during development run `npm run build && npm start` and open port 3118, or point a dev proxy at it.
+
+### Iterating on the styles
+
+`/styles` on the Express server shows every style's latest preview side by side, with the prompt that made it and the layout Claude chose. Previews live in `generated/preview/`, apart from the live slots.
+
+```sh
+npm run build                          # once, so the "Readouts" toggle and full-size links work
+STYLE_LAB=1 node --watch server.js     # restarts when visuals.js changes
+open http://localhost:3118/styles
+```
+
+Edit a prompt in `visuals.js`, then hit Regenerate on that tile. Generating from the page is only on with `STYLE_LAB=1` (each image is billed like a live one); without it the page is a read-only gallery of whatever `npm run visual:preview -- all` has made. "Readouts" swaps each image for the real display page (`/?preview=<style>`) with its type on top.
+
+Each layout picks one of four compositions (`stack`, `masthead`, `monument`, `caption`; see `ENUMS.composition` in `src/lib/layout.js`). Add `&composition=masthead` (etc.) to a `/?preview=<style>` URL to force one and compare them on the same image.

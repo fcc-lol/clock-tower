@@ -1,8 +1,8 @@
 // One-off check of the image pipeline: builds a prompt from live weather and,
 // if Google credentials are configured, generates one image into generated/test-*.
 //   npm run visual:test            # random style
-//   npm run visual:test -- poster  # specific style
-//   npm run visual:test -- poster --dry   # print the prompt only
+//   npm run visual:test -- crt     # specific style
+//   npm run visual:test -- crt --dry   # print the prompt only
 import { writeFile, mkdir } from "fs/promises";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";

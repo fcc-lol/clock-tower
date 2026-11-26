@@ -1,7 +1,7 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import styled from "styled-components";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import styled, { css } from "styled-components";
 import { WMO, moonPhase, nextSunEvent, fetchWeather } from "./lib/sky.js";
-import { FONTS, resolveLayout } from "./lib/layout.js";
+import { FONTS, ENUMS, resolveLayout } from "./lib/layout.js";
 import { fetchToday, factFor } from "./lib/today.js";
 
 // Fixed design dimensions — everything is authored at this exact size.
@@ -16,43 +16,77 @@ const STAGE_H = 1920;
 // a built-in layout per image style (src/lib/layout.js). The layout switches
 // in the same frame as the image. Here it is turned into concrete CSS values.
 // ---------------------------------------------------------------------------
-const PAD_X = 96;
+const PAD_X = 88;
+const PAD_Y = 120;
+const MEASURE = STAGE_W - PAD_X * 2;
 const WEIGHT = { light: 0, regular: 1, bold: 2 };
 const TRACK = { tight: -0.01, normal: 0.02, wide: 0.14 };
-const TIME_TRACK = { tight: -0.04, normal: -0.02, wide: 0.02 };
+const TIME_TRACK = { tight: -0.045, normal: -0.02, wide: 0.02 };
 const SCRIM = { light: 0.22, medium: 0.4, strong: 0.58 };
 const FLEX = { left: "flex-start", center: "center", right: "flex-end" };
 const JUSTIFY = { stack_top: "flex-start", stack_center: "center", stack_bottom: "flex-end", split: "space-between" };
 
+// The scrim fades out along an eased curve rather than a straight ramp, so it
+// reads as the picture getting darker, not as a band laid over it.
 function scrimOf(where, strength) {
   const s = SCRIM[strength];
-  const k = (a) => `rgba(0,0,0,${a.toFixed(3)})`;
-  if (where === "top") return `linear-gradient(180deg, ${k(s)} 0%, ${k(s * 0.6)} 45%, ${k(0)} 72%)`;
-  if (where === "bottom") return `linear-gradient(0deg, ${k(s)} 0%, ${k(s * 0.6)} 45%, ${k(0)} 72%)`;
-  if (where === "both") return `linear-gradient(180deg, ${k(s)} 0%, ${k(s * 0.5)} 30%, ${k(0)} 45%, ${k(0)} 55%, ${k(s * 0.5)} 70%, ${k(s)} 100%)`;
-  if (where === "full") return k(s * 0.75);
+  const k = (a) => `rgba(0,0,0,${(s * a).toFixed(3)})`;
+  const fade = (dir, end) => {
+    const stops = [[1, 0], [0.96, 0.3], [0.82, 0.5], [0.55, 0.68], [0.25, 0.83], [0.07, 0.93], [0, 1]];
+    return `linear-gradient(${dir}, ${stops.map(([a, at]) => `${k(a)} ${(at * end).toFixed(1)}%`).join(", ")})`;
+  };
+  if (where === "top") return fade("180deg", 90);
+  if (where === "bottom") return fade("0deg", 90);
+  if (where === "both") return `${fade("180deg", 48)}, ${fade("0deg", 48)}`;
+  if (where === "full") return k(0.75);
   return "none";
 }
 
 function themeOf(l) {
   const d = FONTS[l.display_font];
   const b = FONTS[l.body_font];
+  const comp = l.composition;
+  const masthead = comp === "masthead";
+  const monument = comp === "monument";
+  const k = comp === "caption" ? 0.7 : 1; // the caption is the same design, smaller
+  const italic = l.italic && Boolean(b.italic);
   return {
+    comp,
+    masthead,
+    monument,
     display: d.stack,
     body: b.stack,
     timeWeight: d.weights[WEIGHT[l.time_weight]],
     bodyWeight: b.weights[WEIGHT[l.body_weight]],
-    timeSize: l.time_size,
+    // Masthead fills the width from this size; monument stacks two huge lines.
+    timeSize: monument ? Math.min(l.time_size * 2.2, 600) : comp === "caption" ? Math.min(l.time_size, 250) * k * 1.12 : l.time_size * 1.12,
+    fill: masthead,
+    tempSize: l.time_size * 0.66 * k,
+    colon: d.colon ?? 0.06,
+    vary: d.opsz ? `"opsz" ${d.opsz}` : "normal",
+    ghost: Boolean(d.ghost),
+    ampm: d.digits ? b.stack : "inherit", // a digits-only face can't spell AM
+    effect: l.effect,
+    tilt: l.tilt || 0,
     upper: l.uppercase,
-    italic: l.italic && Boolean(b.italic),
+    italic,
+    // The fact reads as a pull quote where the face has an italic.
+    quote: Boolean(b.italic) && !l.uppercase,
+    caps: b.caps !== false,
     track: TRACK[l.tracking],
     timeTrack: TIME_TRACK[l.tracking],
-    scale: b.scale,
-    align: l.align,
-    flex: FLEX[l.align],
-    justify: JUSTIFY[l.arrangement],
-    split: l.arrangement === "split",
-    row: l.stats === "row",
+    s: b.scale * k,
+    k,
+    align: masthead ? "left" : l.align,
+    items: masthead ? "stretch" : FLEX[l.align],
+    flex: masthead ? "space-between" : FLEX[l.align],
+    side: l.align === "right" ? "right" : "left",
+    direction: monument && l.arrangement === "stack_bottom" ? "column-reverse" : "column",
+    justify: monument ? "space-between" : JUSTIFY[l.arrangement],
+    apart: monument || l.arrangement === "split",
+    // Big figures are hung a hair outside the margin so their stems line up
+    // optically with the small text under them.
+    hang: !masthead && !monument && l.align !== "center",
     ink: l.ink,
     accent: l.accent,
     scrim: scrimOf(l.scrim, l.scrim_strength),
@@ -86,16 +120,67 @@ const Stage = styled.div`
   user-select: none;
 `;
 
-// The readouts: a clock block and a weather block, placed where the layout
-// says (together at the top, middle or bottom, or split to both ends).
+// Every line is trimmed to its letters (cap height to baseline), so a margin
+// is exactly the visible gap, whatever the typeface or size: one gap between
+// all elements, and a smaller one between a label and its value.
+const trim = css`
+  text-box: trim-both cap alphabetic;
+`;
+const GAP = 60;
+const LABEL_GAP = 18;
+
+// Type effects that belong to a style's own lettering (STYLE_TYPE). Set on
+// every element so the em lengths follow each one's own size.
+const EFFECT = {
+  // Lit from within: LED segments, phosphor, neon.
+  glow: css`
+    &,
+    & * {
+      text-shadow: 0 0 0.05em currentColor, 0 0 0.22em currentColor, 0 0 0.6em currentColor;
+    }
+  `,
+  // Comic-book lettering: black outline with a hard drop.
+  comic: css`
+    &,
+    & * {
+      -webkit-text-stroke: 0.09em #111;
+      paint-order: stroke fill;
+      text-shadow: 0.055em 0.055em 0 #111;
+    }
+  `,
+  // Ink or graphite on paper: the type takes on the sheet's grain.
+  ink: css`
+    mix-blend-mode: multiply;
+  `,
+};
+
+// A seven-segment face shows its unlit segments faintly behind the lit ones.
+const ghostDigits = css`
+  b {
+    position: relative;
+    display: inline-block;
+    font-weight: inherit;
+  }
+  b::before {
+    content: attr(data-ghost);
+    position: absolute;
+    top: 0;
+    right: 0;
+    opacity: 0.13;
+    text-shadow: none;
+  }
+`;
+
+// The readouts: a clock block and a weather block, composed and placed as the
+// layout says (see ENUMS.composition in src/lib/layout.js).
 const Content = styled.div`
   position: absolute;
   inset: 0;
   z-index: 1;
   display: flex;
-  flex-direction: column;
+  flex-direction: ${(p) => p.$t.direction};
   justify-content: ${(p) => p.$t.justify};
-  padding: 150px ${PAD_X}px;
+  padding: ${PAD_Y}px ${PAD_X}px;
   font-family: ${(p) => p.$t.body};
   font-weight: ${(p) => p.$t.bodyWeight};
   font-style: ${(p) => (p.$t.italic ? "italic" : "normal")};
@@ -103,94 +188,180 @@ const Content = styled.div`
   text-transform: ${(p) => (p.$t.upper ? "uppercase" : "none")};
   letter-spacing: ${(p) => p.$t.track}em;
   font-variant-numeric: lining-nums tabular-nums;
+  font-optical-sizing: auto;
+  text-rendering: optimizeLegibility;
+  transform: ${(p) => (p.$t.tilt ? `rotate(${p.$t.tilt}deg)` : "none")};
+  ${(p) => EFFECT[p.$t.effect]}
 `;
 
 const Block = styled.div`
   display: flex;
   flex-direction: column;
-  align-items: ${(p) => p.$t.flex};
+  align-items: ${(p) => p.$t.items};
   text-align: ${(p) => p.$t.align};
 `;
 
+// The time. Proportional figures (tabular ones leave holes around the 1s at
+// this size), the colon lifted to sit centered on them, and AM/PM hung small
+// at the top of the figures.
 const Time = styled.div`
   font-family: ${(p) => p.$t.display};
   font-weight: ${(p) => p.$t.timeWeight};
   font-style: normal;
+  font-variant-numeric: lining-nums proportional-nums;
+  font-variation-settings: ${(p) => p.$t.vary};
   letter-spacing: ${(p) => p.$t.timeTrack}em;
   line-height: 1;
   white-space: nowrap;
+  /* The figures' own measured height, not the font's nominal cap height. */
+  ${(p) => !p.$t.monument && `margin-top: ${-p.$t.figTop}em; margin-bottom: ${-p.$t.figBottom}em;`}
+  gap: 0.13em; /* monument: between the hour and the minutes */
+  align-self: ${(p) => (p.$t.masthead ? "flex-start" : "auto")};
+  ${(p) => p.$t.hang && `margin-${p.$t.side}: -0.03em;`}
+  display: ${(p) => (p.$t.monument ? "flex" : "block")};
+  flex-direction: column;
+  align-items: ${(p) => p.$t.items};
+
+  i {
+    font-style: normal;
+    position: relative;
+    top: ${(p) => -p.$t.colon}em;
+    margin: 0 0.02em;
+  }
 
   small {
-    font-size: 0.26em;
+    display: inline-block;
+    font-size: 0.19em;
+    font-family: ${(p) => p.$t.ampm};
     font-weight: inherit;
-    letter-spacing: 0.06em;
-    margin-left: 0.3em;
+    line-height: 1;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     color: ${(p) => p.$t.accent};
+    vertical-align: top;
+    position: relative;
+    top: 0.72em;
+    margin-left: 0.4em;
   }
+
+  /* Monument: hour over minutes, AM/PM hung outside the hour. */
+  span {
+    display: block;
+    position: relative;
+    margin-top: ${(p) => -p.$t.figTop}em;
+    margin-bottom: ${(p) => -p.$t.figBottom}em;
+  }
+  span small {
+    position: absolute;
+    top: 1.5em;
+    font-size: 0.1em;
+    margin: 0 1em;
+    ${(p) => (p.$t.side === "right" ? "right: 100%;" : "left: 100%;")}
+  }
+  ${ghostDigits}
 `;
 
+// Below the time everything is set in three sizes only: a secondary size (the
+// date and the condition), a data size (values) and the label size. Capitals
+// run large, so an all-caps layout sets each a step smaller.
+const SECONDARY = (t) => (t.upper ? 48 : 60) * t.s;
+const DATA = (t) => (t.upper ? 38 : 46) * t.s;
+const LABEL = (t) => (t.caps ? 26 : 33) * t.s;
 const DateLine = styled.div`
-  margin-top: 34px;
-  font-size: ${(p) => 54 * p.$t.scale}px;
-  line-height: 1.2;
+  ${trim}
+  margin-top: ${(p) => GAP * p.$t.k}px;
+  font-size: ${(p) => SECONDARY(p.$t)}px;
+  line-height: 1.15;
+  white-space: nowrap;
+  display: flex;
+  justify-content: ${(p) => p.$t.flex};
+  ${(p) => p.$t.monument && `order: -1; margin: 0 0 ${GAP * 0.6}px; font-size: ${DATA(p.$t)}px; color: ${p.$t.accent};`}
 `;
 
 const Now = styled.div`
-  margin-top: ${(p) => (p.$t.split ? 0 : 96)}px;
+  margin-top: ${(p) => (p.$t.apart ? 0 : GAP * p.$t.k)}px;
   display: flex;
   align-items: baseline;
   justify-content: ${(p) => p.$t.flex};
   flex-wrap: wrap;
-  gap: 0 36px;
-  line-height: 1.05;
+  gap: 0 ${(p) => 40 * p.$t.k}px;
+  line-height: 1;
 `;
 
 const Temp = styled.span`
+  line-height: 1;
+  margin-top: ${(p) => -p.$t.figTop}em;
+  margin-bottom: ${(p) => -p.$t.figBottom}em;
   font-family: ${(p) => p.$t.display};
   font-style: normal;
-  font-size: ${(p) => p.$t.timeSize * 0.56}px;
+  font-variant-numeric: lining-nums proportional-nums;
+  font-variation-settings: ${(p) => p.$t.vary};
+  font-size: ${(p) => p.$t.tempSize}px;
   font-weight: ${(p) => p.$t.timeWeight};
   letter-spacing: ${(p) => p.$t.timeTrack}em;
+  ${(p) => p.$t.hang && `margin-${p.$t.side}: -0.03em;`}
+  ${ghostDigits}
 `;
 
+// Measured like the figures rather than trimmed in CSS, so it still lines up
+// on the temperature's baseline.
 const Cond = styled.span`
-  font-size: ${(p) => 60 * p.$t.scale}px;
+  line-height: 1;
+  margin-top: ${(p) => -p.$t.capTop}em;
+  margin-bottom: ${(p) => -p.$t.capBottom}em;
+  font-size: ${(p) => SECONDARY(p.$t)}px;
 `;
 
+// The four figures run as one strip on a shared baseline: spread to both
+// margins in a masthead, otherwise evenly spaced from the aligned edge. If a
+// wide face makes the strip longer than the measure it falls back to two rows
+// of two (data-grid is set by useStrip).
 const Stats = styled.div`
-  margin-top: 64px;
-  display: ${(p) => (p.$t.row ? "flex" : "grid")};
-  flex-wrap: wrap;
-  grid-template-columns: repeat(2, auto);
+  margin-top: ${(p) => GAP * p.$t.k}px;
+  display: flex;
   justify-content: ${(p) => p.$t.flex};
-  gap: ${(p) => (p.$t.row ? "40px 64px" : "46px 110px")};
+  gap: 0 ${(p) => (p.$t.masthead ? 34 : 54) * p.$t.k}px; /* a floor: the masthead spreads them wider */
+
+  &[data-grid] {
+    display: grid;
+    grid-template-columns: ${(p) => (p.$t.masthead ? "1fr 1fr" : "repeat(2, max-content)")};
+    gap: ${(p) => `${GAP * 0.75 * p.$t.k}px ${96 * p.$t.k}px`};
+  }
 `;
 
+// A small label over a value. Labels are always upright tracked capitals (where
+// the face can carry them), whatever the rest of the text is doing.
 const Stat = styled.div`
   span {
+    ${trim}
     display: block;
-    font-size: ${(p) => 28 * p.$t.scale}px;
-    letter-spacing: ${(p) => (p.$t.upper ? Math.max(p.$t.track, 0.18) : 0.04)}em;
+    font-size: ${(p) => LABEL(p.$t)}px;
+    font-style: normal;
+    line-height: 1.2;
+    white-space: nowrap;
+    text-transform: ${(p) => (p.$t.caps ? "uppercase" : "none")};
+    letter-spacing: ${(p) => (p.$t.caps ? 0.16 : 0.03)}em;
     color: ${(p) => p.$t.accent};
-    margin-bottom: 10px;
+    margin-bottom: ${(p) => LABEL_GAP * p.$t.k}px;
   }
   b {
+    ${trim}
     display: block;
     font-weight: inherit;
-    font-size: ${(p) => 50 * p.$t.scale}px;
-    line-height: 1.1;
+    font-size: ${(p) => DATA(p.$t)}px;
+    line-height: 1.15;
     white-space: nowrap;
   }
 `;
 
-// The "today" fact: set like a stat, but its value may wrap.
+// The "today" fact: set like a stat, but its value may wrap. Held to a
+// comfortable line length rather than the full measure.
 const Fact = styled(Stat)`
-  margin-top: 56px;
-  max-width: 100%;
+  margin-top: ${(p) => GAP * p.$t.k}px;
+  max-width: ${(p) => (p.$t.masthead ? "100%" : `${840 * p.$t.k}px`)};
   b {
-    font-size: ${(p) => 44 * p.$t.scale}px;
-    line-height: 1.18;
+    font-style: ${(p) => (p.$t.quote ? "italic" : "inherit")};
+    line-height: 1.22;
     white-space: normal;
     text-wrap: balance;
   }
@@ -307,16 +478,62 @@ function useFonts() {
 }
 
 // Sets an element's font size, shrinking it if the line would be wider than
-// the stage allows (a wide face at "12:00 PM" can otherwise run off the edge).
-function useFitFontSize(size, deps) {
+// the measure (a wide face at "12:00 PM" can otherwise run off the edge). With
+// `fill` it is scaled, up or down, to span the measure exactly.
+const FILL_MAX = 430;
+function useFitFontSize(size, fill, deps) {
   const ref = useRef(null);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const max = STAGE_W - PAD_X * 2;
     el.style.fontSize = `${size}px`;
-    if (el.offsetWidth > max) el.style.fontSize = `${Math.floor((size * max) / el.offsetWidth)}px`;
-  }, [size, ...deps]); // eslint-disable-line react-hooks/exhaustive-deps
+    const w = el.offsetWidth;
+    if (!w) return;
+    if (fill) el.style.fontSize = `${Math.min(Math.floor((size * MEASURE) / w), FILL_MAX)}px`;
+    else if (w > MEASURE) el.style.fontSize = `${Math.floor((size * MEASURE) / w)}px`;
+  }, [size, fill, ...deps]); // eslint-disable-line react-hooks/exhaustive-deps
+  return ref;
+}
+
+// How much empty space a line of figures carries above and below the digits
+// themselves, in em, at line-height 1. Measured from the face (the nominal cap
+// height is no guide: handwriting and pixel faces draw their digits well short
+// of it), so the gaps around the time and temperature come out exact.
+function useInkTrim(stack, weight, loaded, sample = "0123456789") {
+  return useMemo(() => {
+    const none = { top: 0, bottom: 0 };
+    try {
+      const size = 200;
+      const ctx = document.createElement("canvas").getContext("2d");
+      ctx.font = `${weight} ${size}px ${stack}`;
+      const m = ctx.measureText(sample);
+      const asc = m.fontBoundingBoxAscent;
+      const desc = m.fontBoundingBoxDescent;
+      if (!asc || !m.actualBoundingBoxAscent) return none;
+      const toBaseline = (size - (asc + desc)) / 2 + asc;
+      return {
+        top: (toBaseline - m.actualBoundingBoxAscent) / size,
+        bottom: (size - toBaseline - Math.max(0, m.actualBoundingBoxDescent)) / size,
+      };
+    } catch {
+      return none;
+    }
+  }, [stack, weight, loaded, sample]);
+}
+
+// Lays the stats out as one strip, or as two rows of two when the strip would
+// not fit the measure in this face.
+function useStrip(deps) {
+  const ref = useRef(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    delete el.dataset.grid;
+    const gap = parseFloat(getComputedStyle(el).columnGap) || 0;
+    const kids = [...el.children];
+    const width = kids.reduce((w, k) => w + k.offsetWidth, 0) + gap * Math.max(0, kids.length - 1);
+    if (width > MEASURE) el.dataset.grid = "";
+  }, deps); // eslint-disable-line react-hooks/exhaustive-deps
   return ref;
 }
 
@@ -337,12 +554,14 @@ function reloadIfNewBuild(serverBuild) {
 // keeps generating), preloads the next slot's image, and returns the one that
 // should be on screen right now. The swap happens on the client's own clock
 // the moment the slot boundary passes, so it's instant rather than waiting for
-// the next poll. Polling pauses while the tab is hidden.
-function useBackdrop(now) {
+// the next poll. Polling pauses while the tab is hidden, and never starts when
+// `off` (a ?preview page must not count as a viewer and trigger generation).
+function useBackdrop(now, off) {
   const [visual, setVisual] = useState(null);
   const [ready, setReady] = useState({}); // url -> true once decoded
 
   useEffect(() => {
+    if (off) return;
     let active = true;
     const poll = async () => {
       if (document.visibilityState === "hidden") return;
@@ -363,7 +582,7 @@ function useBackdrop(now) {
       clearInterval(id);
       document.removeEventListener("visibilitychange", poll);
     };
-  }, []);
+  }, [off]);
 
   // Decode both images ahead of time so the cut is clean.
   useEffect(() => {
@@ -400,7 +619,7 @@ function App() {
   const now = useNow();
   const weather = useWeather();
   const params = new URLSearchParams(window.location.search);
-  const live = useBackdrop(now);
+  const live = useBackdrop(now, Boolean(params.get("preview")));
   const previewed = usePreview(params.get("preview"));
   const backdrop = params.get("preview") ? previewed : live;
   const fontsLoaded = useFonts();
@@ -410,19 +629,27 @@ function App() {
   // The layout designed for this image, or the built-in one for its style.
   // ?theme=neon previews a built-in layout on whatever image is showing.
   const preview = params.get("theme");
+  // ?composition=masthead (etc.) forces one composition, to compare them.
   const layout = resolveLayout(preview ? null : backdrop?.layout, preview || backdrop?.style);
+  if (ENUMS.composition.includes(params.get("composition"))) layout.composition = params.get("composition");
   const t = themeOf(layout);
+  const fig = useInkTrim(t.display, t.timeWeight, fontsLoaded);
+  const cap = useInkTrim(t.body, t.bodyWeight, fontsLoaded, "H");
+  Object.assign(t, { figTop: fig.top, figBottom: fig.bottom, capTop: cap.top, capBottom: cap.bottom });
 
   const [clock, ampm] = now
     .toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
     .split(/\s+/);
-  const date = now.toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-  });
+  const [hh, mm] = clock.split(":");
+  const weekday = now.toLocaleDateString("en-US", { weekday: "long" });
+  const monthDay = now.toLocaleDateString("en-US", { month: "long", day: "numeric" });
 
-  const timeRef = useFitFontSize(t.timeSize, [clock, ampm, t.display, t.timeWeight, t.timeTrack, fontsLoaded]);
+  // Figures in a seven-segment face sit over a ghost of all their segments.
+  const digits = (v) => (t.ghost ? <b data-ghost={String(v).replace(/\d/g, "8")}>{v}</b> : v);
+
+  const timeRef = useFitFontSize(t.timeSize, t.fill, [clock, ampm, t.comp, t.display, t.timeWeight, t.timeTrack, fontsLoaded]);
+
+  const statsRef = useStrip([t.comp, t.body, t.bodyWeight, t.upper, t.s, t.track, fontsLoaded, Boolean(weather), now.getMinutes()]);
 
   const [, label] = (weather && WMO[weather.weather_code]) || ["", ""];
   const sun = weather && nextSunEvent(weather.daily, now);
@@ -435,19 +662,42 @@ function App() {
         <Content $t={t}>
           <Block $t={t}>
             <Time $t={t} ref={timeRef}>
-              {clock}
-              <small>{ampm}</small>
+              {t.monument ? (
+                <>
+                  <span>
+                    {digits(hh)}
+                    <small>{ampm}</small>
+                  </span>
+                  <span>{digits(mm)}</span>
+                </>
+              ) : (
+                <>
+                  {digits(hh)}
+                  <i>:</i>
+                  {digits(mm)}
+                  <small>{ampm}</small>
+                </>
+              )}
             </Time>
-            <DateLine $t={t}>{date}</DateLine>
+            <DateLine $t={t}>
+              {t.masthead ? (
+                <>
+                  <span>{weekday}</span>
+                  <span>{monthDay}</span>
+                </>
+              ) : (
+                `${weekday}, ${monthDay}`
+              )}
+            </DateLine>
           </Block>
           <Block $t={t}>
             {weather ? (
               <>
                 <Now $t={t}>
-                  <Temp $t={t}>{Math.round(weather.temperature_2m)}°</Temp>
+                  <Temp $t={t}>{digits(Math.round(weather.temperature_2m))}°</Temp>
                   <Cond $t={t}>{label}</Cond>
                 </Now>
-                <Stats $t={t}>
+                <Stats $t={t} ref={statsRef}>
                   {sun && (
                     <Stat $t={t}>
                       <span>{sun.label} in</span>

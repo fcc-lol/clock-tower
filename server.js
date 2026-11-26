@@ -5,6 +5,7 @@ import { dirname, join } from "path";
 import { readFile } from "fs/promises";
 import { createVisuals, createProvider, loadDotenv } from "./visuals.js";
 import { createLayoutDesigner } from "./layout.js";
+import { mountStyles } from "./styles.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -53,6 +54,15 @@ app.use("/generated", express.static(join(__dirname, "generated"), { maxAge: "7d
 app.get("/api/visual", (req, res) => {
   res.set("Cache-Control", "no-store");
   res.json({ build: buildId, ...visuals.snapshot() });
+});
+
+// /styles: every style's preview side by side, for iterating on the prompts.
+// Generating from the page is opt-in (STYLE_LAB=1) because each image is billed.
+mountStyles(app, {
+  dir: join(__dirname, "generated", "preview"),
+  provider,
+  designer,
+  canGenerate: process.env.STYLE_LAB === "1",
 });
 
 // API endpoint for SQLite queries
