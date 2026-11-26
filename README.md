@@ -16,7 +16,7 @@ Deployed at https://clock-tower.fcc.lol (pushes to `main` auto-deploy via GitHub
 `visuals.js` on the server turns the live weather/sky data into an image prompt and renders a portrait image through an image API. Time is cut into 15-minute slots on the quarter hour; while one slot's image is on screen, the next slot's is generated in the background, and the browser swaps to it the moment the boundary passes (a hard cut, on the client's own clock).
 
 - The browser polls `/api/visual` every 30 s. That poll is also the "someone is watching" heartbeat: if nothing has polled for 2 minutes, generation stops, so an idle server costs nothing.
-- Images and their prompts land in `generated/` (gitignored, last 12 kept) and are served at `/generated/<slot>.jpg`.
+- Images and their prompts land in `generated/` (gitignored, kept for `IMAGE_KEEP_DAYS`, default 3) and are served at `/generated/<slot>.jpg`.
 - Twelve prompt styles live in `visuals.js`. Each is a matched pair of picture and lettering, with the lettering art-directed by hand in `STYLE_TYPE` (`src/lib/layout.js`): a seven-segment LED clock over a neon megacity, pencil handwriting on a sketchbook page, pixel type on isometric pixel art, an LED dot-matrix sign, chalk on a blackboard, terminal text on a phosphor vector display, a typewritten label in a field journal, comic lettering on a pop-art panel, blackletter over a book-of-hours miniature, a four-shade handheld LCD, stencilled numerals on a street-art wall and wood type on a letterpress broadside. `IMAGE_STYLE` pins one; the default `random` picks a different style from the previous slot every time.
 - Without Google credentials the display runs with a plain black backdrop.
 - Each build gets an id (`dist/build-id.txt`) that the server reports from `/api/visual`. A running display reloads itself when that changes, so after `npm run build` + a server restart the kiosk picks up the new version on its next poll (within 30 s) with no keyboard needed.
@@ -164,10 +164,12 @@ Vite dev server for the display only. The backdrop comes from the Express server
 
 ```sh
 npm run build                          # once, so the "Readouts" toggle and full-size links work
-STYLE_LAB=1 node --watch server.js     # restarts when visuals.js changes
+node --watch server.js                 # restarts when visuals.js changes
 open http://localhost:3118/styles
 ```
 
-Edit a prompt in `visuals.js`, then hit Regenerate on that tile. Generating from the page is only on with `STYLE_LAB=1` (each image is billed like a live one); without it the page is a read-only gallery of whatever `npm run visual:preview -- all` has made. "Readouts" swaps each image for the real display page (`/?preview=<style>`) with its type on top.
+Edit a prompt in `visuals.js`, then hit Regenerate on that tile. Generating from the page only works when you open it on localhost, on the machine running the server (each image is billed like a live one); anywhere else the page is a read-only gallery of whatever `npm run visual:preview -- all` has made. "Readouts" swaps each image for the real display page (`/?preview=<style>`) with its type on top.
 
 Each layout picks one of four compositions (`stack`, `masthead`, `monument`, `caption`; see `ENUMS.composition` in `src/lib/layout.js`). Add `&composition=masthead` (etc.) to a `/?preview=<style>` URL to force one and compare them on the same image.
+
+`/gallery` shows every generation still on disk, newest first, grouped by day: the live slots and every preview made from `/styles`, each kept for `IMAGE_KEEP_DAYS` (default 3; about 2 MB an image, so roughly 600 MB for a screen that is always on). Filter by style or source, and click one to open it full size (`/?show=<its .json>`). Each image is saved with the time, weather and fact its readouts showed, so the gallery presents it as it appeared when it was made.

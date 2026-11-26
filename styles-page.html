@@ -47,6 +47,8 @@
       button:hover:not(:disabled) { background: var(--hover); }
       button:disabled { opacity: 0.4; cursor: default; }
       button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+      header a { color: var(--dim); text-decoration: none; }
+      header a:hover { color: var(--ink); }
       #notice { margin: 6px 20px 0; padding: 10px 14px; background: var(--panel); color: var(--dim); }
       #notice code { color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
       main {
@@ -91,6 +93,7 @@
     <header>
       <h1>Styles</h1>
       <span id="summary">Loading</span>
+      <a href="/gallery">Gallery</a>
       <label><input type="checkbox" id="readouts" checked /> Readouts</label>
       <label>Size <input type="range" id="size" min="140" max="520" step="20" value="240" /></label>
       <button id="missing" hidden>Generate missing</button>

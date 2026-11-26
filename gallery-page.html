@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Clock Tower gallery</title>
+    <style>
+      :root {
+        --tile: 240px;
+        --bg: #141414;
+        --panel: #262626;
+        --hover: #333;
+        --ink: #ededed;
+        --dim: #999;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 18px;
+        padding: 14px 20px;
+        background: var(--bg);
+      }
+      h1 { margin: 0; font-size: 16px; font-weight: 650; }
+      #summary { color: var(--dim); margin-right: auto; }
+      label { display: inline-flex; align-items: center; gap: 7px; color: var(--dim); }
+      input[type="range"] { width: 110px; accent-color: var(--ink); }
+      input[type="checkbox"] { accent-color: var(--ink); }
+      button {
+        font: inherit;
+        color: var(--ink);
+        background: var(--panel);
+        border: 0;
+        padding: 6px 12px;
+        cursor: pointer;
+      }
+      button:hover:not(:disabled) { background: var(--hover); }
+      button:disabled { opacity: 0.4; cursor: default; }
+      button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+      #notice { margin: 6px 20px 0; padding: 10px 14px; background: var(--panel); color: var(--dim); }
+      #notice code { color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+      main {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(var(--tile), 1fr));
+        gap: 24px 16px;
+        padding: 6px 20px 20px;
+      }
+      .tile { min-width: 0; }
+      .frame {
+        position: relative;
+        display: block;
+        aspect-ratio: 9 / 16;
+        background: #0a0a0a;
+        overflow: hidden;
+      }
+      .frame img, .frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; object-fit: cover; }
+      .frame iframe { pointer-events: none; } /* clicks go to the link around it */
+      .frame .empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--dim); }
+      .frame .status {
+        position: absolute; inset: 0;
+        display: grid; place-items: center;
+        padding: 16px; text-align: center;
+        background: rgba(10, 10, 10, 0.78);
+        color: var(--ink);
+      }
+      .frame .status.failed { background: rgba(10, 10, 10, 0.95); font-size: 12.5px; overflow-wrap: anywhere; overflow: auto; }
+      .frame .status.busy::after { content: ""; animation: dots 1.4s steps(4, end) infinite; }
+      @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
+      @media (prefers-reduced-motion: reduce) { .frame .status.busy::after { animation: none; content: "..."; } }
+      .meta { display: flex; align-items: baseline; gap: 8px; margin-top: 8px; }
+      .meta b { font-weight: 650; }
+      .meta span { color: var(--dim); font-size: 12.5px; margin-right: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .meta button { padding: 3px 9px; font-size: 12.5px; }
+      details { margin-top: 6px; color: var(--dim); font-size: 12.5px; }
+      summary { cursor: pointer; width: fit-content; }
+      details p { margin: 6px 0 0; }
+      details .prompt { max-height: 16em; overflow: auto; padding: 8px 10px; background: var(--panel); color: var(--ink); }
+    </style>
+    <style>
+      select { font: inherit; color: var(--ink); background: var(--panel); border: 0; padding: 6px 10px; }
+      header a { color: var(--dim); text-decoration: none; }
+      header a:hover { color: var(--ink); }
+      h2 { grid-column: 1 / -1; margin: 12px 0 -8px; font-size: 13px; font-weight: 500; color: var(--dim); }
+      h2:first-child { margin-top: 0; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Gallery</h1>
+      <span id="summary">Loading</span>
+      <a href="/styles">Styles</a>
+      <label>Style <select id="style"><option value="">All</option></select></label>
+      <label>From <select id="kind"><option value="">All</option><option value="live">Live slots</option><option value="preview">Previews</option></select></label>
+      <label><input type="checkbox" id="readouts" checked /> Readouts</label>
+      <label>Size <input type="range" id="size" min="100" max="520" step="20" value="180" /></label>
+    </header>
+    <main id="grid"></main>
+
+    <script>
+      const grid = document.getElementById("grid");
+      const summary = document.getElementById("summary");
+      const styleSel = document.getElementById("style");
+      const kindSel = document.getElementById("kind");
+      const readouts = document.getElementById("readouts");
+      const size = document.getElementById("size");
+      let items = [];
+
+      const el = (tag, props, ...kids) => {
+        const n = Object.assign(document.createElement(tag), props || {});
+        n.append(...kids.filter((k) => k != null));
+        return n;
+      };
+      const dayOf = (iso) => (iso ? new Date(iso).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" }) : "Undated");
+      const timeOf = (iso) => (iso ? new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "");
+
+      function render() {
+        const shown = items.filter((i) => (!styleSel.value || i.style === styleSel.value) && (!kindSel.value || i.kind === kindSel.value));
+        summary.textContent = shown.length === items.length ? items.length + " generations" : shown.length + " of " + items.length + " generations";
+        grid.replaceChildren();
+        let day = null;
+        for (const i of shown) {
+          if (dayOf(i.createdAt) !== day) grid.append(el("h2", { textContent: (day = dayOf(i.createdAt)) }));
+          const href = "/?show=" + encodeURIComponent(i.meta);
+          const frame = el("a", { className: "frame", href, target: "_blank", title: "Open full size with its readouts" });
+          frame.append(
+            readouts.checked
+              ? el("iframe", { src: href, loading: "lazy", tabIndex: -1, title: i.style })
+              : el("img", { src: i.url, alt: i.style + " backdrop", loading: "lazy" }),
+          );
+          const meta = el("div", { className: "meta" }, el("b", { textContent: i.style }), el("span", { textContent: timeOf(i.createdAt) + (i.kind === "preview" ? " preview" : "") }));
+          grid.append(el("div", { className: "tile" }, frame, meta));
+        }
+        if (!shown.length) grid.append(el("h2", { textContent: items.length ? "Nothing matches these filters." : "Nothing has been generated yet." }));
+      }
+
+      styleSel.onchange = kindSel.onchange = readouts.onchange = render;
+      size.oninput = () => {
+        document.documentElement.style.setProperty("--tile", size.value + "px");
+        try { localStorage.setItem("galleryTile", size.value); } catch {}
+      };
+      try { size.value = localStorage.getItem("galleryTile") || size.value; } catch {}
+      size.oninput();
+
+      (async () => {
+        try {
+          items = (await (await fetch("/api/gallery", { cache: "no-store" })).json()).items;
+          for (const s of [...new Set(items.map((i) => i.style))].sort()) styleSel.append(el("option", { value: s, textContent: s }));
+          render();
+        } catch (err) {
+          summary.textContent = "Could not load the gallery: " + err.message;
+        }
+      })();
+    </script>
+  </body>
+</html>

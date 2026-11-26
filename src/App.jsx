@@ -408,19 +408,21 @@ function useStageScale() {
   return scale;
 }
 
-function useNow() {
+function useNow(off) {
   const [now, setNow] = useState(new Date());
   useEffect(() => {
+    if (off) return;
     const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [off]);
   return now;
 }
 
 // Fetch current conditions on mount and refresh every 10 minutes.
-function useWeather() {
+function useWeather(off) {
   const [weather, setWeather] = useState(null);
   useEffect(() => {
+    if (off) return;
     let active = true;
     const load = async () => {
       try {
@@ -436,15 +438,16 @@ function useWeather() {
       active = false;
       clearInterval(id);
     };
-  }, []);
+  }, [off]);
   return weather;
 }
 
 // Today's facts (holidays, events on this date, plants in bloom), refreshed
 // hourly so they roll over with the date.
-function useToday() {
+function useToday(off) {
   const [facts, setFacts] = useState([]);
   useEffect(() => {
+    if (off) return;
     let active = true;
     const load = () => fetchToday().then((f) => active && f.length && setFacts(f)).catch(() => {});
     load();
@@ -453,7 +456,7 @@ function useToday() {
       active = false;
       clearInterval(id);
     };
-  }, []);
+  }, [off]);
   return facts;
 }
 
@@ -600,31 +603,45 @@ function useBackdrop(now, off) {
 }
 
 // ?preview=<name> shows generated/preview/<name>.json (made by
-// `npm run visual:preview`) instead of the live slot, to look at one image and
-// its layout on its own.
-function usePreview(name) {
+// `npm run visual:preview` or the /styles page) instead of the live slot, to
+// look at one image and its layout on its own. ?show=<path> does the same for
+// any generation's .json under /generated/ (the /gallery page links here).
+function usePreview(name, path) {
   const [meta, setMeta] = useState(null);
+  const src = name ? `/generated/preview/${name}.json` : /^\/generated\/[\w./-]+\.json$/.test(path || "") && !path.includes("..") ? path : null;
   useEffect(() => {
-    if (!name) return;
-    fetch(`/generated/preview/${name}.json`, { cache: "no-store" })
+    if (!src) return;
+    fetch(src, { cache: "no-store" })
       .then((r) => r.json())
       .then(setMeta)
       .catch(() => {});
-  }, [name]);
+  }, [src]);
   return meta;
 }
 
 function App() {
   const scale = useStageScale();
-  const now = useNow();
-  const weather = useWeather();
   const params = new URLSearchParams(window.location.search);
-  const live = useBackdrop(now, Boolean(params.get("preview")));
-  const previewed = usePreview(params.get("preview"));
-  const backdrop = params.get("preview") ? previewed : live;
+  const pinned = Boolean(params.get("preview") || params.get("show"));
+  const previewed = usePreview(params.get("preview"), params.get("show"));
+  // A generation opened from the gallery (?show=) is shown as it was when it
+  // was made: its saved time, weather and fact stand in for the live ones.
+  // (Images made before readouts were saved show the time they were made, with
+  // live weather.)
+  const showing = Boolean(params.get("show"));
+  const saved = showing ? previewed?.readout : null;
+  const still = showing && (!previewed || Boolean(saved)); // no live data needed, or not yet known
+  const madeAt = saved?.at || (showing && previewed?.createdAt) || null;
+  const liveNow = useNow(still || Boolean(madeAt));
+  const liveWeather = useWeather(still);
+  const liveFacts = useToday(still);
+  const now = madeAt ? new Date(madeAt) : liveNow;
+  const weather = saved ? saved.weather : liveWeather;
+  const live = useBackdrop(now, pinned);
+  const backdrop = pinned ? previewed : live;
   const fontsLoaded = useFonts();
   // One fact per image: it changes when the backdrop does.
-  const fact = factFor(useToday(), backdrop?.slot ?? now.getTime());
+  const fact = saved ? saved.fact : factFor(liveFacts, backdrop?.slot ?? now.getTime());
   const onDevice = params.get("onDevice") === "true";
   // The layout designed for this image, or the built-in one for its style.
   // ?theme=neon previews a built-in layout on whatever image is showing.

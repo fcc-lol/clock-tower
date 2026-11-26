@@ -13,13 +13,19 @@ import { readdir, readFile, writeFile, mkdir, unlink } from "fs/promises";
 import { join } from "path";
 import { GoogleAuth } from "google-auth-library";
 import { fetchWeather, fetchSkyColors, colorWords, WMO, moonPhase, toDate } from "./src/lib/sky.js";
+import { fetchToday, factFor } from "./src/lib/today.js";
 
 export const SLOT_MS = 15 * 60 * 1000;
 const LEAD_MS = 12 * 60 * 1000; // start the next slot's image this long before it begins
 const VIEWER_TIMEOUT_MS = 2 * 60 * 1000; // no poll for this long = nobody watching
 const RETRY_MS = 90 * 1000; // wait this long after a failed generation
 const TICK_MS = 15 * 1000;
-const KEEP = 12; // images kept on disk
+// Images are kept on disk for this long, then deleted; the /gallery page shows
+// what is kept. About 2 MB each, so three days of a screen that is always on
+// (288 images) is roughly 600 MB. The newest few are kept whatever their age,
+// so the display always has something to show.
+export const KEEP_MS = Math.max(0.1, Number(process.env.IMAGE_KEEP_DAYS) || 3) * 24 * 60 * 60 * 1000;
+const KEEP_MIN = 12;
 
 const TZ = "America/New_York";
 
@@ -220,6 +226,27 @@ function measuredSky(sky) {
   const where = (dirs) => (dirs.length === 4 ? "in every direction" : `to the ${dirs.join(" and ")}`);
   const list = parts.map((p) => `${p.words} (${p.hex}) ${where(p.dirs)}`).join(", ");
   return `A camera above Manhattan has just measured the actual color of the sky: ${list}. Paint the sky in these measured colors and at this brightness; where they differ from the description above, the measurement wins.`;
+}
+
+// What the display's readouts showed for an image when it was made: the time,
+// the weather figures and the "today" fact. Saved with the image so the
+// gallery can show it exactly as it appeared, not with today's data.
+let todayCache = null; // { at, facts }
+export async function snapshotReadout(w, at, slot) {
+  if (!todayCache || Date.now() - todayCache.at > 60 * 60 * 1000) {
+    todayCache = { at: Date.now(), facts: await fetchToday().catch(() => todayCache?.facts || []) };
+  }
+  return {
+    at: at.toISOString(),
+    weather: {
+      temperature_2m: w.temperature_2m,
+      weather_code: w.weather_code,
+      uv_index: w.uv_index,
+      aqi: w.aqi,
+      daily: { sunrise: w.daily?.sunrise, sunset: w.daily?.sunset },
+    },
+    fact: factFor(todayCache.facts, slot),
+  };
 }
 
 // Turn a weather reading + timestamp into what every style shares:
@@ -566,7 +593,8 @@ export function createVisuals({ dir, provider, designer = null, style = "random"
 
   async function prune() {
     const slots = [...images.keys()].sort((a, b) => b - a);
-    for (const slot of slots.slice(KEEP)) {
+    const cutoff = Date.now() - KEEP_MS;
+    for (const slot of slots.slice(KEEP_MIN).filter((t) => t < cutoff)) {
       const meta = images.get(slot);
       images.delete(slot);
       await Promise.allSettled([unlink(join(dir, meta.file)), unlink(join(dir, `${slot}.json`))]);
@@ -597,7 +625,8 @@ export function createVisuals({ dir, provider, designer = null, style = "random"
           log(`[layout] failed, using the built-in ${used} layout: ${String(err.message || err).slice(0, 200)}`);
         }
       }
-      const meta = { slot, file, url: `/generated/${file}?v=${Date.now().toString(36)}`, style: used, layout, prompt, provider: provider.name, model: provider.model, createdAt: new Date().toISOString(), ms: Date.now() - started, tokens, usd };
+      const readout = await snapshotReadout(w, at, slot).catch(() => null);
+      const meta = { slot, file, url: `/generated/${file}?v=${Date.now().toString(36)}`, style: used, layout, readout, prompt, provider: provider.name, model: provider.model, createdAt: new Date().toISOString(), ms: Date.now() - started, tokens, usd };
       await writeFile(join(dir, file), buffer);
       await writeFile(join(dir, `${slot}.json`), JSON.stringify(meta, null, 2));
       images.set(slot, meta);

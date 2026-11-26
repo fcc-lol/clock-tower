@@ -57,13 +57,8 @@ app.get("/api/visual", (req, res) => {
 });
 
 // /styles: every style's preview side by side, for iterating on the prompts.
-// Generating from the page is opt-in (STYLE_LAB=1) because each image is billed.
-mountStyles(app, {
-  dir: join(__dirname, "generated", "preview"),
-  provider,
-  designer,
-  canGenerate: process.env.STYLE_LAB === "1",
-});
+// Generating from the page only works on localhost, because each image is billed.
+mountStyles(app, { dir: join(__dirname, "generated", "preview"), provider, designer });
 
 // API endpoint for SQLite queries
 app.post("/api/query", (req, res) => {
