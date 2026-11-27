@@ -10,15 +10,19 @@
 // on the two lotto panels.
 //
 // How the conditions drive it:
-// - Day: an awake window has a cream blind half down (sunlit cloth, the
-//   brightest thing on the wall, so the digits read from across a room) and
-//   the real sky in the glass below it: the four measured sky colors, west on
-//   the left columns to east on the right, with cloud as thick as the cover.
-//   Sleeping windows have dark shades in brick-brown so they recede.
-// - Dusk: as the light goes (earlier under rain, snow or fog) each awake
-//   window crosses its own threshold and its lamp comes on, so the building
-//   lights up room by room; at night the digits are warm rooms throwing light
-//   on dark brick, with three small lives (a cat, someone passing, a TV).
+// - Bright day: an awake window is a white frame with a cream blind most of
+//   the way down (sunlit cloth, the brightest thing on the wall, so the
+//   digits read from across a room) and the real sky in the glass below it:
+//   the four measured sky colors, west on the left columns to east on the
+//   right, with cloud as thick as the cover. Sleeping windows have dark,
+//   recessed shades, a clear step below the brick. The fire escape and the
+//   air conditioners keep to the two outer bays, so nothing crosses a figure.
+// - Dim light: people switch lamps on whenever the room is dim, so under a
+//   closed sky, in rain, snow or fog and in the half-light each awake window
+//   crosses its own threshold and its lamp comes on; at dusk the building
+//   lights up room by room. Only a bright, open day relies on the blinds. At
+//   night the digits are warm rooms throwing light on dark brick, with three
+//   small lives (a cat, someone passing, a TV).
 // - Sun: hard shadows under the cornice, sills and fire escape, their length
 //   and lean set by where the sun is; a warm wash when it is low.
 // - Rain darkens the brick from the roof down and drips off the sills and the
@@ -46,7 +50,7 @@ import {
 // ---- geometry (stage units) -------------------------------------------------
 const ROOF = 214; // top of the parapet
 const GX = 54, CW = 108, CH = 100; // window grid: 9 columns, 10 floors
-const WW = 82, WH = 80, FR = 5; // window opening and frame width
+const WW = 90, WH = 80, FR = 5; // window opening and frame width
 const HOURS_Y = 336, MINS_Y = 872;
 const SHOP = 1378, FASCIA = 1394, FRONT = 1518, WALK = 1800;
 const NWIN = 90;
@@ -208,15 +212,15 @@ export default {
       .lo .fact { position: absolute; left: ${BOARD_X + 22}px; top: 62px; width: ${BOARD_W - 44}px; height: 136px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; }
       .lo .factL { font-weight: 500; font-size: 24px; line-height: 28px; letter-spacing: 0.22em; padding-left: 0.22em; text-transform: uppercase; color: var(--gilt); white-space: nowrap; }
       .lo .factV { font-weight: 500; font-size: 38px; line-height: 43px; letter-spacing: 0.01em; color: var(--bill); margin-top: 8px; max-width: 100%; }
-      .lo .moonN { left: 64px; width: 236px; font-weight: 600; font-size: 38px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--gilt); }
-      .lo .ampm { left: 348px; width: 384px; top: ${FASCIA}px; height: 124px; font-weight: 700; font-size: 100px; line-height: 124px; letter-spacing: 0.08em; padding-left: 0.08em; box-sizing: border-box; color: var(--chan); text-shadow: 3px 4px 0 rgba(0,0,0,0.6), 0 0 26px var(--chanGlow); }
+      .lo .moonN { left: 64px; width: 236px; font-weight: 600; font-size: 36px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--gilt); }
+      .lo .ampm { left: 348px; width: 384px; top: ${FASCIA}px; height: 116px; font-weight: 700; font-size: 100px; line-height: 116px; letter-spacing: 0.08em; padding-left: 0.08em; box-sizing: border-box; color: var(--chan); text-shadow: 3px 4px 0 rgba(0,0,0,0.6), 0 0 26px var(--chanGlow); }
       .lo .sideL { top: ${FASCIA}px; width: 108px; height: 124px; font-weight: 600; font-size: 44px; line-height: 124px; letter-spacing: 0.06em; color: var(--gilt); }
       .lo .led { top: 1566px; width: 108px; height: 140px; font-weight: 600; font-size: 64px; line-height: 140px; color: ${LED}; text-shadow: 0 0 14px rgba(255,80,40,0.55); }
       .lo .neonBox { position: absolute; left: 72px; top: 1554px; width: 220px; height: 164px; box-sizing: border-box; border: 3px solid ${NEON}; border-radius: 18px; box-shadow: 0 0 12px ${NEON_GLOW}, inset 0 0 12px ${NEON_GLOW}; opacity: 0.9; }
       .lo .sunL { left: 64px; width: 236px; top: 1576px; font-weight: 400; font-size: 34px; letter-spacing: 0.07em; color: ${NEON}; text-shadow: 0 0 8px ${NEON_GLOW}, 0 0 20px ${NEON_GLOW}; }
       .lo .sunV { left: 64px; width: 236px; top: 1622px; font-weight: 300; font-size: 74px; letter-spacing: 0.01em; color: ${NEON}; text-shadow: 0 0 9px ${NEON_GLOW}, 0 0 26px ${NEON_GLOW}; }
-      .lo .temp { left: 348px; width: 384px; top: 1522px; font-weight: 600; font-size: 100px; padding-left: 0.22em; box-sizing: border-box; color: var(--cream); }
-      .lo .cond { left: 348px; width: 384px; top: 1641px; font-weight: 500; font-size: 44px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--cream); }
+      .lo .temp { left: 348px; width: 384px; top: 1532px; font-weight: 600; font-size: 100px; padding-left: 0.22em; box-sizing: border-box; color: var(--cream); }
+      .lo .cond { left: 348px; width: 384px; top: 1650px; font-weight: 500; font-size: 44px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--cream); }
     `);
 
     const wrap = el("div", { class: "lo" });
@@ -256,8 +260,8 @@ export default {
     const factEl = el("div", { class: "fact" }, factL, factV);
     wrap.append(factEl);
     // the bar is named for tonight's moon, on two lines
-    const moonA = tx("moonN", { top: "1407px" });
-    const moonB = tx("moonN", { top: "1463px" });
+    const moonA = tx("moonN", { top: "1408px" });
+    const moonB = tx("moonN", { top: "1466px" });
     const ampmEl = tx("ampm");
     tx("sideL", { left: "782px" }, "AIR");
     tx("sideL", { left: "906px" }, "UV");
@@ -294,7 +298,7 @@ export default {
     const blindK = new Uint8Array(NWIN); // how far down each daytime blind is drawn (0..3)
     for (let i = 0; i < NWIN; i++) {
       blindK[i] = r.int(0, 3);
-      lampAt[i] = r.range(0.18, 0.6);
+      lampAt[i] = r.range(0.3, 0.62);
       roomOf[i] = r.int(0, 15);
       isOpen[i] = r.chance(0.17) ? 1 : 0;
       rank[i * 3] = r();
@@ -304,12 +308,15 @@ export default {
     const rooms = [];
     for (let k = 0; k < 16; k++) rooms.push(roomSprite(LAMPS[k % 4], k < 4 ? 0 : k < 8 ? 1 : k < 12 ? 2 : r.chance(0.5) ? 3 : 0, r));
 
-    // Air conditioners live in the three columns that never hold a digit.
+    // Air conditioners live in the left bay, which never holds a digit (the
+    // gap between the two figures of a row stays clear brick, so nothing
+    // breaks the strokes).
     const acs = [];
-    for (const c of [0, 4, 8]) for (const rr of r.shuffle([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]).slice(0, c === 4 ? 1 : 3)) acs.push([c, rr]);
+    for (const rr of r.shuffle([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]).slice(0, 4)) acs.push([0, rr]);
 
     // ---- ironwork ---------------------------------------------------------------
-    const FE0 = 480, FE1 = 600;
+    // the fire escape climbs the right bay, clear of the digits
+    const FE0 = colX(8) + WW / 2 - 60, FE1 = FE0 + 120;
     const ironThick = new Path2D(), ironThin = new Path2D();
     const platformY = [];
     for (let rr = 0; rr < 10; rr++) platformY.push(rowY(rr) + WH + 9);
@@ -436,11 +443,11 @@ export default {
 
       // every window asleep: a shade drawn in a tone close to the brick, so by
       // day the wall is one quiet field and the awake windows are the only figure
-      const blinds = ["#61392e", "#5d3a30", "#633d2f", "#5a3832"];
+      const blinds = ["#4c2e26", "#492d27", "#4e3027", "#472c28"];
       for (let i = 0; i < NWIN; i++) {
         const x = colX(i % 9), y = rowY((i / 9) | 0);
         // flat arch of soldier bricks
-        for (let k = 0; k < 9; k++) R(tones[(k * 7 + i) % tones.length], x - 4 + k * 9.35 + 0.5, y - 14, 8.3, 11.5);
+        for (let k = 0; k < 9; k++) R(tones[(k * 7 + i) % tones.length], x - 4 + (k * (WW + 8)) / 9 + 0.5, y - 14, (WW + 8) / 9 - 1, 11.5);
         R("rgba(30,10,8,0.25)", x - 4, y - 14, WW + 8, 11.5);
         R("#1d1310", x - 2, y - 2, WW + 4, WH + 3);
         const b = blinds[(r() * blinds.length) | 0];
@@ -631,7 +638,7 @@ export default {
       aW: 0, aD: 0, glossA: 0, sunS: 0, shTop: 0, shSide: 0, va: 0, fogA: 0, night: 0,
     };
     let lastMs = null, lastH = -1, lastM = -1, first = true;
-    let wetness = 0, snowDepth = 0, scrollX = 0, palKey1 = -1, palKey2 = -1, skyKey = "", skyKeyW = "", shKey = -1e9;
+    let wetness = 0, snowDepth = 0, scrollX = 0, palKey1 = -1, palKey2 = -1, palKey3 = -1, skyKey = "", skyKeyW = "", shKey = -1e9;
     let hasFact = false, frostK = 0, winDirty = true, shDx = 0, shDy = 1, wasMoving = false, palPending = false, sinceBuild = 99;
 
     function setDigits(h12, m) {
@@ -673,7 +680,7 @@ export default {
       const wetBrick = blend(BRICK_AVG, "#140808", 0.42 * clamp(wetness * 1.3));
       const brickBase = under(wetBrick);
       let fogA = Math.max(0.52 * env.murk, haze);
-      while (fogA > 0.04 && luminance(blend(brickBase, fogCol, fogA)) > 0.135 + 0.07 * dl) fogA -= 0.03;
+      while (fogA > 0.04 && luminance(blend(brickBase, fogCol, fogA)) > 0.1 + 0.04 * dl) fogA -= 0.03;
       PAL.fogA = fogA;
       const fogged = (c, k) => blend(c, fogCol, fogA * k);
       const brickNow = fogged(brickBase, 1);
@@ -701,7 +708,7 @@ export default {
 
       // glass: the measured sky, west to east, lifted until it stands off the brick
       const skyRamp = ramp([sky.west, sky.northWest, sky.northEast, sky.east]);
-      for (let c = 0; c < 9; c++) PAL.glass[c] = ensure(mix(skyRamp(c / 8), "#ffffff", 0.1 * dl), brickNow, 3.5);
+      for (let c = 0; c < 9; c++) PAL.glass[c] = ensure(mix(skyRamp(c / 8), "#ffffff", 0.22 * dl), brickNow, 4.5);
       const dayK = smoothstep(0.2, 0.7, dl);
       const partly = smoothstep(0.04, 0.5, cloudK) * (1 - 0.6 * smoothstep(0.7, 1, cloudK));
       PAL.aW = dayK * (0.22 + 0.72 * partly);
@@ -785,7 +792,7 @@ export default {
     const FRONT_N = 4;
     const fronts = [];
     for (let k = 0; k < FRONT_N; k++) fronts.push(offscreen(WW * 2, WH * 2));
-    const frontLv = (k) => 0.4 + (0.22 * k) / (FRONT_N - 1);
+    const frontLv = (k) => 0.55 + (0.2 * k) / (FRONT_N - 1);
     function paintFronts() {
       const gw = WW - 2 * FR, gh = WH - 2 * FR;
       for (let k = 0; k < FRONT_N; k++) {
@@ -946,7 +953,7 @@ export default {
       if (sunS > 0.01) paintShadows(shDx, shDy, sunS);
       for (let i = 0; i < NWIN; i++) {
         if (awake[i] !== 1 || target[i] !== 1) continue;
-        const lamp = 1 - smoothstep(lampAt[i] - 0.04, lampAt[i] + 0.04, light);
+        const lamp = 1 - smoothstep(lampAt[i] - 0.04, lampAt[i] + 0.04, env.lampL);
         if (lamp < 0.995) drawGlass(wctx, patWg, patDg, i, 1);
         drawWin(wctx, i, 1, lamp);
       }
@@ -959,19 +966,21 @@ export default {
       const night = PAL.night;
       gctx.globalCompositeOperation = "lighter";
       const size = 250 * (1 + 0.7 * env.murk);
+      // a lamp's spill only shows on the brick once the daylight is going
+      const dayGlow = 1 - 0.6 * smoothstep(0.3, 0.9, env.dl);
       for (let i = 0; i < NWIN; i++) {
         const a = awake[i];
         if (a <= 0.02) continue;
-        const lamp = a * (1 - smoothstep(lampAt[i] - 0.04, lampAt[i] + 0.04, env.light));
+        const lamp = a * (1 - smoothstep(lampAt[i] - 0.04, lampAt[i] + 0.04, env.lampL));
         if (lamp < 0.02) continue;
-        gctx.globalAlpha = lamp * (0.42 + 0.3 * env.murk);
+        gctx.globalAlpha = lamp * (0.42 + 0.3 * env.murk) * dayGlow;
         gctx.drawImage(warmGlow, colX(i % 9) + WW / 2 - size / 2, rowY((i / 9) | 0) + WH / 2 - size / 2, size, size);
       }
       gctx.globalCompositeOperation = "source-over";
       for (let i = 0; i < NWIN; i++) {
         const a = awake[i];
         if (a < 1) continue;
-        const lamp = 1 - smoothstep(lampAt[i] - 0.04, lampAt[i] + 0.04, env.light);
+        const lamp = 1 - smoothstep(lampAt[i] - 0.04, lampAt[i] + 0.04, env.lampL);
         if (lamp < 0.05) continue;
         gctx.globalAlpha = lamp * 0.55;
         gctx.fillStyle = "#c98548";
@@ -1008,7 +1017,8 @@ export default {
       fctx.quadraticCurveTo(x1 - 1.5, y - h * 0.86, x1, y + 0.5);
     };
 
-    const env = { cloudK: 0, rainK: 0, snowK: 0, murk: 0, dark: 0, light: 1, sunS: 0, openK: 0 };
+    const DOG_LEGS = [-9, -5, 6, 10];
+    const env = { dl: 1, cloudK: 0, rainK: 0, snowK: 0, murk: 0, dark: 0, light: 1, lampL: 1, sunS: 0, openK: 0 };
 
     return {
       frame(s) {
@@ -1029,8 +1039,14 @@ export default {
         const rel = ((s.sun.az - 225) * Math.PI) / 180; // the facade faces south-west
         const facing = smoothstep(0.02, 0.4, Math.cos(rel));
         const sunS = dl * (1 - smoothstep(0.35, 0.9, cloudK)) * (1 - murk) * (w.falling ? 0.15 : 1) * facing * smoothstep(-1, 7, s.sun.alt);
+        // People switch their lamps on whenever the room is dim, not only at
+        // night: under a closed sky, in rain, snow or fog, and in the half-light.
+        // So the digits are lit rooms in all but bright, open daylight.
+        const dim = Math.max(0.9 * smoothstep(0.6, 0.95, cloudK), w.falling ? 1 : 0, murk);
+        env.lampL = dl * (1 - 0.88 * dim);
         env.cloudK = cloudK; env.rainK = rainK; env.snowK = snowK; env.murk = murk; env.light = light; env.sunS = sunS;
         env.dark = rainK > 0 ? rainK : snowK * 0.4;
+        env.dl = dl;
         // windows open on a warm day; in real heat they shut again and the AC runs
         env.openK = smoothstep(60, 72, w.temp) * (1 - smoothstep(84, 92, w.temp)) * (w.falling ? 0 : 1);
         frostK = smoothstep(30, 14, w.temp) * 0.9;
@@ -1076,6 +1092,7 @@ export default {
         const sh = s.sun;
         const k1 = Math.round(dl * 400) + 1000 * Math.round(w.cloud) + 2e5 * Math.round(murk * 60) + 2e7 * Math.round(wetness * 40);
         const k2 = Math.round(sh.alt * 2) + 1000 * Math.round(sh.az / 2) + 1e6 * Math.round(w.aqi / 4) + 1e8 * Math.round(snowDepth * 30) + 1e10 * Math.round(sunS * 50) + 1e12 * Math.round(light * 200);
+        const k3 = Math.round(env.lampL * 100);
         let palChanged = false;
         // sun shadows: length and lean follow the sun
         if (sunS > 0.01) {
@@ -1087,8 +1104,8 @@ export default {
             palChanged = true;
           }
         }
-        if (k1 !== palKey1 || k2 !== palKey2 || skyKey !== s.sky.mean || skyKeyW !== s.sky.west) {
-          palKey1 = k1; palKey2 = k2; skyKey = s.sky.mean; skyKeyW = s.sky.west;
+        if (k1 !== palKey1 || k2 !== palKey2 || k3 !== palKey3 || skyKey !== s.sky.mean || skyKeyW !== s.sky.west) {
+          palKey1 = k1; palKey2 = k2; palKey3 = k3; skyKey = s.sky.mean; skyKeyW = s.sky.west;
           updatePalette(s, env);
           palChanged = true;
         }
@@ -1126,7 +1143,7 @@ export default {
         if (moving) {
           for (let i = 0; i < NWIN; i++) {
             if (awake[i] === target[i] || awake[i] <= 0) continue;
-            const lamp = 1 - smoothstep(lampAt[i] - 0.04, lampAt[i] + 0.04, light);
+            const lamp = 1 - smoothstep(lampAt[i] - 0.04, lampAt[i] + 0.04, env.lampL);
             if (lamp < 0.995) drawGlass(fctx, patWf, patDf, i, awake[i]);
             drawWin(fctx, i, awake[i], lamp);
           }
@@ -1152,7 +1169,7 @@ export default {
         // the small lives in three of the lit rooms
         for (let i = 0; i < NWIN; i++) {
           if (!vig[i] || awake[i] < 1) continue;
-          const lamp = 1 - smoothstep(lampAt[i] - 0.04, lampAt[i] + 0.04, light);
+          const lamp = 1 - smoothstep(lampAt[i] - 0.04, lampAt[i] + 0.04, env.lampL);
           if (lamp > 0.4) drawVig(i, lamp, t);
         }
 
@@ -1185,11 +1202,11 @@ export default {
             fctx.beginPath();
             for (let i = 0; i < NWIN; i++) {
               if (!isOpen[i] || awake[i] < 1) continue;
-              if ((1 - smoothstep(lampAt[i] - 0.04, lampAt[i] + 0.04, light) > 0.5 ? 1 : 0) !== g) continue;
+              if ((1 - smoothstep(lampAt[i] - 0.04, lampAt[i] + 0.04, env.lampL) > 0.5 ? 1 : 0) !== g) continue;
               const gx = colX(i % 9) + FR, gy = rowY((i / 9) | 0) + FR;
               const y0 = gy + gh * 0.5 + 1.5, y1 = gy + gh, h = y1 - y0;
               const xe = dir > 0 ? gx + gw : gx, xi = dir > 0 ? gx : gx + gw;
-              const L = (12 + 44 * blow) * env.openK * (0.8 + 0.4 * rank[i * 3]);
+              const L = (8 + 22 * blow) * env.openK * (0.8 + 0.4 * rank[i * 3]);
               const p = t * (1.1 + ws * 0.07) + i * 1.7;
               const lift = blow * (7 + 3 * Math.sin(p * 0.6));
               const ax = xe + dir * L, ay = y0 - lift + Math.sin(p) * (1 + blow * 2);
@@ -1296,7 +1313,7 @@ export default {
               fctx.moveTo(dx + dir * 15 * sc, dy - 7 * sc); fctx.ellipse(dx + dir * 13 * sc, dy - 7 * sc, 5 * sc, 4.5 * sc, 0, 0, TAU);
               fctx.fill();
               fctx.lineWidth = 3 * sc; fctx.beginPath();
-              for (const lx of [-9, -5, 6, 10]) { fctx.moveTo(dx + dir * lx * sc, dy + 3 * sc); fctx.lineTo(dx + dir * lx * sc + ds * (lx > 0 ? 3 : -3) * sc, gy); }
+              for (let q = 0; q < 4; q++) { const lx = DOG_LEGS[q]; fctx.moveTo(dx + dir * lx * sc, dy + 3 * sc); fctx.lineTo(dx + dir * lx * sc + ds * (lx > 0 ? 3 : -3) * sc, gy); }
               fctx.moveTo(dx - dir * 12 * sc, dy - 2 * sc); fctx.lineTo(dx - dir * 18 * sc, dy - 9 * sc + ds * 2);
               fctx.stroke();
             }

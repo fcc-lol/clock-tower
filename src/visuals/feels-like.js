@@ -15,7 +15,7 @@ const M = 96; // side margin
 const MEASURE = W - 2 * M;
 const TOP = 72;
 const BOTTOM = 66;
-const LABEL = 66; // the column of point sizes in the left margin
+const LABEL = 0; // (the left margin once carried each line's point size; the sheet reads better without the annotation)
 const MAX_FIGURE = 720; // largest size of the time, px
 const LH = 0.76; // line height of the time, em: the figures fill it top to bottom
 const EDGE = 26; // how far past the measure a leaning line may reach (it stays 70 px inside the frame)
@@ -56,10 +56,10 @@ export default {
       .fl .fig { line-height: ${LH}; font-variation-settings: "opsz" 144; align-self: flex-start; }
       .fl .mmrow { display: flex; align-items: flex-start; align-self: flex-start; margin-top: 30px; }
       .fl .ampm { font-size: 64px; line-height: 1; margin: 2px 0 0 22px; }
-      .fl .axes { font-size: 24px; line-height: 1; margin: 22px 0 30px; display: flex; justify-content: space-between; }
+      .fl .rule + .block { margin-top: 44px; }
       .fl .row { display: flex; align-items: baseline; }
       .fl .row + .row { margin-top: 14px; }
-      .fl .row i { flex: 0 0 ${LABEL}px; font-style: normal; font-size: 24px; letter-spacing: 0; }
+      .fl .row i { display: none; }
       .fl b { font-weight: inherit; display: block; }
       .fl .r132 { font-size: 132px; line-height: 0.9; }
       .fl .cond { font-size: 76px; line-height: 0.9; margin-left: 26px; }
@@ -81,7 +81,6 @@ export default {
     const ampm = el("div", { class: "ampm" });
     const mmrow = el("div", { class: "mmrow lean" }, mm, ampm);
     const figures = el("div", { class: "figures" }, hh, mmrow);
-    const axis = [el("span"), el("span"), el("span")];
     const rows = {};
     const labels = {};
     const row = (key, cls, ...more) => {
@@ -95,9 +94,8 @@ export default {
     labels.fact = el("i", { class: "mono" });
     const fact = el("div", { class: "row fact lean" }, labels.fact, el("div", {}, factLabel, factValue));
     const head = el("div", { class: "head lean" }, date, el("span", { class: "place mono", text: "Long Island City" }));
-    const axes = el("div", { class: "axes mono" }, ...axis);
-    const block = el("div", {}, row("temp", "r132", cond), row("sun", "r72"), row("moon", "r56"), row("air", "r46"), fact);
-    const sheet = el("div", { class: "sheet" }, head, el("div", { class: "rule" }), figures, el("div", { class: "rule" }), axes, block);
+    const block = el("div", { class: "block" }, row("temp", "r132", cond), row("sun", "r72"), row("moon", "r56"), row("air", "r46"), fact);
+    const sheet = el("div", { class: "sheet" }, head, el("div", { class: "rule" }), figures, el("div", { class: "rule" }), block);
     wrap.append(flash, sheet);
     grain(wrap, { opacity: 0.05 });
     const leaners = [...sheet.querySelectorAll(".lean")];
@@ -124,7 +122,7 @@ export default {
     const BOXES = 8;
     const box = new Float32Array(BOXES * 4); // x0, y0, x1, y1 in stage px
     let boxes = 0;
-    const lines = [head, axes, ...block.children];
+    const lines = [head, ...block.children];
     function measureBoxes() {
       boxes = 0;
       for (const line of lines) {
@@ -138,7 +136,7 @@ export default {
         const b = boxes * 4;
         const y0 = TOP + line.offsetTop;
         const lift = line.offsetHeight * 0.24; // room for the lean, up to 13 degrees
-        box[b] = M + x0 - 20 - (line === axes ? 0 : 6);
+        box[b] = M + x0 - 26;
         box[b + 1] = y0 - 14;
         box[b + 2] = M + x1 + 20 + lift;
         box[b + 3] = y0 + line.offsetHeight + 14;
@@ -196,7 +194,8 @@ export default {
         lastMs = s.ms;
 
         // ---- the axes: temperature -> weight, humidity -> width ----
-        const wantWght = Math.round(remap(w.temp, 10, 100, 320, 1000) / 4) * 4;
+        // (At night the figures are never thinner than a regular weight: a hairline in a dark room is the hardest time to read.)
+        const wantWght = Math.round(Math.max(remap(w.temp, 10, 100, 320, 1000), lerp(440, 320, smoothstep(0.1, 0.4, s.daylight))) / 4) * 4;
         const wantWdth = Math.round(remap(w.humidity, 20, 100, 40, 151));
         const wantBig = `"opsz" 144, "wght" ${wantWght}, "wdth" ${wantWdth}`;
         if (big !== wantBig) {
@@ -236,9 +235,6 @@ export default {
           fact.style.display = factShow;
           refit = true;
         }
-        // The key to the specimen: what set each axis. A caption, in words.
-        put("ax0", axis[0], w.live ? `${tx.temp} = wght ${wantWght}` : `wght ${wantWght}`);
-        put("ax1", axis[1], w.live ? `${tx.humidity} = wdth ${wantWdth}` : `wdth ${wantWdth}`);
 
         // A wide, heavy instance can push a long line past the measure: let it
         // shrink, and let the size in the margin say so.
@@ -302,7 +298,6 @@ export default {
             if (shown.origin !== origin) node.style.transformOrigin = origin;
           }
           shown.origin = origin;
-          put("ax2", axis[2], w.live ? `${tx.wind} = lean ${Math.abs(lean).toFixed(0)}°` : `lean ${Math.abs(lean).toFixed(0)}°`);
         }
 
         // ---- paper and ink: by temperature, by day and by night ----
