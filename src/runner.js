@@ -103,8 +103,10 @@ async function loadFonts(mod) {
 // Data: from the parent page, simulated, or fetched here.
 // ---------------------------------------------------------------------------
 
-const sim = resolveSim(params);
 const rate = params.has("rate") ? Number(params.get("rate")) || 0 : 1;
+// Live readings go stale as soon as the clock is run fast, so a rate on its own
+// simulates ordinary weather from the present.
+const sim = resolveSim(params) ?? (rate !== 1 ? { wx: "partly", ms: null, overrides: {}, name: null } : null);
 const simulatedClock = (sim && sim.ms != null) || rate !== 1;
 const simulatedData = Boolean(sim && sim.wx !== "live");
 let data = emptyData();

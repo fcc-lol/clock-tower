@@ -37,6 +37,7 @@ export function nightTone(hex, sunAlt) {
   return fromOklab([cap, lab[1] * k, lab[2] * k]);
 }
 
+const SKY_DIRS = ["west", "northWest", "northEast", "east"];
 const SMOOTHED = ["temp", "feels", "humidity", "dewPoint", "wind", "gust", "cloud", "precip", "pressure", "visibility", "uv", "aqi", "pm25", "intensity"];
 
 export function createState({ slot = 0, seed = 1 } = {}) {
@@ -69,6 +70,8 @@ export function createState({ slot = 0, seed = 1 } = {}) {
   let skyDayKey = null;
   let target = {}; // smoothed weather numbers head toward these
   let snap = true;
+  let skyLab = null; // the sky colors as painted, easing toward each new reading
+  let skyAt = 0;
 
   function slow(data, ms) {
     // ----- clock -----
@@ -179,10 +182,13 @@ export function createState({ slot = 0, seed = 1 } = {}) {
       hourKey = hk;
       const start = Math.floor(ms / HOUR) * HOUR;
       const byHour = new Map();
-      if (live) for (const h of wx.hourly || []) byHour.set(Math.round(h.ms / HOUR), h);
+      if (live) for (const h of Array.isArray(wx.hourly) ? wx.hourly : []) if (h && typeof h.ms === "number") byHour.set(Math.round(h.ms / HOUR), h);
       const entry = (t) => {
         const h = byHour.get(Math.round(t / HOUR));
-        if (h) return { ...h, kind: kindOf(h.code), label: labelOf(h.code) };
+        // Precipitation and its probability are reported for the hour ending at
+        // each stamp, so the figures for the hour starting at t are the next entry's.
+        const after = byHour.get(Math.round(t / HOUR) + 1);
+        if (h) return { ...h, precip: after?.precip ?? h.precip, pop: after?.pop ?? h.pop, kind: kindOf(h.code), label: labelOf(h.code) };
         const zz = zoned(t);
         const ty = typicalWeather(zz.month, zz.hour);
         // Without a forecast, hold the current reading and let it follow a normal day's curve.
@@ -196,7 +202,7 @@ export function createState({ slot = 0, seed = 1 } = {}) {
       state.hours = Array.from({ length: 48 }, (_, i) => entry(start + i * HOUR));
       state.pastHours = Array.from({ length: 24 }, (_, i) => entry(start - (24 - i) * HOUR));
       w.hasForecast = live && byHour.size > 0;
-      const todays = live ? (wx.daily || []).find((d) => Math.abs(d.ms - midnight) < 2 * HOUR) : null;
+      const todays = live ? (Array.isArray(wx.daily) ? wx.daily : []).find((d) => d && Math.abs(d.ms - midnight) < 2 * HOUR) : null;
       const span = [...state.pastHours, ...state.hours].filter((h) => h.ms >= midnight && h.ms < midnight + DAY).map((h) => h.temp);
       w.high = todays?.high ?? Math.max(...span, cur.temp);
       w.low = todays?.low ?? Math.min(...span, cur.temp);
@@ -208,14 +214,21 @@ export function createState({ slot = 0, seed = 1 } = {}) {
     const rawSky = fresh ? data.sky.colors : modelSky(ms, target.cloud / 100, w.falling, w.fog);
     sk.measured = Boolean(fresh);
     sk.raw = rawSky;
-    for (const dir of ["west", "northWest", "northEast", "east"]) sk[dir] = nightTone(rawSky[dir], pos.alt);
-    const labs = ["west", "northWest", "northEast", "east"].map((d) => toOklab(sk[d]));
-    sk.mean = fromOklab([0, 1, 2].map((i) => (labs[0][i] + labs[1][i] + labs[2][i] + labs[3][i]) / 4));
+    // A new reading arrives every 15 minutes, and at dawn and dusk it can be a
+    // big step: the painted colors glide to it over a couple of minutes. (After
+    // a jump in the clock they go straight there.)
+    const goal = SKY_DIRS.map((d) => toOklab(nightTone(rawSky[d], pos.alt)));
+    const gap = Math.abs(ms - skyAt);
+    const ks = !skyLab || gap > 10 * 60 * 1000 ? 1 : 1 - Math.exp(-gap / 90000);
+    skyLab = goal.map((g, i) => (ks === 1 ? g : skyLab[i].map((v, j) => v + (g[j] - v) * ks)));
+    skyAt = ms;
+    SKY_DIRS.forEach((d, i) => (sk[d] = fromOklab(skyLab[i])));
+    sk.mean = fromOklab([0, 1, 2].map((i) => (skyLab[0][i] + skyLab[1][i] + skyLab[2][i] + skyLab[3][i]) / 4));
     const sdk = `${Math.floor(ms / 60000)}:${data?.skyDay?.length || 0}:${data?.fetched?.skyDay || 0}`;
     if (sdk !== skyDayKey) {
       skyDayKey = sdk;
-      sk.day = (data?.skyDay || [])
-        .filter((e) => e.ms > ms - DAY && e.ms <= ms)
+      sk.day = (Array.isArray(data?.skyDay) ? data.skyDay : [])
+        .filter((e) => e && e.ms > ms - DAY && e.ms <= ms)
         .map((e) => {
           const alt = sunPosition(e.ms).alt;
           return { ms: e.ms, west: nightTone(e.west, alt), northWest: nightTone(e.northWest, alt), northEast: nightTone(e.northEast, alt), east: nightTone(e.east, alt) };
@@ -224,7 +237,7 @@ export function createState({ slot = 0, seed = 1 } = {}) {
 
     // ----- tide at Hunters Point -----
     const td = state.tide;
-    const list = data?.tides || [];
+    const list = Array.isArray(data?.tides) ? data.tides : [];
     const after = list.findIndex((e) => e.ms > ms);
     if (after > 0) {
       const a = list[after - 1];
@@ -253,7 +266,10 @@ export function createState({ slot = 0, seed = 1 } = {}) {
     td.norm = hi > lo ? clamp((td.level - lo) / (hi - lo)) : 0.5; // 0 at low water, 1 at high
 
     // ----- today's fact -----
-    state.fact = factFor(data?.facts, state.slot ? state.slot * 15 * 60 * 1000 : ms);
+    // Facts carry the day they are for: yesterday's are not shown after midnight.
+    const todayName = `${c.month} ${z.day}`;
+    const facts = (Array.isArray(data?.facts) ? data.facts : []).filter((f) => f && f.value && (!f.day || f.day === todayName));
+    state.fact = factFor(facts, state.slot ? state.slot * 15 * 60 * 1000 : ms);
 
     // ----- ready-made strings for the readouts -----
     const tx = state.text;

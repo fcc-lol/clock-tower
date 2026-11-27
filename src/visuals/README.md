@@ -119,7 +119,9 @@ sky     west, northWest, northEast, east    the color of the real sky in four di
                                              by a camera on a Manhattan tower; ready to paint (night exposure already corrected)
         mean                                 their average
         measured                             false when a model is standing in for the camera
-        day                                  [{ ms, west, northWest, northEast, east }] the last 24 hours, oldest first (may be empty)
+        day                                  [{ ms, west, northWest, northEast, east }] the last 24 hours, oldest first. Readings are
+                                             about 15 minutes apart but can be missing for hours: place them by `ms`, never by
+                                             index (may be empty)
 
 tide    level (feet), norm (0 low water .. 1 high water), rising, next { kind: "high" | "low", ms, ft, minutes }
 

@@ -15,7 +15,7 @@
 // Nothing here throws at the caller: a source that fails keeps its old value.
 
 import { LAT, LON } from "./astro.js";
-import { dateKey } from "./time.js";
+import { dateKey, startOfDay } from "./time.js";
 import { fetchToday } from "./today.js";
 
 const MIN = 60 * 1000;
@@ -44,16 +44,22 @@ export const tideUrl = (begin, end) =>
 
 const num = (v, fallback = null) => (typeof v === "number" && Number.isFinite(v) ? v : fallback);
 
+// A request that never settles would stop its source for good, so each one
+// gets a time limit.
+const TIMEOUT_MS = 20000;
+
 async function getJson(url, fetchFn) {
-  const res = await fetchFn(url, { cache: "no-store" });
-  const json = await res.json();
-  if (!res.ok || json?.error) throw new Error(json?.reason || `HTTP ${res.status}`);
+  const res = await fetchFn(url, { cache: "no-store", signal: AbortSignal.timeout(TIMEOUT_MS) });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json || json.error) throw Object.assign(new Error(json?.reason || `HTTP ${res.status}`), { status: res.status });
   return json;
 }
 
 function shapeWeather(wx) {
   const c = wx.current;
   if (!c || num(c.temperature_2m) == null) throw new Error("weather unavailable");
+  // "current" precipitation is the total over the last `interval` seconds (15 minutes): make it a rate per hour.
+  const perHour = 3600 / (num(c.interval) > 0 ? c.interval : 3600);
   const current = {
     temp: c.temperature_2m,
     feels: num(c.apparent_temperature, c.temperature_2m),
@@ -61,8 +67,8 @@ function shapeWeather(wx) {
     dewPoint: num(c.dew_point_2m),
     code: num(c.weather_code, 2),
     cloud: num(c.cloud_cover, 40),
-    precip: num(c.precipitation, 0),
-    snowfall: num(c.snowfall, 0),
+    precip: num(c.precipitation, 0) * perHour,
+    snowfall: num(c.snowfall, 0) * perHour,
     wind: num(c.wind_speed_10m, 0),
     gust: num(c.wind_gusts_10m),
     windDir: num(c.wind_direction_10m),
@@ -98,7 +104,10 @@ function shapeWeather(wx) {
 export async function fetchWeather(fetchFn = fetch) {
   try {
     return shapeWeather(await getJson(WEATHER_URL, fetchFn));
-  } catch {
+  } catch (err) {
+    // Only when the fuller query itself is refused. A passing network error
+    // must not swap a complete reading for one with no forecast.
+    if (err?.status !== 400) throw err;
     return shapeWeather(await getJson(WEATHER_URL_BASIC, fetchFn));
   }
 }
@@ -124,39 +133,47 @@ export async function fetchSky(fetchFn = fetch) {
   return { at, colors };
 }
 
-// Every reading for yesterday and today (New York dates), oldest first.
-export async function fetchSkyDay(fetchFn = fetch, now = Date.now()) {
+// Every reading for yesterday and today (New York dates), oldest first. Readings
+// already held (`prev`) are kept, so one failed request does not lose a day.
+export async function fetchSkyDay(fetchFn = fetch, now = Date.now(), prev = null) {
   const days = await Promise.all(
     [dateKey(now, -1), dateKey(now)].map((key) => getJson(`${SKY_URL}?date=${key}`, fetchFn).catch(() => null)),
   );
   if (!days.some(Boolean)) throw new Error("sky history unavailable");
-  const out = [];
+  const out = (Array.isArray(prev) ? prev : []).filter((e) => e && e.ms > now - 49 * 60 * MIN);
   for (const day of days) {
-    for (const it of day?.intervals || []) {
-      const colors = shapeColors(it.colors);
+    for (const it of Array.isArray(day?.intervals) ? day.intervals : []) {
+      const colors = shapeColors(it?.colors);
       if (colors && num(it.timestamp) != null) out.push({ ms: it.timestamp, ...colors });
     }
   }
-  return out.sort((a, b) => a.ms - b.ms);
+  return [...new Map(out.map((e) => [e.ms, e])).values()].sort((a, b) => a.ms - b.ms);
 }
 
 export async function fetchTides(fetchFn = fetch, now = Date.now()) {
   const ymd = (days) => dateKey(now, days).replace(/-/g, "");
   const d = await getJson(tideUrl(ymd(-1), ymd(3)), fetchFn);
-  const out = (d.predictions || [])
+  const out = (Array.isArray(d.predictions) ? d.predictions : [])
+    .filter((p) => p && typeof p.t === "string")
     .map((p) => ({ ms: Date.parse(`${p.t.replace(" ", "T")}:00Z`), ft: Number(p.v), kind: p.type === "H" ? "high" : "low" }))
     .filter((p) => Number.isFinite(p.ms) && Number.isFinite(p.ft));
   if (!out.length) throw new Error("tides unavailable");
   return out;
 }
 
+// `every` is how long to wait after a success; a function gets the time now.
 const SOURCES = [
-  { key: "weather", every: 10 * MIN, run: fetchWeather },
-  { key: "air", every: 20 * MIN, run: fetchAir },
-  { key: "sky", every: 5 * MIN, run: fetchSky },
-  { key: "skyDay", every: 15 * MIN, run: fetchSkyDay },
-  { key: "tides", every: 6 * 60 * MIN, run: fetchTides },
-  { key: "facts", every: 60 * MIN, run: (f) => fetchToday(f).then((facts) => (facts.length ? facts : Promise.reject(new Error("no facts")))) },
+  { key: "weather", every: 10 * MIN, run: (f) => fetchWeather(f) },
+  { key: "air", every: 20 * MIN, run: (f) => fetchAir(f) },
+  { key: "sky", every: 5 * MIN, run: (f) => fetchSky(f) },
+  { key: "skyDay", every: 15 * MIN, run: (f, now, prev) => fetchSkyDay(f, now, prev) },
+  { key: "tides", every: 6 * 60 * MIN, run: (f, now) => fetchTides(f, now) },
+  {
+    key: "facts",
+    // Hourly, and again just after New York midnight so the new day's facts arrive promptly.
+    every: (now) => Math.min(60 * MIN, Math.max(MIN, startOfDay(now, 1) + 90 * 1000 - now)),
+    run: (f, now, prev) => fetchToday(f, prev).then((facts) => (facts.length ? facts : Promise.reject(new Error("no facts")))),
+  },
 ];
 
 export const emptyData = () => ({ weather: null, air: null, sky: null, skyDay: [], tides: null, facts: [], fetched: {} });
@@ -170,32 +187,53 @@ const STORE_KEY = "clock-tower:data:v1";
 export function createHub({ onChange = () => {}, fetchFn = (...a) => fetch(...a), storage = safeStorage() } = {}) {
   let data = emptyData();
   try {
+    // Take only what has the right shape: a bundle saved by another version of
+    // this code must not be able to break the pieces that read it.
     const saved = JSON.parse(storage?.getItem(STORE_KEY) || "null");
-    if (saved && typeof saved === "object") data = { ...data, ...saved };
+    const list = (v) => (Array.isArray(v) ? v.filter((e) => e && typeof e === "object") : null);
+    if (saved && typeof saved === "object" && !Array.isArray(saved)) {
+      const w = saved.weather;
+      if (w && typeof w.at === "number" && typeof w.current?.temp === "number") data.weather = { at: w.at, current: w.current, hourly: list(w.hourly) || [], daily: list(w.daily) || [] };
+      if (typeof saved.air?.aqi === "number" && typeof saved.air.at === "number") data.air = saved.air;
+      if (typeof saved.sky?.at === "number" && shapeColors({ west: saved.sky.colors?.west, "north-west": saved.sky.colors?.northWest, "north-east": saved.sky.colors?.northEast, east: saved.sky.colors?.east })) data.sky = saved.sky;
+      data.skyDay = (list(saved.skyDay) || []).filter((e) => typeof e.ms === "number" && HEX.test(e.west || "") && HEX.test(e.northWest || "") && HEX.test(e.northEast || "") && HEX.test(e.east || ""));
+      const tides = (list(saved.tides) || []).filter((e) => typeof e.ms === "number" && typeof e.ft === "number");
+      data.tides = tides.length ? tides : null;
+      data.facts = (list(saved.facts) || []).filter((e) => typeof e.label === "string" && typeof e.value === "string");
+      if (saved.fetched && typeof saved.fetched === "object") data.fetched = saved.fetched;
+    }
   } catch {}
   const timers = {}; // source key -> pending timeout
   let stopped = false;
 
   async function pull(source) {
+    let value;
     try {
-      const value = await source.run(fetchFn);
-      if (stopped) return true;
-      data = { ...data, [source.key]: value, fetched: { ...data.fetched, [source.key]: Date.now() } };
-      try {
-        storage?.setItem(STORE_KEY, JSON.stringify(data));
-      } catch {}
-      onChange(data);
-      return true;
+      value = await source.run(fetchFn, Date.now(), data[source.key]);
     } catch {
       return false; // keep what we have
     }
+    if (stopped) return true;
+    data = { ...data, [source.key]: value, fetched: { ...data.fetched, [source.key]: Date.now() } };
+    try {
+      storage?.setItem(STORE_KEY, JSON.stringify(data));
+    } catch {}
+    try {
+      onChange(data);
+    } catch {}
+    return true;
   }
 
   function start() {
     for (const source of SOURCES) {
+      let fails = 0;
       const loop = async () => {
         const ok = await pull(source);
-        if (!stopped) timers[source.key] = setTimeout(loop, ok ? source.every : Math.min(source.every, 2 * MIN));
+        fails = ok ? 0 : fails + 1;
+        const every = typeof source.every === "function" ? source.every(Date.now()) : source.every;
+        // After a failure try again sooner, backing off: 2, 4, 8, 16, 32 minutes.
+        const wait = ok ? every : Math.min(Math.max(every, 2 * MIN), 2 * MIN * 2 ** Math.min(fails - 1, 4));
+        if (!stopped) timers[source.key] = setTimeout(loop, wait);
       };
       loop();
     }
