@@ -33,8 +33,11 @@ export function zoned(ms) {
 export function zonedToUtc(year, month, day, hour = 0, minute = 0, second = 0) {
   const guess = Date.UTC(year, month - 1, day, hour, minute, second);
   const first = guess - zoned(guess).offset;
-  const second_ = guess - zoned(first).offset; // settles it across a DST change
-  return second_;
+  const settled = guess - zoned(first).offset; // settles it across a DST change
+  // A time the spring change skips (02:30 on that night) lands after the change.
+  const z = zoned(settled);
+  const want = (((hour * 60 + minute) % 1440) + 1440) % 1440;
+  return z.hour * 60 + z.minute === want ? settled : first;
 }
 
 // The instant of New York midnight at the start of the day containing `ms`,

@@ -28,7 +28,7 @@ export default {
 ```
 
 - `root` is 1080 x 1920 CSS pixels with a black background and `overflow: hidden`. Position children absolutely. The page belongs to your piece alone (it runs in its own iframe), so plain class names and a `<style>` are fine.
-- `state` is the same object every frame, updated in place. Everything you may read is in it (see below). It is always complete: when live data is missing, typical values stand in, so you never have to check for null.
+- `state` is the same object every frame, updated in place. Everything you may read is in it (see below). It is always complete: when live data is missing, typical values stand in, so you never have to check for null. Read `state.hours`, `state.pastHours` and `state.sky.day` from `state` each time you use them rather than keeping a reference: those arrays are rebuilt when new data arrives.
 - `seed` (also `state.seed`) is an integer that is stable for one showing and differs between showings. Use it for anything arranged at random.
 - The runner calls `frame`. The piece never calls `requestAnimationFrame`, `setTimeout` or `setInterval`, adds no listeners to `window` or `document`, makes no network requests, and stores nothing. When its 15 minutes are up the whole page is thrown away, so there is nothing to clean up.
 - **Never use `Math.random()`, `Date.now()`, `new Date()` or `performance.now()`.** Time is `state.t` (seconds of animation since mount), `state.dt` (seconds since the last frame, at most 0.1) and `state.ms` (the instant being shown). Randomness is `rng(seed)`. The same seed and the same state must give the same picture: the test harness steps time by hand, and the gallery runs the clock at other speeds.
@@ -100,7 +100,8 @@ sun     alt, az                  where it is (alt below 0 = below the horizon)
         progress                 0..1 through the current day (sunrise to sunset) or night
         next { kind: "sunrise" | "sunset", ms, minutes }, dayLength (hours)
 
-moon    phase (0 new, 0.5 full, to 1), illumination (0..1), waxing, name, alt, az, up, tilt
+moon    phase (0 new, 0.5 full, to 1), illumination (0..1), waxing, name, alt, az, up
+        tilt                     which way the lit edge faces as seen from here: degrees counter-clockwise from straight up, -180..180
 
 weather live                     false when there is no current reading (typical values are standing in)
         temp, feels, humidity, dewPoint, wind, gust, windDir, cloud (0..100), precip, pressure (hPa), visibility (miles), uv, aqi, pm25

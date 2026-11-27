@@ -168,6 +168,7 @@ function run(fps) {
     windowFrames++;
     if (ts - windowStart >= 2000) {
       fpsNow = (windowFrames * 1000) / (ts - windowStart);
+      const statsClean = windowClean; // false if the window included a pause that was not about drawing
       if (windowClean && ts - started > 6000 && fpsNow < fps * 0.7) slowWindows++;
       else slowWindows = 0;
       if (slowWindows >= 2 && __kit.quality > 0.5) {
@@ -179,7 +180,7 @@ function run(fps) {
       windowFrames = 0;
       windowClean = true;
       if (hudNode) hudNode.textContent = hudText();
-      tell("stats", { fps: +fpsNow.toFixed(1), quality: __kit.quality, avgMs: viz.stats().avgMs });
+      tell("stats", { fps: +fpsNow.toFixed(1), target: fps, clean: statsClean, quality: __kit.quality, avgMs: viz.stats().avgMs });
     }
   };
   raf = requestAnimationFrame(loop);

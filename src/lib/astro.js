@@ -2,9 +2,10 @@
 // they rise and set, the twilights, and the moon's phase.
 //
 // These are the standard low-precision formulas (Meeus, "Astronomical
-// Algorithms", in the compact form popularised by Astronomy Answers): good to
-// a fraction of a degree and about a minute of time for decades either side of
-// 2000, which is far finer than anything drawn here needs. Everything is a
+// Algorithms", and the Astronomical Almanac's series for the moon). Checked
+// against JPL Horizons for 2026-2027: the sun to about 0.02 degrees and its
+// rise and set to well under a minute; the moon to a few tenths of a degree
+// and its rise and set to a few minutes. Everything is a
 // pure function of an instant in epoch milliseconds, so no time zone is
 // involved. Angles in the public API are degrees; azimuth is a compass
 // bearing (0 north, 90 east, 180 south, 270 west).
@@ -29,7 +30,7 @@ const declination = (l, b) => Math.asin(Math.sin(b) * Math.cos(OBLIQUITY) + Math
 // Azimuth here is measured from south, turning west; compass() converts.
 const azimuthOf = (H, phi, dec) => Math.atan2(Math.sin(H), Math.cos(H) * Math.sin(phi) - Math.tan(dec) * Math.cos(phi));
 const altitudeOf = (H, phi, dec) => Math.asin(Math.sin(phi) * Math.sin(dec) + Math.cos(phi) * Math.cos(dec) * Math.cos(H));
-const siderealTime = (d, lw) => RAD * (280.16 + 360.9856235 * d) - lw;
+const siderealTime = (d, lw) => RAD * (280.4606 + 360.98564737 * d) - lw;
 const compass = (azSouth) => (((azSouth * DEG + 180) % 360) + 360) % 360;
 
 // How much the atmosphere lifts an object near the horizon, in radians.
@@ -39,14 +40,14 @@ function refraction(h) {
 }
 
 const solarMeanAnomaly = (d) => RAD * (357.5291 + 0.98560028 * d);
-function eclipticLongitude(M) {
+function eclipticLongitude(M, d) {
   const C = RAD * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M)); // equation of center
-  const P = RAD * 102.9372; // perihelion of the Earth
+  const P = RAD * (102.9372 + 0.0000471 * d); // perihelion of the Earth, from the equinox of date
   return M + C + P + Math.PI;
 }
 function sunCoords(d) {
   const M = solarMeanAnomaly(d);
-  const L = eclipticLongitude(M);
+  const L = eclipticLongitude(M, d);
   return { dec: declination(L, 0), ra: rightAscension(L, 0), M, L };
 }
 
@@ -62,7 +63,7 @@ export function sunPosition(ms, lat = LAT, lon = LON) {
 }
 
 // The sun's declination (degrees) and the equation of time (minutes: apparent
-// solar time minus mean solar time), for sundials and analemmas.
+// solar time minus mean solar time).
 export function sunDeclination(ms) {
   return sunCoords(toDays(ms)).dec * DEG;
 }
@@ -72,7 +73,7 @@ export function equationOfTime(ms) {
   return -(0.0053 * Math.sin(M) - 0.0069 * Math.sin(2 * L)) * 1440;
 }
 
-const J0 = 0.0009;
+const J0 = 0; // times here are UTC throughout
 const julianCycle = (d, lw) => Math.round(d - J0 - lw / TAU);
 const approxTransit = (Ht, lw, n) => J0 + (Ht + lw) / TAU + n;
 const solarTransitJ = (ds, M, L) => J2000 + ds + 0.0053 * Math.sin(M) - 0.0069 * Math.sin(2 * L);
@@ -93,7 +94,7 @@ export function sunTimes(ms, lat = LAT, lon = LON) {
   const n = julianCycle(toDays(ms), lw);
   const ds = approxTransit(0, lw, n);
   const M = solarMeanAnomaly(ds);
-  const L = eclipticLongitude(M);
+  const L = eclipticLongitude(M, ds);
   const dec = declination(L, 0);
   const Jnoon = solarTransitJ(ds, M, L);
   const pair = (angle) => {
@@ -113,16 +114,23 @@ export function sunTimes(ms, lat = LAT, lon = LON) {
   };
 }
 
+// The moon's place among the stars: the low-precision series of the
+// Astronomical Almanac (good to a few tenths of a degree), with its parallax,
+// which is how far its nearness shifts it for an observer on the surface.
 function moonCoords(d) {
-  const L = RAD * (218.316 + 13.176396 * d); // ecliptic longitude
-  const M = RAD * (134.963 + 13.064993 * d); // mean anomaly
-  const F = RAD * (93.272 + 13.22935 * d); // mean distance
-  const l = L + RAD * 6.289 * Math.sin(M);
-  const b = RAD * 5.128 * Math.sin(F);
-  return { ra: rightAscension(l, b), dec: declination(l, b), dist: 385001 - 20905 * Math.cos(M) };
+  const T = d / 36525;
+  const s = (a, b) => Math.sin(RAD * (a + b * T));
+  const c = (a, b) => Math.cos(RAD * (a + b * T));
+  const l =
+    RAD *
+    (218.32 + 481267.881 * T + 6.29 * s(135.0, 477198.87) - 1.27 * s(259.3, -413335.36) + 0.66 * s(235.7, 890534.22) +
+      0.21 * s(269.9, 954397.74) - 0.19 * s(357.5, 35999.05) - 0.11 * s(186.5, 966404.03));
+  const b = RAD * (5.13 * s(93.3, 483202.02) + 0.28 * s(228.2, 960400.89) - 0.28 * s(318.3, 6003.15) - 0.17 * s(217.6, -407332.21));
+  const par = RAD * (0.9508 + 0.0518 * c(135.0, 477198.87) + 0.0095 * c(259.3, -413335.36) + 0.0078 * c(235.7, 890534.22) + 0.0028 * c(269.9, 954397.74));
+  return { ra: rightAscension(l, b), dec: declination(l, b), dist: 6378.14 / Math.sin(par), par };
 }
 
-// Where the moon is: { alt, az } in degrees (alt includes refraction),
+// Where the moon is: { alt, az } in degrees (alt as seen: parallax and refraction included),
 // `distance` in km, and `parallactic` (degrees), the tilt of the moon's
 // north-south axis from the vertical as seen from this place.
 export function moonPosition(ms, lat = LAT, lon = LON) {
@@ -133,6 +141,7 @@ export function moonPosition(ms, lat = LAT, lon = LON) {
   const H = siderealTime(d, lw) - c.ra;
   let h = altitudeOf(H, phi, c.dec);
   const pa = Math.atan2(Math.sin(H), Math.tan(phi) * Math.cos(c.dec) - Math.sin(c.dec) * Math.cos(H));
+  h -= c.par * Math.cos(h); // seen from the surface, not the Earth's centre
   h += refraction(h);
   return { alt: h * DEG, az: compass(azimuthOf(H, phi, c.dec)), distance: c.dist, parallactic: pa * DEG };
 }
@@ -178,7 +187,7 @@ export const moonPhaseName = (phase) => MOON_PHASES[Math.floor(phase * 8 + 0.5) 
 // When the moon rises and sets within [from, to] (epoch ms): a list of
 // { kind: "rise" | "set", ms } in time order. Found by stepping its altitude.
 export function moonEvents(from, to, lat = LAT, lon = LON) {
-  const H0 = 0.133; // the moon's centre at rise/set, allowing for parallax and refraction
+  const H0 = -0.26; // rise and set are when the upper limb is on the horizon: the centre is half a disc below
   const step = 10 * 60 * 1000;
   const out = [];
   let prev = moonPosition(from, lat, lon).alt - H0;
@@ -193,7 +202,7 @@ export function moonEvents(from, to, lat = LAT, lon = LON) {
   return out;
 }
 
-// Local sidereal time in hours (0..24), for star charts.
+// Local sidereal time in hours (0..24): the right ascension now on the meridian.
 export function siderealHours(ms, lon = LON) {
   const h = (siderealTime(toDays(ms), RAD * -lon) * DEG) / 15;
   return ((h % 24) + 24) % 24;

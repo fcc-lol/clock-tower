@@ -25,10 +25,44 @@ const STAGE_H = 1920;
 const PRELOAD_MS = 45 * 1000; // start the next piece this long before its slot, so it is running when cut to
 const LOAD_TIMEOUT_MS = 30 * 1000; // a piece that has not drawn by then is skipped
 
+// On the kiosk, the display notices which pieces its hardware cannot keep up
+// with and leaves them out. A showing that runs well under its frame rate is a
+// strike; three strikes within a week and the piece is skipped until they
+// expire, when it gets another chance. `?forgive=1` clears the record.
+const SLOW_KEY = "clock-tower:slow:v1";
+const SLOW_WINDOW_MS = 7 * 24 * 3600 * 1000;
+const SLOW_STRIKES = 3;
+function readStrikes() {
+  try {
+    const all = JSON.parse(localStorage.getItem(SLOW_KEY) || "{}");
+    const out = {};
+    for (const [id, times] of Object.entries(all && typeof all === "object" ? all : {})) {
+      const recent = (Array.isArray(times) ? times : []).filter((t) => typeof t === "number" && Date.now() - t < SLOW_WINDOW_MS);
+      if (recent.length) out[id] = recent;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+function addStrike(id) {
+  const all = readStrikes();
+  all[id] = [...(all[id] || []), Date.now()].slice(-SLOW_STRIKES);
+  try {
+    localStorage.setItem(SLOW_KEY, JSON.stringify(all));
+  } catch {}
+}
+const slowPieces = () => new Set(Object.entries(readStrikes()).filter(([, times]) => times.length >= SLOW_STRIKES).map(([id]) => id));
+
 const params = new URLSearchParams(window.location.search);
 const onDevice = params.get("onDevice") === "true";
 const debug = params.get("debug") === "1";
 const pinned = IDS.includes(params.get("viz")) ? params.get("viz") : null;
+if (params.get("forgive") === "1") {
+  try {
+    localStorage.removeItem(SLOW_KEY);
+  } catch {}
+}
 const sim = resolveSim(params);
 const rate = params.has("rate") ? Number(params.get("rate")) || 1 : 1;
 const simulatedClock = (sim && sim.ms != null) || rate !== 1;
@@ -187,7 +221,12 @@ function useRotation(dataRef, scaleRef) {
 
     const begin = (slot, immediate) => {
       if (!IDS.length) return;
-      let id = pinned || pieceForSkipping(slot, IDS, R.bad, immediate ? R.shown?.id : null);
+      // Never the piece already showing (the schedule never repeats one; skipping
+      // must not either). Leave out what has failed this session and, on the
+      // kiosk, what this machine runs badly, as long as that leaves something.
+      const not = R.shown?.id ?? null;
+      const skip = onDevice ? new Set([...R.bad, ...slowPieces()]) : R.bad;
+      let id = pinned || pieceForSkipping(slot, IDS, skip, not) || pieceForSkipping(slot, IDS, skip, null) || pieceForSkipping(slot, IDS, R.bad, not);
       if (!id) {
         // Everything has failed at least once: forgive and try again.
         R.bad.clear();
@@ -211,6 +250,7 @@ function useRotation(dataRef, scaleRef) {
       if (p) {
         const due = p.immediate || !R.shown || now >= (p.slot - R.offset) * SLOT_MS;
         if (p.ready && due) {
+          p.shownAt = performance.now();
           R.shown = p;
           R.pending = null;
           R.jump = false;
@@ -248,6 +288,16 @@ function useRotation(dataRef, scaleRef) {
         publish();
       } else if (m.type === "ct:stats" && R.shown === frame) {
         R.stats = m;
+        // Count how the showing is going, once it has had 20 s to settle.
+        if (m.clean !== false && m.target > 0 && performance.now() - (frame.shownAt || 0) > 20000) {
+          frame.samples = (frame.samples || 0) + 1;
+          if (m.fps < m.target * 0.55) frame.slow = (frame.slow || 0) + 1;
+          // A minute or more of readings, most of them slow: a strike (once per showing).
+          if (onDevice && !pinned && !frame.struck && frame.samples >= 30 && frame.slow > frame.samples * 0.7) {
+            frame.struck = true;
+            addStrike(frame.id);
+          }
+        }
         if (debug) publish();
       }
     };
@@ -358,7 +408,7 @@ function App() {
         <Hud>
           {`showing  ${shown ? shown.id : "(plain clock)"}${pinned ? "  [held]" : ""}\n`}
           {`next     ${pending ? `${pending.id}${pending.ready ? " (ready)" : " (loading)"}` : "-"}  in ${Math.floor(toNext / 60000)}:${String(Math.floor((toNext % 60000) / 1000)).padStart(2, "0")}\n`}
-          {`library  ${IDS.length} pieces\n`}
+          {`library  ${IDS.length} pieces${onDevice && slowPieces().size ? `  (too slow here, skipped: ${[...slowPieces()].join(", ")})` : ""}\n`}
           {stats ? `${stats.fps} fps  frame ${stats.avgMs} ms  quality ${stats.quality}` : ""}
         </Hud>
       )}

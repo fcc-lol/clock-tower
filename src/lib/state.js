@@ -50,13 +50,13 @@ export function createState({ slot = 0, seed = 1 } = {}) {
     W: 1080, H: 1920, scale: 1,
     daylight: 0,
     clock: {},
-    sun: {},
+    sun: { next: {}, prev: {} },
     moon: {},
     weather: {},
     hours: [],
     pastHours: [],
     sky: {},
-    tide: {},
+    tide: { next: {}, prev: {} },
     fact: null,
     text: {},
   };
@@ -101,7 +101,6 @@ export function createState({ slot = 0, seed = 1 } = {}) {
     const pos = sunPosition(ms);
     const s = state.sun;
     s.alt = pos.alt; s.az = pos.az;
-    s.up = pos.alt > -0.833;
     s.rise = today.rise; s.set = today.set; s.noon = today.noon;
     s.civilDawn = today.civilDawn; s.civilDusk = today.civilDusk;
     s.nauticalDawn = today.nauticalDawn; s.nauticalDusk = today.nauticalDusk;
@@ -115,13 +114,15 @@ export function createState({ slot = 0, seed = 1 } = {}) {
     const next = events.find((e) => e.ms > ms) || { kind: "sunrise", ms: ms + 12 * HOUR };
     const prev = [...events].reverse().find((e) => e.ms <= ms) || { kind: "sunset", ms: ms - 12 * HOUR };
     const mins = Math.max(0, Math.round((next.ms - ms) / 60000));
-    s.next = { kind: next.kind, ms: next.ms, minutes: mins };
-    s.prev = { kind: prev.kind, ms: prev.ms };
+    Object.assign(s.next, { kind: next.kind, ms: next.ms, minutes: mins });
+    Object.assign(s.prev, { kind: prev.kind, ms: prev.ms });
+    // "Up" comes from the same events as the countdown, so the two never disagree.
+    s.up = prev.kind === "sunrise";
     // 0..1 through the day (sunrise to sunset) or through the night.
     s.progress = clamp((ms - prev.ms) / Math.max(1, next.ms - prev.ms));
     const morning = ms < today.noon;
     s.phase =
-      pos.alt < -12 ? "night" : pos.alt < -0.833 ? (morning ? "dawn" : "dusk") : pos.alt < 6 ? (morning ? "sunrise" : "golden") : "day";
+      !s.up ? (pos.alt < -12 ? "night" : morning ? "dawn" : "dusk") : pos.alt < 6 ? (morning ? "sunrise" : "golden") : "day";
     state.daylight = smoothstep(-9, 6, pos.alt);
 
     // ----- moon -----
@@ -130,8 +131,9 @@ export function createState({ slot = 0, seed = 1 } = {}) {
     const m = state.moon;
     m.phase = ill.phase; m.illumination = ill.fraction; m.waxing = ill.phase < 0.5;
     m.name = moonPhaseName(ill.phase);
-    m.alt = mp.alt; m.az = mp.az; m.up = mp.alt > 0;
-    m.tilt = ill.angle - mp.parallactic; // the lit side, degrees counter-clockwise from "up", as seen here
+    m.alt = mp.alt; m.az = mp.az; m.up = mp.alt > -0.26;
+    // Which way the lit edge faces, as seen from here: degrees counter-clockwise from straight up, -180..180.
+    m.tilt = ((((ill.angle - mp.parallactic) % 360) + 540) % 360) - 180;
     m.distance = mp.distance;
     const mk = Math.floor(ms / (10 * 60 * 1000));
     if (mk !== moonKey) {
@@ -153,7 +155,7 @@ export function createState({ slot = 0, seed = 1 } = {}) {
     w.label = live ? labelOf(cur.code) : "";
     w.kind = kindOf(cur.code);
     const feels = cur.feels ?? cur.temp;
-    w.falling = fallingOf(cur.code, cur.precip, feels);
+    w.falling = fallingOf(cur.code, cur.precip, cur.temp); // rain or snow goes by the air, not the wind chill
     w.fog = cur.code === 45 || cur.code === 48;
     w.windDirTarget = cur.windDir ?? 250;
     w.windFrom = compassPoint(w.windDirTarget);
@@ -246,8 +248,8 @@ export function createState({ slot = 0, seed = 1 } = {}) {
       td.live = true;
       td.level = a.ft + (b.ft - a.ft) * k;
       td.rising = b.kind === "high";
-      td.next = { kind: b.kind, ms: b.ms, ft: b.ft, minutes: Math.round((b.ms - ms) / 60000) };
-      td.prev = { kind: a.kind, ms: a.ms, ft: a.ft };
+      Object.assign(td.next, { kind: b.kind, ms: b.ms, ft: b.ft, minutes: Math.round((b.ms - ms) / 60000) });
+      Object.assign(td.prev, { kind: a.kind, ms: a.ms, ft: a.ft });
       td.events = list;
     } else {
       // No table: the mean semidiurnal tide (12.42 h), phased from a known high water.
@@ -257,8 +259,8 @@ export function createState({ slot = 0, seed = 1 } = {}) {
       td.level = 2.6 + 2.6 * Math.cos(ph * Math.PI * 2);
       td.rising = ph > 0.5;
       const toNext = (td.rising ? 1 - ph : 0.5 - ph) * M2;
-      td.next = { kind: td.rising ? "high" : "low", ms: ms + toNext, ft: td.rising ? 5.2 : 0, minutes: Math.round(toNext / 60000) };
-      td.prev = { kind: td.rising ? "low" : "high", ms: ms + toNext - M2 / 2, ft: td.rising ? 0 : 5.2 };
+      Object.assign(td.next, { kind: td.rising ? "high" : "low", ms: ms + toNext, ft: td.rising ? 5.2 : 0, minutes: Math.round(toNext / 60000) });
+      Object.assign(td.prev, { kind: td.rising ? "low" : "high", ms: ms + toNext - M2 / 2, ft: td.rising ? 0 : 5.2 });
       td.events = [];
     }
     const lo = Math.min(td.prev.ft, td.next.ft);
@@ -266,9 +268,18 @@ export function createState({ slot = 0, seed = 1 } = {}) {
     td.norm = hi > lo ? clamp((td.level - lo) / (hi - lo)) : 0.5; // 0 at low water, 1 at high
 
     // ----- today's fact -----
-    // Facts carry the day they are for: yesterday's are not shown after midnight.
-    const todayName = `${c.month} ${z.day}`;
-    const facts = (Array.isArray(data?.facts) ? data.facts : []).filter((f) => f && f.value && (!f.day || f.day === todayName));
+    // Facts carry the day they are for ("November 27"): yesterday's are not shown
+    // after midnight, nor an old set kept from days ago. (A source that is a few
+    // hours ahead of New York is let through.)
+    const tomorrow = zoned(startOfDay(ms, 1) + 12 * HOUR);
+    const isCurrent = (day) => {
+      const m = /^([A-Za-z]+)\s+0?(\d{1,2})\b/.exec(day);
+      if (!m) return true;
+      const month = m[1].toLowerCase();
+      const n = Number(m[2]);
+      return (month === c.month.toLowerCase() && n === z.day) || (month === MONTHS[tomorrow.month - 1].toLowerCase() && n === tomorrow.day);
+    };
+    const facts = (Array.isArray(data?.facts) ? data.facts : []).filter((f) => f && f.value && (typeof f.day !== "string" || isCurrent(f.day)));
     state.fact = factFor(facts, state.slot ? state.slot * 15 * 60 * 1000 : ms);
 
     // ----- ready-made strings for the readouts -----

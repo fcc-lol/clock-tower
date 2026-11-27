@@ -50,7 +50,7 @@ export function modelSky(ms, cloud = 0, falling = null, fog = false) {
     // Even at midday the sky is paler toward the sun and deeper away from it.
     if (sun.alt > 0) clear = adjust(clear, { l: (l) => l + 0.07 * (near - 0.35) * Math.min(1, sun.alt / 10) });
     let c = mix(clear, CLOUDY(alt01(sun.alt)), Math.pow(clamp(cloud), 1.2));
-    if (fog) c = mix(c, sun.alt > 0 ? "#c2c6c8" : "#34353a", 0.6);
+    if (fog) c = mix(c, mix("#34353a", "#c2c6c8", clamp((sun.alt + 6) / 12)), 0.6);
     if (falling === "storm") c = adjust(c, { l: (l) => l * 0.62, c: (v) => v * 0.8 });
     else if (falling === "snow") c = adjust(c, { l: (l) => l * 0.96 + 0.03, c: (v) => v * 0.6 });
     else if (falling) c = adjust(c, { l: (l) => l * 0.8, c: (v) => v * 0.85 });
@@ -170,6 +170,8 @@ export function resolveSim(params, now = Date.now()) {
   const overrides = {};
   if (scenario) for (const k of ["temp", "wind", "gust", "cloud", "code", "humidity", "aqi", "precip"]) if (scenario[k] != null) overrides[k] = scenario[k];
   if (wxParam) wx = wxParam === "none" || wxParam === "offline" ? null : PRESETS[wxParam] ? wxParam : wxParam === "live" ? "live" : wx;
+  // A scenario's own figures (84 degrees at noon in July) belong to its weather, not to another preset.
+  if (scenario && wx !== scenario.wx) for (const k of Object.keys(overrides)) delete overrides[k];
   if (atParam) ms = parseAt(atParam, now) ?? ms;
   // Live readings belong to the real present: at any other instant, simulate.
   if (wx === "live" && ms != null) wx = "partly";
@@ -197,7 +199,8 @@ export function simulate({ wx = "overcast", ms = Date.now(), overrides = {} } = 
   const empty = { weather: null, air: null, sky: null, skyDay: [], tides: null, facts: [], fetched: {}, simulated: true };
   if (!wx || !PRESETS[wx]) return empty;
   const p = { ...PRESETS[wx], ...overrides };
-  const seed = Math.floor(ms / (6 * HOUR));
+  // The variation belongs to the preset, not the hour, so a time-lapse does not lurch.
+  const seed = [...wx].reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) % 9973, 7);
   const cloud0 = clamp(p.cloud / 100);
   const hod = (t) => {
     const z = zoned(t);
@@ -210,6 +213,7 @@ export function simulate({ wx = "overcast", ms = Date.now(), overrides = {} } = 
   const wet = p.precip > 0;
   const kind = [71, 73, 75, 77, 85, 86].includes(p.code) ? "snow" : [95, 96, 99].includes(p.code) ? "storm" : wet ? "rain" : null;
 
+  const windWave = (dh) => 0.85 + 0.3 * Math.sin(dh / 4.2 + hash(seed + 2) * 6);
   // Conditions `dh` hours from now: the preset fades toward ordinary weather.
   const f = (t) => {
     const dh = (t - ms) / HOUR;
@@ -217,7 +221,7 @@ export function simulate({ wx = "overcast", ms = Date.now(), overrides = {} } = 
     const drift = 22 * Math.sin(dh / 6.5 + hash(seed + 1) * 6);
     const cloud = clamp((p.cloud * w + (42 + drift) * (1 - w)) / 100) * 100;
     const temp = mean + amp * wave(hod(t)) + (trend * dh) / 24;
-    const wind = Math.max(0, p.wind * (0.55 + 0.45 * w) * (0.85 + 0.3 * Math.sin(dh / 4.2 + hash(seed + 2) * 6)));
+    const wind = Math.max(0, (p.wind * (0.55 + 0.45 * w) * windWave(dh)) / windWave(0));
     const precip = wet ? p.precip * w * w * (0.6 + 0.8 * hash(seed + Math.round(dh) * 7.3)) : 0;
     const pop = wet ? clamp(0.12 + 0.88 * w) * 100 : clamp(0.04 + 0.18 * (cloud / 100) * hash(seed + Math.round(dh) * 3.1)) * 100;
     const code = Math.abs(dh) < 3 ? p.code : precip > 0.01 ? (kind === "snow" ? 71 : 61) : cloud > 85 ? 3 : cloud > 30 ? 2 : cloud > 10 ? 1 : 0;
