@@ -1563,7 +1563,6 @@ export default {
       if (vA > 0.01) for (let i = 0; i < 3; i++) drawVellum(vellums[i], vA * VEL_A[i], null);
 
       // the city, far to near; each layer's windows that are on the turn twinkle
-      if (s.frame > 3) { ctx.restore(); return; }
       const lit = P.lit;
       const pf = Math.round(swayX * 2), pm = Math.round(swayX * 5), pb = Math.round(swayX * 8);
       const v3 = vellums[3];
@@ -1663,6 +1662,7 @@ export default {
       ctx.fill();
 
       // rain: threads hung from above, leaning with the wind
+      if (s.frame > 3) { ctx.restore(); return; }
       if (w.falling && w.falling !== "snow" && w.intensity > 0.01) {
         const nThreads = Math.min(NR, Math.round(30 + 120 * w.intensity));
         const slant = clamp(lat * w.wind * 0.012, -0.38, 0.38);

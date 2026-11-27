@@ -51,7 +51,11 @@ const SIN = Math.sin((TILT * Math.PI) / 180), COS = Math.cos((TILT * Math.PI) / 
 const MAXREG = 6;             // px: the most a plate may sit out of register
 
 const PAPER_DAY = "#f1ecdf", PAPER_NIGHT = "#0b0a0d";
-const INK_DAY = "#131114", INK_NIGHT = "#a09784"; // the night cream stays just below "light" so the room stays dark
+const PAPER_GOLD = "#f5dcb2", PAPER_DIM = "#d9d2c4"; // the stock in low sun: warm when it is clear, greyer under cloud
+// Ink C: near-black by day; at night a dim cream that keeps the room dark, which
+// brightens toward near-white as the ground approaches the switch, so the type
+// reads on both sides of it
+const INK_DAY = "#131114", INK_NIGHT = "#a09784", INK_TWI = "#f3eee3";
 
 // Ink B by temperature: [lightness, chroma, hue, which way to turn if the sky sits on the same hue]
 const LADDER = [
@@ -306,15 +310,15 @@ export default {
     // that must be sharp is DOM above it) and only when something on the
     // plates has moved: about 15 times a second while the weather crawls,
     // barely at all on a still, clear day.
-    const gl = shader(root, { frag: FRAG, maxScale: 0.75 });
+    const gl = shader(root, { frag: FRAG, maxScale: 0.6 });
     const uP = new Float32Array(3), uA = new Float32Array(3), uB = new Float32Array(3), uAB = new Float32Array(3);
     const uReg = new Float32Array(4), uSky = new Float32Array(4), uWx = new Float32Array(4), uMo = new Float32Array(4);
     const uRoll = new Float32Array(4), uOld = new Float32Array(4), uFx = new Float32Array(4), uDry = new Float32Array(2);
-    const uStamp = new Float32Array(4), uSrot = new Float32Array(2), uC = new Float32Array(4);
+    const uStamp = new Float32Array(4), uSrot = new Float32Array(2), uC = new Float32Array(4), uGale = new Float32Array(2);
     gl.set("u_p", uP); gl.set("u_a", uA); gl.set("u_b", uB); gl.set("u_ab", uAB);
     gl.set("u_reg", uReg); gl.set("u_sky", uSky); gl.set("u_wx", uWx); gl.set("u_mo", uMo);
     gl.set("u_roll", uRoll); gl.set("u_old", uOld); gl.set("u_fx", uFx); gl.set("u_dry", uDry);
-    gl.set("u_stamp", uStamp); gl.set("u_srot", uSrot); gl.set("u_c", uC);
+    gl.set("u_stamp", uStamp); gl.set("u_srot", uSrot); gl.set("u_c", uC); gl.set("u_gale", uGale);
     uMo[3] = (seed % 977) * 0.137 + 1.3;
     uRoll[0] = uRoll[1] = 1e5; // at rest the whole sheet is the current pull
 
@@ -449,17 +453,25 @@ export default {
     // A ground's way from its night colour to its day colour is bent so that
     // paper and both fields all pass the same mid tone at the same moment (g = 0.5):
     // that is where ink C changes from black to cream, legible on either side.
-    const LSTAR = 0.475;
+    // 0.56 is where near-white and near-black type read equally well (about 4:1 each)
+    const LSTAR = 0.56;
     const cross = (night, day, g) => {
       const ln = toOklab(night)[0], ld = toOklab(day)[0];
       const w = clamp((LSTAR - ln) / Math.max(0.01, ld - ln), 0.06, 0.94);
       return mix(night, day, Math.pow(g, Math.log(w) / Math.log(0.5)));
     };
     let hueB = null;
-    let pal = { p: PAPER_NIGHT, a: "#000", b: "#000", ab: "#000", g: 0 };
+    let pal = { p: PAPER_NIGHT, a: "#000", b: "#000", ab: "#000", g: 0, inkN: INK_NIGHT };
     let dirty = true;
     function palette(s, snap) {
-      const g = smoothstep(0.16, 0.62, s.daylight);
+      // the stock moves continuously with the light, but hurries through the
+      // middle, where neither ink reads well on it (a few minutes at twilight)
+      const g0 = smoothstep(0.16, 0.62, s.daylight);
+      const g = g0 < 0.5 ? 0.5 * Math.pow(2 * g0, 2.6) : 1 - 0.5 * Math.pow(2 - 2 * g0, 2.6);
+      // low sun: the paper takes the light of the hour, warm and golden in a
+      // clear sky, dimmer and greyer under cloud (the half-light before dusk)
+      const low = smoothstep(14, 1, s.sun.alt), cl = clamp(s.weather.cloud / 100);
+      const paperDay = mix(mix(PAPER_DAY, PAPER_GOLD, low * (1 - 0.75 * cl) * 0.85), PAPER_DIM, low * cl * 0.6);
       const sky = toOklch(s.sky.mean);
       const hA = lerpAngle(255, sky.h, smoothstep(0.004, 0.02, sky.c));
       const Ad = oklch(clamp(sky.l, 0.66, 0.8), clamp(sky.c * 1.15, 0.045, 0.15), hA);
@@ -476,11 +488,13 @@ export default {
       hueB = hueB == null || snap ? hB : lerpAngle(hueB, hB, 0.12);
       const cB = lerp(lo[1], hi[1], k);
       const Bd = oklch(lerp(lo[0], hi[0], k), cB, hueB);
-      // yellow cannot glow at night (dark yellow is olive): it turns to amber
-      const hBn = hueB > 70 && hueB < 125 ? lerpAngle(hueB, 64, smoothstep(125, 95, hueB) * smoothstep(70, 85, hueB)) : hueB;
-      const Bn = oklch(0.285, Math.min(0.125, cB * 0.8), hBn);
+      // warm inks cannot glow in the dark (dark yellow is olive, dark orange is
+      // brown): at night they turn to embers, orange to crimson, yellow to vermilion
+      const warm = smoothstep(14, 30, hueB) * smoothstep(132, 116, hueB);
+      const hBn = lerpAngle(hueB, remap(hueB, 48, 100, 22, 36), warm);
+      const Bn = oklch(lerp(0.285, 0.3, warm), Math.min(0.125, cB * 0.8), hBn);
 
-      const PAd = mul(PAPER_DAY, Ad), PBd = mul(PAPER_DAY, Bd);
+      const PAd = mul(paperDay, Ad), PBd = mul(paperDay, Bd);
       // the overprint: the two inks multiplied, as on the press, with the little
       // extra saturation real ink trapping gives (so blue over orange is a rich
       // rust, not mud)
@@ -488,13 +502,17 @@ export default {
       // toward a deep version of ink B (blue over orange prints as terracotta).
       const ab = toOklch(mul(PAd, Bd));
       const lean = smoothstep(148, 160, Math.abs(((hueB - hA + 540) % 360) - 180)) * 0.85;
-      const PABd = oklch(ab.l + 0.035, Math.min(0.17, ab.c * 1.6 + 0.04 + lean * 0.03), lerpAngle(ab.h, hueB - 14, lean));
+      // Yellow over a sky blue prints green, as on the press, not acid olive.
+      const green = smoothstep(72, 90, hueB) * smoothstep(128, 110, hueB) * smoothstep(195, 220, hA) * smoothstep(295, 275, hA);
+      const hAB = lerpAngle(lerpAngle(ab.h, hueB - 14, lean), 142, green * 0.9);
+      const PABd = oklch(ab.l + 0.035 + 0.07 * lean, Math.max(0.09 + 0.03 * lean, Math.min(0.17, ab.c * 1.6 + 0.04 + lean * 0.03)) * (1 - 0.15 * green), hAB);
       const PAn = scr(PAPER_NIGHT, An), PBn = scr(PAPER_NIGHT, Bn), PABn = scr(PAn, Bn);
-      const p = cross(PAPER_NIGHT, PAPER_DAY, g);
+      const p = cross(PAPER_NIGHT, paperDay, g);
       if (p !== pal.p || g !== pal.g) dirty = true;
-      pal = { p, a: cross(PAn, PAd, g), b: cross(PBn, PBd, g), ab: cross(PABn, PABd, g), g };
+      const inkN = mix(INK_NIGHT, INK_TWI, smoothstep(0.08, 0.5, g));
+      pal = { p, a: cross(PAn, PAd, g), b: cross(PBn, PBd, g), ab: cross(PABn, PABd, g), g, inkN };
       fill(uP, pal.p); fill(uA, pal.a); fill(uB, pal.b); fill(uAB, pal.ab);
-      fill(uC, INK_NIGHT);
+      fill(uC, inkN);
       uC[3] = 1 - smoothstep(0.35, 0.65, g);
       if (shown.fr !== pal.ab) { shown.fr = pal.ab; wrap.style.setProperty("--fr", pal.ab); dirty = true; }
       if (shown.bg !== pal.p) { shown.bg = pal.p; root.style.background = pal.p; }
@@ -504,7 +522,7 @@ export default {
         fallback.fbAB.style.background = pal.ab;
       }
     }
-    const inkFor = (day) => (day ? INK_DAY : INK_NIGHT);
+    const inkFor = (day) => (day ? INK_DAY : pal.inkN);
 
     // ---- pulls: a drum pass that wipes the black plate from one copy to the other ----
     let cur = 0;
@@ -573,7 +591,15 @@ export default {
         }
         lastMs = s.ms;
 
-        if (jumped || t - palT > 0.4 || s.frame < 3) { palette(s, jumped); palT = t; }
+        if (jumped || t - palT > 0.4 || s.frame < 3) {
+          palette(s, jumped);
+          palT = t;
+          // the night cream brightens toward the switch (not during a pull, which carries its own ink)
+          if (!inkDay && !pull.on && shown.inkN !== pal.inkN) {
+            shown.inkN = pal.inkN;
+            layers[0].win.style.color = layers[1].win.style.color = pal.inkN;
+          }
+        }
         writeReadouts(s);
 
         // ---- the black plate ---------------------------------------------------
@@ -692,9 +718,11 @@ export default {
         uFx[1] = smoothstep(84, 96, wx.temp) * 3.2;
         uFx[2] = smoothstep(90, 170, wx.aqi) * 0.42;
         uFx[3] += dt * 0.55;
+        uGale[0] = (vx >= 0 ? 1 : -1) * remap(wx.wind, 9, 30, 0, 44) * uFx[0];
+        uGale[1] += dt * (0.15 + wx.wind * 0.012);
 
         // ---- draw the plates when something on them has changed ---------------------
-        const crawling = uWx[0] > 0 || uWx[2] > 0 || uWx[3] > 0 || uFx[1] > 0.05 || uSky[0] > 0.08;
+        const crawling = uWx[0] > 0 || uWx[2] > 0 || uWx[3] > 0 || uFx[1] > 0.05 || uSky[0] > 0.08 || Math.abs(uGale[0]) > 1;
         const since = t - lastDraw;
         const resized = gl.canvas.width !== drawnW || gl.canvas.height !== drawnH;
         if (dirty || resized || jumped || moved || rolling || (crawling && since >= 1 / 15) || since >= 0.5 || s.frame < 2) {

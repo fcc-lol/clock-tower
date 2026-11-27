@@ -1118,7 +1118,7 @@ export default {
         if (cj < 0) cj = 0; else if (cj >= SR) cj = SR - 1;
         dbk[i] = (skyLum[cj * SC + ci] < birdFlip ? 1 : 0) + 2;
       }
-      for (let b = 0; b < 0; b++) {
+      for (let b = 0; b < 4; b++) {
         ctx.fillStyle = dotStyles[b];
         ctx.beginPath();
         for (let i = b < 2 ? 0 : NDG; i < ND; i++) {
@@ -1394,7 +1394,6 @@ export default {
         syncLook(s);
         step(s, s.dt, s.t);
         syncLayers(s, s.dt);
-        draw(s, s.t);
       },
     };
   },

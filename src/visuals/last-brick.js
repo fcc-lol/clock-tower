@@ -857,6 +857,11 @@ export default {
         simStep(h, false, tau / 900);
       }
       instant = false;
+      // snow has been lying on whatever stands all along, not just since the
+      // last thirty seconds
+      if (env.snow > 0) for (let i = 0; i < NB; i++) {
+        if (kind[i] && (i < COLS || !kind[i - COLS])) cap[i] = Math.max(cap[i], (0.35 + 0.65 * env.snow) * (0.6 + 0.4 * hash(i, seed + 3)));
+      }
       nCells = 0;
       cellFlag.fill(0);
       rowDirty.fill(1);
@@ -1056,7 +1061,7 @@ export default {
           const i = rr * COLS + c;
           if (!kind[i] || cap[i] < 0.06 || (rr > r && kind[r * COLS + c])) continue;
           const top = WY + rr * BH;
-          const hgt = 2 + Math.round(cap[i] * 4);
+          const hgt = 3 + Math.round(cap[i] * 7);
           const bx = WX + c * BW;
           wc.fillRect(bx + 1, top - hgt + 1, BW - 2, hgt);
           if (cap[i] > 0.5) wc.fillRect(bx + 5 + ((hash(i, 5) * 12) | 0), top - hgt - 1, BW - 22, 2);
@@ -1174,10 +1179,11 @@ export default {
       const u = Math.round((U0 + (1 - U0) * smoothstep(0.06, 0.7, dl)) * 60) / 60;
       const fr = Math.round(smoothstep(35, 18, s.weather.temp) * 4) / 4;
       const wt = Math.round(env.slick * 4) / 4;
+      const ht = Math.round(smoothstep(84, 100, s.weather.temp) * 4) / 4;
       const day = s.sky.day || [];
       // a single number standing for everything the glaze depends on; the
       // live sky is re-read once a minute, not every frame
-      const key = (Math.floor(s.ms / 60000) % 100000) * 1e9 + Math.round(u * 60) * 1e7 + Math.round(fr * 4) * 1e6 + Math.round(wt * 4) * 1e5 +
+      const key = (Math.floor(s.ms / 60000) % 100000) * 1e9 + Math.round(u * 60) * 1e7 + Math.round(fr * 4) * 1e6 + Math.round(wt * 4) * 1e5 + ht * 4e4 +
         (day.length % 100) * 1e3 + (day.length ? Math.floor(day[day.length - 1].ms / 60000) % 1000 : 0);
       if (key !== palKey) {
         palKey = key;
@@ -1194,7 +1200,9 @@ export default {
         const cloud = clamp(s.weather.cloud / 100);
         const top = mix(NIGHT_SKY, adjust(s.sky.mean, { l: 0.3, c: (v) => Math.min(v * 0.9, 0.075) }), dk);
         // (low down it is the western sky: the studio looks across the river at Manhattan)
-        const bot = mix(mix("#0f1629", "#2a1b16", cloud * 0.85), adjust(mix(s.sky.mean, s.sky.west, 0.7), { l: 0.43, c: (v) => Math.min(v * 1.15, 0.1) }), dk);
+        let bot = mix(mix("#0f1629", "#2a1b16", cloud * 0.85), adjust(mix(s.sky.mean, s.sky.west, 0.7), { l: 0.43, c: (v) => Math.min(v * 1.15, 0.1) }), dk);
+        // a hot day leaves an amber haze lying over the river
+        if (ht > 0) bot = mix(bot, "#a8673a", 0.42 * ht * (0.3 + 0.7 * dk));
         ground = mix(NIGHT_GROUND, adjust(s.sky.mean, { l: 0.18, c: (v) => Math.min(v, 0.03) }), dk);
         // one background for the whole stage: the sky down to the horizon, then the ground
         wrap.style.background = `linear-gradient(to bottom, ${top} 0px, ${mix(top, bot, 0.45)} ${FLOOR / 2}px, ${bot} ${FLOOR}px, ${mix(ground, bot, 0.25)} ${FLOOR}px, ${ground} ${FLOOR + 160}px, ${ground} ${H}px)`;
