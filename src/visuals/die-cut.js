@@ -1252,7 +1252,9 @@ export default {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = "source-over";
-      // the sky, only where the cuts are (it also wipes the last frame there)
+      // a whole-canvas clear lets the browser drop the last frame's drawing instead of keeping it queued
+      scene.clear();
+      // the sky, only where the cuts are
       for (let i = 0; i < nClip; i++) {
         const x = clip[i * 4], y = clip[i * 4 + 1], cw = clip[i * 4 + 2], ch = clip[i * 4 + 3];
         ctx.drawImage(skyB.can, x, y, cw, ch, x, y, cw, ch);

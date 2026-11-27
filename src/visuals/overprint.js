@@ -71,6 +71,7 @@ uniform vec4 u_mo;    // x rain travel (px), y snow fall (px), z storm, w seed
 uniform vec4 u_roll;  // x, y: where the rollers re-inking plates A and B are (px; above it is the new pull); z, w: how wet they are
 uniform vec4 u_old;   // the last pull's registration, relative to the new one (A xy, B zw), shown below a roller
 uniform vec4 u_fx;    // x clear-sky bars, y heat shimmer, z haze (air quality), w shimmer phase
+uniform vec2 u_dry;   // during the print-in: how much lighter the last pull's dried ink is, plates A and B
 uniform vec4 u_stamp; // xy centre, zw half size of the stamped box (z = 0: none)
 uniform vec2 u_srot;  // its angle: sin, cos
 uniform vec4 u_c;     // ink C (rgb) and how much of the night it is: on black stock snow is printed in it
@@ -218,8 +219,8 @@ void main() {
   float sA = seed + 2.0 + 5.3 * newA, sB = seed + 8.0 + 5.3 * newB;
   float bandA = 1.0 - 0.1 * vn(vec2(sA, (p.y - offA.y) * 0.011)) - 0.05 * mot;
   float bandB = 1.0 - 0.1 * vn(vec2(sB, (p.y - offB.y) * 0.013)) - 0.05 * (1.0 - mot);
-  float ca = inA * dotA * (1.0 - drop) * bandA * (1.0 - 0.45 * pin);
-  cb = cb * (1.0 - drop * inB) * bandB * (1.0 - 0.45 * pin);
+  float ca = inA * dotA * (1.0 - drop) * bandA * (1.0 - 0.45 * pin) * (1.0 - u_dry.x * (1.0 - newA));
+  cb = cb * (1.0 - drop * inB) * bandB * (1.0 - 0.45 * pin) * (1.0 - u_dry.y * (1.0 - newB));
 
   vec3 col = mix(mix(u_p, u_a, ca), mix(u_b, u_ab, ca), cb);
   // fresh ink is glossy for a few seconds
@@ -259,8 +260,8 @@ const CSS = `
 .op .stamp { position: relative; margin: 36px 12px 12px; padding: 24px 38px 27px; transform-origin: 50% 50%; }
 .op .fl { font-weight: 500; font-size: 25px; letter-spacing: 0.13em; line-height: 30px; }
 .op .fv { margin-top: 10px; text-transform: none; font-size: 40px; line-height: 1.16em; letter-spacing: -0.005em; }
-.op .bar { position: absolute; left: 0; top: 0; width: ${W}px; height: 64px; will-change: transform; pointer-events: none;
-  background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.05) 30%, rgba(0,0,0,0.34) 62%, rgba(0,0,0,0.5) 70%, rgba(255,255,255,0.3) 73%, rgba(255,255,255,0.08) 78%, rgba(0,0,0,0.16) 86%, rgba(0,0,0,0) 100%); }
+.op .bar { position: absolute; left: 0; top: 0; width: ${W}px; height: 150px; will-change: transform; pointer-events: none;
+  background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.05) 18%, rgba(0,0,0,0.16) 40%, rgba(255,255,255,0.12) 47%, rgba(255,255,255,0.34) 52%, rgba(255,255,255,0.1) 58%, rgba(0,0,0,0.22) 70%, rgba(0,0,0,0.5) 75.5%, rgba(255,255,255,0.18) 77%, rgba(0,0,0,0.08) 80%, rgba(0,0,0,0) 100%); }
 .op .fb { position: absolute; }
 `;
 
@@ -283,11 +284,11 @@ export default {
     const gl = shader(root, { frag: FRAG, maxScale: 0.75 });
     const uP = new Float32Array(3), uA = new Float32Array(3), uB = new Float32Array(3), uAB = new Float32Array(3);
     const uReg = new Float32Array(4), uSky = new Float32Array(4), uWx = new Float32Array(4), uMo = new Float32Array(4);
-    const uRoll = new Float32Array(4), uOld = new Float32Array(4), uFx = new Float32Array(4);
+    const uRoll = new Float32Array(4), uOld = new Float32Array(4), uFx = new Float32Array(4), uDry = new Float32Array(2);
     const uStamp = new Float32Array(4), uSrot = new Float32Array(2), uC = new Float32Array(4);
     gl.set("u_p", uP); gl.set("u_a", uA); gl.set("u_b", uB); gl.set("u_ab", uAB);
     gl.set("u_reg", uReg); gl.set("u_sky", uSky); gl.set("u_wx", uWx); gl.set("u_mo", uMo);
-    gl.set("u_roll", uRoll); gl.set("u_old", uOld); gl.set("u_fx", uFx);
+    gl.set("u_roll", uRoll); gl.set("u_old", uOld); gl.set("u_fx", uFx); gl.set("u_dry", uDry);
     gl.set("u_stamp", uStamp); gl.set("u_srot", uSrot); gl.set("u_c", uC);
     uMo[3] = (seed % 977) * 0.137 + 1.3;
     uRoll[0] = uRoll[1] = 1e5; // at rest the whole sheet is the current pull
@@ -458,8 +459,11 @@ export default {
       // the overprint: the two inks multiplied, as on the press, with the little
       // extra saturation real ink trapping gives (so blue over orange is a rich
       // rust, not mud)
+      // Opposite hues cancel to a drab olive-brown; there the overprint leans
+      // toward a deep version of ink B (blue over orange prints as terracotta).
       const ab = toOklch(mul(PAd, Bd));
-      const PABd = oklch(ab.l + 0.035, Math.min(0.17, ab.c * 1.6 + 0.04), ab.h);
+      const lean = smoothstep(0.1, 0.035, ab.c) * 0.75;
+      const PABd = oklch(ab.l + 0.035, Math.min(0.17, ab.c * 1.6 + 0.04 + lean * 0.03), lerpAngle(ab.h, hueB, lean));
       const PAn = scr(PAPER_NIGHT, An), PBn = scr(PAPER_NIGHT, Bn), PABn = scr(PAn, Bn);
       const p = cross(PAPER_NIGHT, PAPER_DAY, g);
       if (p !== pal.p || g !== pal.g) dirty = true;
@@ -586,15 +590,19 @@ export default {
           uRoll[3] = pt < PASS_B ? 0 : Math.exp(-Math.max(0, pt - PASS_B - PASS * 0.5) / 2.2);
           if (pt >= PASS_A && pt < PASS_A + PASS) barY = yA;
           else if (pt >= PASS_B && pt < PASS_B + PASS) barY = yB;
+          // the last pull has dried a shade lighter than the fresh ink coming down over it
+          uDry[0] = pt < PASS_A + PASS ? 0.2 * smoothstep(0, 0.4, pt) : 0;
+          uDry[1] = pt < PASS_B + PASS ? 0.2 * smoothstep(0, 0.4, pt) : 0;
           rolling = true;
         } else if (uRoll[2] !== 0 || uRoll[3] !== 0) {
           uRoll[0] = uRoll[1] = 1e5;
           uRoll[2] = uRoll[3] = 0;
+          uDry[0] = uDry[1] = 0;
           dirty = true;
         }
         if (barY > -100 && barY < H + 100) {
           bar.style.visibility = "visible";
-          bar.style.transform = `translateY(${f1(barY - 46)}px)`;
+          bar.style.transform = `translateY(${f1(barY - 114)}px)`; // the drum's contact line is the roller position
         } else if (bar.style.visibility !== "hidden") bar.style.visibility = "hidden";
 
         // ---- registration: the wind knocks the colour plates about -------------------

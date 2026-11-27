@@ -1109,33 +1109,52 @@ export default {
       for (let b = 0; b < (dbgB ? 12 : 0); b++) {
         const from = b >= 6 ? NG : 0;
         const to = b >= 6 ? N : NG;
-        ctx.strokeStyle = styles[b];
-        ctx.lineWidth = WIDTH[(b % 6) >> 1];
+        ctx.fillStyle = styles[b];
+        const wd = WIDTH[(b % 6) >> 1];
         const gull = (b % 6) >> 1 === 2;
         ctx.beginPath();
         for (let i = from; i < to; i++) {
           if (bk[i] !== b) continue;
-          // seen from far off and side-on: a wingspan that beats between a V and a ^
+          // seen from far off and side-on: a wingspan that beats between a V and a ^,
+          // filled (much cheaper than stroking) and tapering from the body to the tips
           const hs = half[i];
           const f = fsin(t * flap * (1 + 0.3 * bankS[i]) + ph[i] * 3) * beat;
-          const sx = bankC[i] * hs * (1 - 0.14 * f * f), sy = bankS[i] * hs * (1 - 0.14 * f * f);
+          const sq = 1 - 0.14 * f * f;
+          const sx = bankC[i] * hs * sq, sy = bankS[i] * hs * sq;
           const ux_ = bankS[i] * hs, uy_ = -bankC[i] * hs;
+          const ox = -bankS[i] * wd, oy = bankC[i] * wd;
           const x = px[i], y = py[i];
           if (gull) {
             const wl = 0.26 + 0.36 * f, tl = 0.62 * f - 0.04;
-            ctx.moveTo(x - sx + ux_ * tl, y - sy + uy_ * tl);
-            ctx.lineTo(x - sx * 0.46 + ux_ * wl, y - sy * 0.46 + uy_ * wl);
-            ctx.lineTo(x - ux_ * 0.06, y - uy_ * 0.06);
-            ctx.lineTo(x + sx * 0.46 + ux_ * wl, y + sy * 0.46 + uy_ * wl);
-            ctx.lineTo(x + sx + ux_ * tl, y + sy + uy_ * tl);
+            const ax = x - sx + ux_ * tl, ay = y - sy + uy_ * tl;
+            const bx = x - sx * 0.46 + ux_ * wl, by = y - sy * 0.46 + uy_ * wl;
+            const cx = x - ux_ * 0.06, cy = y - uy_ * 0.06;
+            const dx = x + sx * 0.46 + ux_ * wl, dy = y + sy * 0.46 + uy_ * wl;
+            const ex = x + sx + ux_ * tl, ey = y + sy + uy_ * tl;
+            ctx.moveTo(ax, ay);
+            ctx.lineTo(bx, by);
+            ctx.lineTo(cx, cy);
+            ctx.lineTo(dx, dy);
+            ctx.lineTo(ex, ey);
+            ctx.lineTo(ex + ox * 0.45, ey + oy * 0.45);
+            ctx.lineTo(dx + ox, dy + oy);
+            ctx.lineTo(cx + ox * 1.7, cy + oy * 1.7);
+            ctx.lineTo(bx + ox, by + oy);
+            ctx.lineTo(ax + ox * 0.45, ay + oy * 0.45);
           } else {
             const tl = 0.1 + 0.6 * f;
-            ctx.moveTo(x - sx + ux_ * tl, y - sy + uy_ * tl);
-            ctx.lineTo(x - ux_ * 0.16 * f, y - uy_ * 0.16 * f);
-            ctx.lineTo(x + sx + ux_ * tl, y + sy + uy_ * tl);
+            const ax = x - sx + ux_ * tl, ay = y - sy + uy_ * tl;
+            const bx = x - ux_ * 0.16 * f, by = y - uy_ * 0.16 * f;
+            const cx = x + sx + ux_ * tl, cy = y + sy + uy_ * tl;
+            ctx.moveTo(ax, ay);
+            ctx.lineTo(bx, by);
+            ctx.lineTo(cx, cy);
+            ctx.lineTo(cx + ox * 0.5, cy + oy * 0.5);
+            ctx.lineTo(bx + ox * 1.6, by + oy * 1.6);
+            ctx.lineTo(ax + ox * 0.5, ay + oy * 0.5);
           }
         }
-        ctx.stroke();
+        ctx.fill();
       }
       // birds on the wires, facing into the wind
       const d = -windSign;

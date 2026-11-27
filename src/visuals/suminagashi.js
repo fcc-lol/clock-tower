@@ -322,70 +322,88 @@ function blurV(src, dst, r) {
   }
 }
 
-// The work for one set of numerals, in five steps so that it can be spread
-// over five frames ahead of the minute. step() returns true when `target`
-// (Uint16Array) holds the field.
+// The work for one set of numerals, in thirteen small steps so that it can be
+// spread over as many frames (each a few ms). step() returns true when
+// `target` (Uint16Array) holds the field.
+const FIELD_STEPS = 13;
 function fieldJob(glyphs, target) {
   let stage = 0;
+  let m = null;
   let bx0 = 0, bx1 = 0, by0 = 0, by1 = 0;
+  const third = Math.ceil(FC / 3);
   return {
     step() {
-      if (stage === 0) {
-        const m = mask(FC, FR, (ctx) => {
-          ctx.scale(1 / CELL, 1 / CELL);
-          ctx.font = `800 ${NUM_SIZE}px ${NUM_FAMILY}`;
-          ctx.textBaseline = "alphabetic";
-          for (const g of glyphs) ctx.fillText(g.ch, g.x, g.y);
-        }).data;
-        bx0 = FC; bx1 = 0; by0 = FR; by1 = 0;
-        for (let y = 0, i = 0; y < FR; y++) {
-          for (let x = 0; x < FC; x++, i++) {
-            const a = m[i];
-            if (a === 0) {
-              gridOut[i] = INF;
-              gridIn[i] = 0;
-            } else {
-              if (x < bx0) bx0 = x;
-              if (x > bx1) bx1 = x;
-              if (y < by0) by0 = y;
-              if (y > by1) by1 = y;
-              if (a === 255) {
-                gridOut[i] = 0;
-                gridIn[i] = INF;
+      switch (stage) {
+        case 0:
+          m = mask(FC, FR, (ctx) => {
+            ctx.scale(1 / CELL, 1 / CELL);
+            ctx.font = `800 ${NUM_SIZE}px ${NUM_FAMILY}`;
+            ctx.textBaseline = "alphabetic";
+            for (const g of glyphs) ctx.fillText(g.ch, g.x, g.y);
+          }).data;
+          break;
+        case 1:
+          bx0 = FC; bx1 = 0; by0 = FR; by1 = 0;
+          for (let y = 0, i = 0; y < FR; y++) {
+            for (let x = 0; x < FC; x++, i++) {
+              const a = m[i];
+              if (a === 0) {
+                gridOut[i] = INF;
+                gridIn[i] = 0;
               } else {
-                const dd = 0.5 - a / 255;
-                gridOut[i] = dd > 0 ? dd * dd : 0;
-                gridIn[i] = dd < 0 ? dd * dd : 0;
+                if (x < bx0) bx0 = x;
+                if (x > bx1) bx1 = x;
+                if (y < by0) by0 = y;
+                if (y > by1) by1 = y;
+                if (a === 255) {
+                  gridOut[i] = 0;
+                  gridIn[i] = INF;
+                } else {
+                  const dd = 0.5 - a / 255;
+                  gridOut[i] = dd > 0 ? dd * dd : 0;
+                  gridIn[i] = dd < 0 ? dd * dd : 0;
+                }
               }
             }
           }
+          if (bx1 < bx0) { bx0 = 0; bx1 = 1; by0 = 0; by1 = 1; }
+          bx0 = Math.max(0, bx0 - 1); by0 = Math.max(0, by0 - 1);
+          bx1 = Math.min(FC - 1, bx1 + 1); by1 = Math.min(FR - 1, by1 + 1);
+          m = null;
+          break;
+        case 2: case 3: case 4: {
+          const x1 = Math.min(FC, (stage - 1) * third);
+          for (let x = (stage - 2) * third; x < x1; x++) edt1d(gridOut, x, FC, FR);
+          break;
         }
-        if (bx1 < bx0) { bx0 = 0; bx1 = 1; by0 = 0; by1 = 1; }
-        bx0 = Math.max(0, bx0 - 1); by0 = Math.max(0, by0 - 1);
-        bx1 = Math.min(FC - 1, bx1 + 1); by1 = Math.min(FR - 1, by1 + 1);
-      } else if (stage === 1) {
-        for (let x = 0; x < FC; x++) edt1d(gridOut, x, FC, FR);
-      } else if (stage === 2) {
-        for (let y = 0; y < FR; y++) edt1d(gridOut, y * FC, 1, FC);
-        const bw = bx1 - bx0 + 1, bh = by1 - by0 + 1;
-        for (let x = 0; x < bw; x++) edt1d(gridIn, by0 * FC + bx0 + x, FC, bh);
-        for (let y = 0; y < bh; y++) edt1d(gridIn, (by0 + y) * FC + bx0, 1, bw);
-      } else if (stage === 3) {
-        for (let i = 0; i < NCELL; i++) dist[i] = (Math.sqrt(gridOut[i]) - Math.sqrt(gridIn[i])) * CELL;
-        blurH(dist, blurA, 6);
-        blurV(blurA, blurB, 6);
-      } else {
-        blurH(blurB, blurA, 6);
-        blurV(blurA, blurB, 6);
-        for (let i = 0; i < NCELL; i++) {
-          const d = dist[i];
-          let k = (d - 14) / 170;
-          k = k < 0 ? 0 : k > 1 ? 1 : k * k * (3 - 2 * k);
-          const v = Math.round((d + (blurB[i] - d) * k + D_OFF) * D_Q);
-          target[i] = v < 0 ? 0 : v > 65535 ? 65535 : v;
+        case 5:
+          for (let y = 0; y < FR; y++) edt1d(gridOut, y * FC, 1, FC);
+          break;
+        case 6: {
+          const bw = bx1 - bx0 + 1, bh = by1 - by0 + 1;
+          for (let x = 0; x < bw; x++) edt1d(gridIn, by0 * FC + bx0 + x, FC, bh);
+          for (let y = 0; y < bh; y++) edt1d(gridIn, (by0 + y) * FC + bx0, 1, bw);
+          break;
         }
+        case 7:
+          for (let i = 0; i < NCELL; i++) dist[i] = (Math.sqrt(gridOut[i]) - Math.sqrt(gridIn[i])) * CELL;
+          break;
+        case 8: blurH(dist, blurA, 6); break;
+        case 9: blurV(blurA, blurB, 6); break;
+        case 10: blurH(blurB, blurA, 6); break;
+        case 11: blurV(blurA, blurB, 6); break;
+        default:
+          // near the figures the exact distance; further out the blurred one,
+          // so the far rings round off as surface tension would have them
+          for (let i = 0; i < NCELL; i++) {
+            const d = dist[i];
+            let k = (d - 14) / 170;
+            k = k < 0 ? 0 : k > 1 ? 1 : k * k * (3 - 2 * k);
+            const v = Math.round((d + (blurB[i] - d) * k + D_OFF) * D_Q);
+            target[i] = v < 0 ? 0 : v > 65535 ? 65535 : v;
+          }
       }
-      return ++stage >= 5;
+      return ++stage >= FIELD_STEPS;
     },
   };
 }
@@ -831,8 +849,8 @@ export default {
       ink.set("u_skyOld", vec3(skyInk(skyAgo(s, 30))));
       toneU[0] = 1 - 0.22 * (wx.fog ? 1 : 0);
       toneU[1] = 0.45;
-      toneU[2] = 0.13 + 0.07 * moonlight;
-      toneU[3] = 0.5 + 0.22 * moonlight;
+      toneU[2] = 0.17 + 0.06 * moonlight;
+      toneU[3] = 0.62 + 0.18 * moonlight;
       pal.fleck = dark ? "#fffdf6" : "#c8d0d8";
       pal.shade = dark ? "rgba(40,44,60,0.22)" : "rgba(0,0,0,0)";
     }

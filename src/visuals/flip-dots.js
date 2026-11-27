@@ -1348,7 +1348,7 @@ export default {
 
       // snow
       const snowing = fall === "snow";
-      snowTarget = snowing ? Math.round(50 + inten * 150) : 0;
+      snowTarget = snowing ? Math.round(50 + inten * 110) : 0;
       snowVx = clamp(windX * 0.15, -4.5, 4.5);
       snowFast = 1 + clamp(wind / 40, 0, 0.7);
       const dk = snowing ? Math.round(inten * 12) : -1;
@@ -1365,7 +1365,7 @@ export default {
           else continue;
         }
         sY[k] += sV[k] * dt;
-        let x = sX[k] + (snowVx + Math.sin(t * sF[k] + sP[k]) * 0.9) * dt;
+        let x = sX[k] + (snowVx + Math.sin(t * sF[k] + sP[k]) * 0.7) * dt;
         if (x < 0) x += COLS;
         else if (x >= COLS) x -= COLS;
         sX[k] = x;

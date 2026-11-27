@@ -602,7 +602,7 @@ export default {
       moundEl.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="position:absolute;left:0;top:0"><path style="fill:var(--sn)" d="${d}"/></svg>`;
     }
     wrap.append(moundEl, fogFront);
-    const fx = canvas2d(wrap, { adaptive: true });
+    const fx = canvas2d(wrap, { adaptive: true, maxScale: 0.5 });
     grain(wrap, { opacity: 0.05 });
 
     // ----- snow caps ----------------------------------------------------------

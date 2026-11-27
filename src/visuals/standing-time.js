@@ -376,9 +376,7 @@ export default {
       for (const ch of str) w += meas.measureText(ch).width + ls;
       return w - ls;
     };
-    const PT={};const pn=()=>performance.now();
     function setGlyph(sl, f, str, s) {
-      const _t=pn();
       sl.str = str;
       f.str = str;
       const c = sl.cls;
@@ -410,14 +408,13 @@ export default {
         x = c.padX + (W - MX * 2) - advance(sl.font, b, ls);
         for (const ch of b) { sl.chars.push(ch); sl.cx.push(x); x += meas.measureText(ch).width + ls; }
       }
-      let _m=pn();sl.mask = mask(c.bw, c.bh, (ctx) => drawShape(ctx, sl, 0, 0)).data;PT.mask=(PT.mask||0)+pn()-_m;_m=pn();
-      analyse(sl);PT.an=(PT.an||0)+pn()-_m;
+      sl.mask = mask(c.bw, c.bh, (ctx) => drawShape(ctx, sl, 0, 0)).data;
+      analyse(sl);
       // the same figure put up at the same instant always weathers the same way
       sl.seed = (Math.floor((s.ms - sl.age * 1000) / 1000 + 0.5) % 100000) + sl.id * 7919;
       seedRivulets(sl);
       paintSil(sl, f);
       sl.palDrawn = -1;
-      PT.glyph=(PT.glyph||0)+pn()-_t;
     }
     function paintSil(sl, f) {
       const c = f.sctx;
@@ -900,8 +897,6 @@ export default {
 
     // ---- the ground layer: drawn when something in it changes ----------------------------
     function drawGround() {
-      const _t=pn();try{drawGround_();}finally{PT.ground=(PT.ground||0)+pn()-_t;}}
-    function drawGround_() {
       const g = ground.ctx;
       g.setTransform(1, 0, 0, 1, 0, 0);
       g.globalAlpha = 1;
@@ -1560,7 +1555,7 @@ export default {
         const stale = sl.palDrawn !== pal.version || sl.wetDrawn !== sl.wetKey || Math.abs(sl.D - sl.Ddrawn) >= 0.5;
         if (stale && budget > 0) {
           budget--;
-          {const _t=pn();buildFace(sl, sl.faces[sl.cur]);PT.face=(PT.face||0)+pn()-_t;}
+          buildFace(sl, sl.faces[sl.cur]);
           if (sl.palDrawn !== shown[`sil${sl.id}`]) {
             shown[`sil${sl.id}`] = sl.palDrawn;
             paintSil(sl, sl.faces[sl.cur]);
@@ -1696,7 +1691,7 @@ export default {
       drawAir(s);
     }
 
-    {const _t=pn();if (state && state.clock && state.clock.hh) update(state);PT.update=pn()-_t;console.warn(JSON.stringify(PT), digitCap, digitInk, mCap, R);}
+    if (state && state.clock && state.clock.hh) update(state);
     return { frame: update };
   },
 };

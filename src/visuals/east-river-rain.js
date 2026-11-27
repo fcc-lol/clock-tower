@@ -243,7 +243,7 @@ export default {
       .er .print { position: absolute; left: ${X0}px; top: ${Y0}px; width: ${PW}px; height: ${PH}px; overflow: hidden; }
       .er .inner { position: absolute; left: ${-X0}px; top: ${-Y0}px; width: ${W}px; height: ${H}px; }
       .er .sky { position: absolute; left: ${X0}px; top: ${Y0}px; width: ${PW}px; height: ${HY - Y0 + 2}px; }
-      .er .flash { position: absolute; left: ${X0}px; top: ${Y0}px; width: ${PW}px; height: 620px; opacity: 0; background: linear-gradient(to bottom, var(--flash) 0%, var(--flash) 30%, transparent 100%); }
+      .er .flash { position: absolute; left: ${X0}px; top: ${Y0}px; width: ${PW}px; height: 620px; opacity: 0; will-change: opacity; background: linear-gradient(to bottom, var(--flash) 0%, var(--flash) 30%, transparent 100%); }
       .er .river { position: absolute; left: ${X0}px; top: ${HY}px; width: ${PW}px; height: ${Y1 - HY}px; }
       .er .slide { will-change: transform; }
       .er .mist { position: absolute; left: 0; top: 0; will-change: transform, opacity; }
