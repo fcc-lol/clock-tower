@@ -1231,7 +1231,7 @@ export default {
         L.bob = (1 + 5 * windN) * noise.n2(t * 0.33, i * 7.3 + 2);
         L.sag = 9 + 16 * clamp(load) + 5 * env.snowCap + i * 0.8;
       }
-      const sub = dt > 0.085 ? 3 : dt > 0.05 ? 2 : 1;
+      const sub = dt > 0.06 ? 2 : 1;
       const h = dt / sub;
       for (const c of cloths) {
         // each cloth soaks or dries toward the weather, a little out of step with its neighbours
@@ -1287,7 +1287,7 @@ export default {
           // far enough that every sheet being changed is behind the wall
           const full = i === 0 || tx.mm[0] !== disp.mm[0] || tx.weekday !== disp.weekday;
           L.dist = full ? 966 : 500;
-          L.dur = 0.9 + L.dist / 400;
+          L.dur = 0.7 + L.dist / 620;
           L.phase = 1;
           L.t0 = s.t;
         }

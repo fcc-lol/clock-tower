@@ -331,7 +331,7 @@ export default {
       // AQI and UV hang in the lower storey's left flank, clear of the minutes
       nMoon.style.width = `${Math.min(flankR, Math.floor(W - 64 - (slabX1 + 48)))}px`;
       airW = Math.floor(CX - wm / 2 - EX - 48 - 64);
-      shown.temp = shown.sunV = shown.aqi = null; // refit on the next write
+      shown.temp = shown.sunV = shown.aqi = shown.moon = null; // refit on the next write
       aT.setAttribute("x", ampmX);
       meter.font = AMPM_FONT;
       const wa = meter.measureText(s.text.ampm).width;
@@ -845,7 +845,12 @@ export default {
       put("cond", nCond, s.text.condition);
       put("sunL", nSunL, s.text.sunLabel);
       if (put("sunV", nSunV, s.text.sunValue)) fitText(nSunV, flankR, SUN_PX);
-      put("moon", nMoonV, s.text.moon);
+      if (put("moon", nMoonV, s.text.moon)) {
+        // a long word (CRESCENT) can be wider than the flank: bring the size down until it fits
+        let size = VAL_PX;
+        nMoonV.style.fontSize = "";
+        while (size > 40 && nMoonV.scrollWidth > nMoon.clientWidth) nMoonV.style.fontSize = `${(size -= 2)}px`;
+      }
       if (put("aqi", nAqi, s.text.aqi) | put("uv", nUv, s.text.uv)) fitText(nAir, airW, AIR_PX); // a three-digit AQI beside wide minutes
       put("fl", nFl, s.text.factLabel);
       const fvNew = put("fv", nFv, s.text.factValue);

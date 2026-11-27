@@ -216,7 +216,7 @@ export default {
     );
     grain(wrap, { opacity: 0.05 });
 
-    const LAMP = 250; // the lantern's reach at night
+    const LAMP = 220; // the lantern's reach at night
     const haloCanvas = document.createElement("canvas");
     haloCanvas.width = haloCanvas.height = 128;
     {
@@ -1438,7 +1438,7 @@ export default {
             const dx = x + BW / 2 - b.x;
             const dy = y + BH / 2 - b.y;
             const f = 1 - Math.sqrt(dx * dx + dy * dy) / LAMP;
-            if (f <= 0.14) continue; // (too faint to see: not worth a fill)
+            if (f <= 0.18) continue; // (too faint to see: not worth a fill)
             fc.globalAlpha = dark * 0.85 * f * f;
             fc.fillStyle = kind[i] === 1 ? colLit[i] : STEEL_DAY;
             fc.fillRect(x + 3, y + 3, BW - 6, BH - 7);

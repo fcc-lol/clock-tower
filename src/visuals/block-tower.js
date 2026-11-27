@@ -657,7 +657,11 @@ export default {
     const moundEl = el("div", { class: "mound" });
     {
       let d = `M-10 ${H + 10}V${GROUND + 6}`;
-      for (let x = -10; x <= W + 40; x += 36) d += `Q${x + 18} ${f1(GROUND - 4 - r.range(0, 1) * (x > 30 && x < 1000 ? 20 : 34))} ${x + 36} ${f1(GROUND + 2 - r.range(0, 9))}`;
+      // In front of the tower the drift stays on the floor (it must not climb the base plank, where the fact is lettered); it heaps up only beside it.
+      for (let x = -10; x <= W + 40; x += 36) {
+        const front = x > 30 && x < 1000;
+        d += `Q${x + 18} ${f1(front ? GROUND + 14 - r.range(0, 1) * 4 : GROUND - 4 - r.range(0, 1) * 34)} ${x + 36} ${f1(front ? GROUND + 16 - r.range(0, 4) : GROUND + 2 - r.range(0, 9))}`;
+      }
       d += `V${H + 10}Z`;
       moundEl.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="position:absolute;left:0;top:0"><path style="fill:var(--sn)" d="${d}"/></svg>`;
     }

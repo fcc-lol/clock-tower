@@ -104,7 +104,7 @@ const vec2 A1 = vec2(${glf(A1[0])}, ${glf(A1[1])});
 const vec2 B0 = vec2(${glf(B0[0])}, ${glf(B0[1])});
 const vec2 B1 = vec2(${glf(B1[0])}, ${glf(B1[1])});
 const float MG = ${glf(M)};
-const vec2 C0 = vec2(${glf(CX - 16)}, ${glf(MY - 24)}), C1 = vec2(${glf(CX + CW + 16)}, ${glf(MY + 470)});   // the temperature column
+const vec2 C0 = vec2(${glf(CX - 16)}, ${glf(MY - 24)}), C1 = vec2(${glf(CX + CW + 16)}, ${glf(MY + 510)});   // the temperature column
 
 float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 float vn(vec2 p) {
@@ -293,14 +293,14 @@ const CSS = `
 .op .fr { color: var(--fr); will-change: transform; }
 .op .ampm { position: absolute; left: ${CX}px; top: ${HY - 0.0485 * 206 - 0.016 * 206}px; font-size: 206px; line-height: 1em; white-space: nowrap; }
 .op .temp { position: absolute; left: ${CX}px; top: ${MY - 0.0485 * 206}px; font-size: 206px; line-height: 1em; white-space: nowrap; }
-.op .cond { position: absolute; left: ${CX + 4}px; top: ${MY + 0.875 * 206 + 30}px; width: ${CW}px; font-size: 60px; line-height: 1.18em; letter-spacing: 0.012em; }
-.op .ft { position: absolute; left: 72px; right: 72px; bottom: 72px; }
+.op .cond { position: absolute; left: ${CX + 4}px; top: ${MY + 0.875 * 206 + 30}px; width: ${CW}px; font-size: 60px; line-height: calc(0.87em + 44px); letter-spacing: 0.012em; }
+.op .ft { position: absolute; left: 72px; right: 72px; bottom: 67px; }
 .op .cr { display: flex; justify-content: space-between; gap: 40px; align-items: baseline; white-space: nowrap; line-height: 58px; height: 58px; }
-.op .cr + .cr { margin-top: 6px; }
+.op .cr + .cr { margin-top: 23px; }
 .op .cr span { display: inline-block; }
 .op .cr i { font-style: normal; font-weight: 500; font-size: 25px; letter-spacing: 0.13em; margin-right: 16px; }
 .op .cr b { font-size: 42px; letter-spacing: 0.01em; }
-.op .stamp { position: relative; margin: 48px 12px 12px; padding: 36px 46px 30px; transform-origin: 50% 50%; }
+.op .stamp { position: relative; margin: 37px 12px 12px; padding: 32px 46px 30px; transform-origin: 50% 50%; }
 .op .fl { font-weight: 500; font-size: 25px; letter-spacing: 0.13em; line-height: 30px; }
 .op .fv { margin-top: 10px; text-transform: none; font-size: 40px; line-height: 1.22em; letter-spacing: -0.005em; }
 .op .bar { position: absolute; left: 0; top: 0; width: ${W}px; height: 150px; will-change: transform; pointer-events: none;
@@ -440,11 +440,22 @@ export default {
       const b = put("fv", fact);
       if (a || b) {
         const size = fact ? factSize(fact) : 40;
+        // a fact on two lines is leaded open, about 42 px of clear paper from the
+        // foot of one line's descenders to the top of the next line's capitals;
+        // the extra leading above and below it is taken back from the gap to the
+        // label and from the stamp's foot, so the box keeps its insets
+        measure.font = `700 ${size}px "Space Grotesk"`;
+        const two = !!fact && size <= 50 && wrapText(measure, fact, FACT_W - 8).length > 1;
+        const lh = two ? Math.round(0.95 * size + 42) : Math.round(1.22 * size);
+        const extra = (lh - 1.22 * size) / 2;
         for (const L of layers) {
           L.stamp.style.display = fact ? "" : "none";
           // without a fact the billing sits midway between the block and the foot
-          L.ft.style.bottom = fact ? "72px" : "214px";
+          L.ft.style.bottom = fact ? "67px" : "214px";
           L.fv.style.fontSize = `${size}px`;
+          L.fv.style.lineHeight = `${lh}px`;
+          L.fv.style.marginTop = `${f1(two ? 10 - extra - 5 : 10)}px`;
+          L.stamp.style.paddingBottom = `${f1(30 - extra)}px`;
         }
         if (fact) {
           const st = layers[0].stamp;

@@ -61,7 +61,7 @@ export default {
       .fl .row { display: flex; align-items: baseline; }
       .fl .row.sun { margin-top: 58px; } /* the small readouts stand apart from the temperature */
       .fl .row.moon { margin-top: 28px; }
-      .fl .row.air { margin-top: 42px; }
+      .fl .row.air { margin-top: 42px; word-spacing: 0.16em; } /* two labels and two values in one line: a little more room between the words */
       .fl .row i { display: none; }
       .fl b { font-weight: inherit; display: block; }
       .fl .r132 { font-size: 132px; line-height: 0.9; }
@@ -171,7 +171,7 @@ export default {
       const wh = hh.offsetWidth / 400;
       const wm = mm.offsetWidth / 400;
       const side = mmrow.offsetWidth - mm.offsetWidth; // AM/PM and its gap
-      const room = figures.clientHeight - 30 - 56;
+      const room = figures.clientHeight - 30 - 80; // (the gap between the two lines, and clear air between the figures and the rules above and below them)
       const size = Math.floor(
         Math.min(MAX_FIGURE, room / (2 * LH), (MEASURE + EDGE) / (wh + LH * tan) / grow, (MEASURE + EDGE - side) / (wm + LH * tan) / grow),
       );
