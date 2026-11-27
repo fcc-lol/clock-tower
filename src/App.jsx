@@ -249,7 +249,7 @@ function useRotation(dataRef, scaleRef) {
     bad: new Map(), // piece id -> when it failed (performance.now())
     fails: 0, // failures in a row, for the back-off
     up: new Set(), // the machine's other names that have answered
-    down: new Set(), // ...and those given up on
+    down: new Map(), // ...and those given up on -> when (performance.now()); each gets another chance after an hour
     quiet: new Map(), // name -> how many frames in a row said nothing from it
     turn: 0,
     offset: 0,
@@ -273,6 +273,13 @@ function useRotation(dataRef, scaleRef) {
     // and never the one the piece on screen is using (two pieces under one
     // name share a process, and would stall together).
     const pickOrigin = () => {
+      const nowP = performance.now();
+      for (const [o, at] of R.down) {
+        if (nowP - at > BAD_FOR_MS) {
+          R.down.delete(o);
+          R.quiet.delete(o);
+        }
+      }
       const usable = OTHER_ORIGINS.filter((o) => !R.down.has(o));
       if (!usable.length) return window.location.origin;
       const free = usable.filter((o) => o !== R.shown?.origin);
@@ -320,8 +327,9 @@ function useRotation(dataRef, scaleRef) {
       publish();
     };
     // After a failure, wait before trying anything else, and longer each time
-    // nothing will load (4 s, 8, 16 ... up to five minutes), so a display that
-    // cannot load anything is not forever starting pieces.
+    // (4 s, 8, 16 ... up to five minutes), so a display on which nothing will
+    // load, or nothing stays up, is not forever starting pieces. The count
+    // starts again once a piece has stayed up for a minute (see tick).
     const backOff = () => {
       R.fails += 1;
       R.retryAt = performance.now() + Math.min(4000 * 2 ** (R.fails - 1), 5 * 60 * 1000);
@@ -344,6 +352,8 @@ function useRotation(dataRef, scaleRef) {
       const now = clockNow();
       const nowP = performance.now();
       const slot = slotOf(now) + R.offset;
+      // A piece counts as working once it has stayed up a minute, not when it is cut to.
+      if (R.fails && R.shown && nowP - (R.shown.shownAt || nowP) > 60 * 1000) R.fails = 0;
 
       // Is everybody still answering? A piece in a process of its own can hang
       // without taking this page with it; one that leaves a question unanswered
@@ -351,6 +361,8 @@ function useRotation(dataRef, scaleRef) {
       // or is in a background tab, nobody's silence counts.)
       const stalled = nowP - R.lastTick > 3000 || document.visibilityState !== "visible";
       R.lastTick = nowP;
+      // ...nor does time this page lost count against a frame that has yet to say hello.
+      if (stalled && R.pending && !R.pending.heardAt) R.pending.startedAt = nowP;
       for (const f of [R.shown, R.pending]) {
         if (!f || !f.win) continue;
         if (stalled) f.pingedAt = 0;
@@ -382,21 +394,22 @@ function useRotation(dataRef, scaleRef) {
           R.shown = p;
           R.pending = null;
           R.jump = false;
-          R.fails = 0;
           R.stats = null;
           post(p, { type: "ct:shown" });
           say(`showing ${p.id}`);
           publish();
         } else if (!p.heardAt && !R.up.has(p.origin) && p.origin !== window.location.origin && nowP - p.startedAt > HELLO_TIMEOUT_MS) {
           // Not a word from that name, now or ever: it probably does not reach
-          // this server. Stop using it: at once if no other name has answered
-          // either (so a machine where none of them work is not kept waiting),
-          // otherwise the second time. The piece is tried again elsewhere.
+          // this server. Stop using it for an hour: the second time, or at once
+          // if no other name has answered either (so a machine where none of
+          // them work is not kept waiting), though never at once in the first
+          // minute, when the machine may just be busy starting up. The piece
+          // is tried again elsewhere.
           const times = (R.quiet.get(p.origin) || 0) + 1;
           R.quiet.set(p.origin, times);
-          const giveUp = times >= 2 || !R.up.size;
-          if (giveUp) R.down.add(p.origin);
-          say(`nothing answers from ${p.origin}${giveUp ? ": not using it any more" : ""}`);
+          const giveUp = times >= 2 || (!R.up.size && nowP > 60 * 1000);
+          if (giveUp) R.down.set(p.origin, nowP);
+          say(`nothing answers from ${p.origin}${giveUp ? ": not using it for the next hour" : ""}`);
           R.pending = null;
           publish();
         } else if (!p.ready && nowP - p.startedAt > LOAD_TIMEOUT_MS) {
