@@ -133,6 +133,7 @@ const CSS = `
 .bt .marble u{position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle at 34% 28%,rgba(255,255,255,var(--mh)) 0 7%,rgba(255,255,255,0) 26%),radial-gradient(circle at 60% 70%,rgba(255,255,255,0) 40%,rgba(0,0,0,.35) 100%)}
 .bt .mound{position:absolute;left:0;top:0;transform-origin:0 ${GROUND + 26}px;will-change:transform}
 .bt .pen{position:absolute;overflow:visible;left:0;top:0}
+.bt .ao{position:absolute;left:0;height:26px;background:linear-gradient(rgba(0,0,0,var(--ao)),rgba(0,0,0,0))}
 `;
 
 const DEFS = `<svg width="0" height="0" style="position:absolute"><defs>
@@ -475,7 +476,7 @@ export default {
       const fh = r.range(240, 420);
       const node = el("div", { class: "fog", style: { width: `${fw.toFixed(0)}px`, height: `${fh.toFixed(0)}px` } });
       (front ? fogFront : fogBack).append(node);
-      fogs.push({ node, w: fw, x: r.range(-fw, W), y: front ? r.range(60, 1000) : r.range(0, 1500), sp: r.range(5, 13) * r.sign(), k: front ? r.range(0.16, 0.24) : r.range(0.5, 0.8) });
+      fogs.push({ node, w: fw, x: r.range(-fw, W), y: front ? r.range(60, 1000) : r.range(0, 1500), sp: r.range(5, 13) * r.sign(), k: front ? r.range(0.24, 0.32) : r.range(0.55, 0.85) });
     }
     const floorEl = el("div", { class: "floor" });
     {
@@ -488,7 +489,8 @@ export default {
     const shadowEl = el("div", { class: "shadow" });
     const contactEl = el("div", { class: "contact" });
     const tower = el("div", { class: "tower" });
-    wrap.append(skyEl, starEl, hangLayer, swellEl, fogBack, floorEl, shadowEl, contactEl, tower);
+    const hazeEl = el("div", { class: "haze" });
+    wrap.append(skyEl, starEl, hangLayer, swellEl, hazeEl, fogBack, floorEl, shadowEl, contactEl, tower);
 
     // ----- the tower ----------------------------------------------------------
     const blocks = [];
@@ -498,6 +500,7 @@ export default {
       const node = el("div", { class: "blk", style: { left: `${o.x}px`, top: `${o.y}px`, width: `${o.w}px`, height: `${o.h}px` } });
       node.innerHTML = (o.roof ? roofMarkup(r, o.w, o.h, dx, dy) : woodMarkup(r, o, dx, dy)) + `<svg class="cap"></svg>`;
       const face = el("div", { class: `face ${o.cls || ""}` });
+      if (o.course > 0) node.append(el("div", { class: "ao", style: { top: `${o.h}px`, width: `${o.w}px` } }));
       node.append(face);
       parent.append(node);
       const b = { node, face, o, dx, dy, vars: {}, cap: node.querySelector(".cap"), g: -1, ink: "" };
@@ -875,7 +878,7 @@ export default {
     }
 
     // ----- color ----------------------------------------------------------------
-    const FOGK = [0, 0.05, 0.12, 0.24, 0.38, 0.5, 0.56];
+    const FOGK = [0, 0.1, 0.22, 0.38, 0.52, 0.62, 0.7];
     function palette(s) {
       const wx = s.weather;
       const day = s.daylight;
@@ -927,14 +930,20 @@ export default {
       setG("--stf", starF);
       setG("--sts", mix(starF, "#2a1e08", 0.65));
       E.starVis = nightK * (1 - smoothstep(0.3, 0.8, cloud)) * (1 - E.fog);
-      E.cloudFade = 1 - 0.6 * E.fog;
+      E.cloudFade = 1 - 0.9 * E.fog;
       const dropF = mix("#2a63d4", mix(wall, "#6f9be8", 0.45), nightK);
       setG("--dpf", dropF);
       setG("--dps", mix(dropF, "#000000", 0.4));
       setG("--flk", mix(snowCol, "#ffffff", 0.3 * (1 - nightK)));
       setG("--flks", mix(snowCol, "#6d7c96", 0.5));
-      const fogCol = mix(wall, day > 0.3 ? "#eef0f1" : "#3b3e47", 0.45);
+      const fogCol = mix(wall, mix("#262931", "#e2e4e6", smoothstep(0.08, 0.45, day)), 0.6);
       setG("--fogc", rgba(fogCol, 0.9));
+      // fog: a veil over the wall, thickest up high; heat: a warm glare rising off the table
+      const hz = [];
+      if (E.fog > 0.02) hz.push(`linear-gradient(180deg,${rgba(fogCol, 0.92 * E.fog)},${rgba(fogCol, 0.55 * E.fog)})`);
+      if (E.heat > 0.02) hz.push(`linear-gradient(0deg,${rgba("#ffd29a", 0.62 * E.heat)},${rgba("#fff0d0", 0.18 * E.heat)} 60%,rgba(255,240,208,0))`);
+      styleIf("haze", hazeEl, "background", hz.join(",") || "none");
+      setG("--ao", (0.16 + 0.14 * sunK + 0.2 * nightK).toFixed(3));
 
       // light on the blocks
       const lightCol = mix(mix("#fff4dc", wall, 0.25), "#3b4767", nightK);
@@ -1337,7 +1346,7 @@ export default {
           hg.node.style.transform = tf;
         }
       }
-      const fq = Math.round(E.fog * (wx.fog ? 1 : 0.45) * 40) / 40;
+      const fq = wx.fog || wx.visibility < 0.5 ? Math.round(E.fog * 40) / 40 : 0;
       if (fq !== shown.fogq) {
         shown.fogq = fq;
         fogBack.style.display = fogFront.style.display = fq > 0.02 ? "" : "none";

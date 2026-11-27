@@ -161,7 +161,8 @@ export default {
     const lift = new Float32Array(N); // the stadium wave: how far this person is out of the seat
     const liftWas = new Float32Array(N);
     const TURN = 1 / 0.6; // turns per second
-    const stage = new Uint8Array(N); // the turn in six steps: a seat is redrawn only when its step changes
+    const stage = new Uint8Array(N); // the turn in steps: a seat is redrawn only when its step changes
+    const steps = new Uint8Array(N).fill(6); // six steps for the minute wave, three for everyday turns
 
     // Fidgets: a few people at a time peek over their card, wobble it, stir in their sleep.
     const MAXF = 32;
@@ -172,8 +173,8 @@ export default {
     const fidOf = new Int16Array(N).fill(-1);
     let fidAcc = 0;
 
-    // Up to three waves in flight.
-    const WAVES = 3;
+    // Up to two waves in flight.
+    const WAVES = 2;
     const wOn = new Uint8Array(WAVES);
     const wT0 = new Float32Array(WAVES);
     const wDx = new Float32Array(WAVES);
@@ -211,14 +212,14 @@ export default {
 
     // ----- palette (rebuilt when the light or the sky changes) ---------------
     const P = {
-      stand: "#05060a", eye: "#17181c", snow: "#f5f7fb", light: "#fff2c8", halo: "rgba(255,190,90,0.2)", halo2: "rgba(255,205,120,0.45)", straw: "#e6cd8a",
+      stand: "#05060a", eye: "#17181c", snow: "#f5f7fb", rain: "#dfe7f5", light: "#fff2c8", halo: "rgba(255,190,90,0.2)", halo2: "rgba(255,205,120,0.45)", straw: "#e6cd8a",
       sky: new Array(COLS * 3), cloud: new Array(COLS * 3), core: new Array(COLS * 3), lap: new Array(COLS),
       lit: new Array(4), skin: new Array(6), skinLit: new Array(6), skinMoat: new Array(6), hair: new Array(8), shirt: new Array(8),
       beanie: new Array(6), umb: new Array(6), umbDark: new Array(6), veil: new Array(ROWS), veilNum: new Array(ROWS),
     };
     const env = {
       cloud: 0, thrCloud: 9, thrCore: 9, lit: false, umb: 0, sleep: 0, snow: 0, beanie: 0, sunhat: 0, fog: 0,
-      wx: 1, wy: 0, cloudSpeed: 0, gloomLight: 1, lean: 0, gusty: 0, dayK: 1, t: 0, bannerAmp: 2, bannerOm: 1,
+      wx: 1, wy: 0, cloudSpeed: 0, gloomLight: 1, lean: 0, heat: 0, gusty: 0, dayK: 1, t: 0, bannerAmp: 2, bannerOm: 1,
     };
     let paletteKey = "";
     let clothDay = null;
@@ -284,6 +285,7 @@ export default {
       P.straw = person("#e6cd8a");
       P.eye = mix(P.stand, "#15161a", 0.4 + 0.6 * pl);
       P.snow = mix(P.stand, "#f5f7fb", 0.3 + 0.7 * pl);
+      P.rain = mix(P.stand, "#dfe7f5", 0.55 + 0.45 * dayK);
 
       // Fog and haze take the back rows (the top of the stand) first.
       const fogCol = mix(s.sky.mean, mix("#0a0b10", "#ffffff", dayK), 0.3);
@@ -325,11 +327,12 @@ export default {
       env.sleep = night * lerp(0.3, 0.97, smoothstep(0.08, 0.45, s.sun.up ? 0 : s.sun.progress));
       env.beanie = smoothstep(44, 30, wx.temp) * 0.9;
       env.sunhat = smoothstep(80, 92, wx.temp) * smoothstep(0.3, 0.6, s.daylight) * 0.6;
+      env.heat = smoothstep(82, 95, wx.temp) * smoothstep(0.3, 0.6, s.daylight);
       env.fog = clamp((wx.fog ? 1 : 0.55 * clamp((5 - wx.visibility) / 5)) + 0.3 * clamp((wx.aqi - 90) / 120));
       const b = ((wx.windDir + 180) * Math.PI) / 180; // where the wind is going
       env.wx = Math.sin(b);
       env.wy = -Math.cos(b);
-      env.cloudSpeed = wx.wind * 1.7;
+      env.cloudSpeed = 4 + 9 * Math.sqrt(wx.wind); // px/s: 24 at 5 mph, 53 at 30 mph
       env.gusty = clamp((wx.gust - 10) / 30);
       // Cards are held a little crooked against the wind (rounded so it only
       // changes the palette key when it really moves).
@@ -570,7 +573,7 @@ export default {
     // whole stand. Seats that change face do so as part of the wave.
     function minuteWave(whole) {
       const r0 = whole ? 0 : ROW_MID;
-      const span = whole ? 6.5 : 4.5; // seconds from the first card to the last
+      const span = whole ? 5.5 : 3.8; // seconds from the first card to the last
       const k = span / (COLS + (ROWS - r0) * 1.4);
       for (let i = 0; i < N; i++) {
         const w = wantOf(i);
@@ -581,6 +584,7 @@ export default {
         face[i] = w;
         ap[i] = -((i % COLS) + (row - r0) * 1.4 + hash(i, 3) * 2.5) * k * TURN;
         stage[i] = 0;
+        steps[i] = 6;
       }
     }
 
@@ -674,9 +678,13 @@ export default {
         if (fKind[fi] === 0) {
           peek = inOut;
           look = Math.sin(u * TAU * 1.5) * 1.3 * inOut;
-        } else {
+        } else if (fKind[fi] === 1) {
           wob = Math.sin(u * TAU * 2.5) * 0.13 * (1 - u);
           dip = Math.sin(u * Math.PI) * 1.6;
+        } else {
+          // too hot: fanning themselves with the card
+          wob = Math.sin(u * TAU * 5) * 0.2 * inOut;
+          dip = (1 - Math.cos(u * TAU * 5)) * 1.1 * inOut;
         }
       }
       const up = lift[i];
@@ -704,7 +712,7 @@ export default {
           else if (f === F_CLOUD) fill = P.cloud[col * 3 + shadeI[i]];
           else if (f === F_CORE) fill = P.core[col * 3 + shadeI[i]];
           else if (f === F_INK) fill = INK[shadeI[i]];
-          else fill = P.lit[((Math.sin(env.t * 0.55 + phase[i]) * 0.5 + 0.5) * 3.99) | 0];
+          else fill = P.lit[((Math.sin(env.t * 0.35 + phase[i]) * 0.5 + 0.5) * 3.99) | 0];
           ctx.fillStyle = fill;
           ctx.beginPath();
           ctx.roundRect(-13, -hh, 26, hh * 2, Math.min(3, hh));
@@ -808,6 +816,43 @@ export default {
       dy[k] = r.range(0, 1920);
       dv[k] = r.range(0.7, 1.3);
     }
+    // Drops and flakes are small sprites, re-drawn only when their colour or
+    // slant changes: hundreds of tiny drawImage calls cost far less than one
+    // path that spans the whole frame.
+    const SPR = 2; // sprite pixels per stage unit
+    const dropSpr = document.createElement("canvas");
+    dropSpr.width = 40 * SPR;
+    dropSpr.height = 56 * SPR;
+    const dropCtx = dropSpr.getContext("2d");
+    const flakeSpr = document.createElement("canvas");
+    flakeSpr.width = flakeSpr.height = 8 * SPR;
+    const flakeCtx = flakeSpr.getContext("2d");
+    let dropKey = "";
+    let flakeKey = "";
+    function makeDrop(color, slant) {
+      const key = color + slant;
+      if (key === dropKey) return;
+      dropKey = key;
+      dropCtx.setTransform(SPR, 0, 0, SPR, 0, 0);
+      dropCtx.clearRect(0, 0, 40, 56);
+      dropCtx.strokeStyle = color;
+      dropCtx.lineWidth = 1.5;
+      dropCtx.lineCap = "round";
+      dropCtx.beginPath();
+      dropCtx.moveTo(20 + slant * 25, 3);
+      dropCtx.lineTo(20 - slant * 25, 53);
+      dropCtx.stroke();
+    }
+    function makeFlake(color) {
+      if (color === flakeKey) return;
+      flakeKey = color;
+      flakeCtx.setTransform(SPR, 0, 0, SPR, 0, 0);
+      flakeCtx.clearRect(0, 0, 8, 8);
+      flakeCtx.fillStyle = color;
+      flakeCtx.beginPath();
+      flakeCtx.arc(4, 4, 3.3, 0, TAU);
+      flakeCtx.fill();
+    }
     let wetClean = true;
     function drawWet(s) {
       const wx = s.weather;
@@ -820,11 +865,11 @@ export default {
       }
       wet.clear();
       wetClean = false;
-      const slant = clamp(env.wx * wx.wind * 0.03, -0.7, 0.7);
+      const slant = Math.round(clamp(env.wx * wx.wind * 0.03, -0.7, 0.7) * 20) / 20;
       if (wx.falling === "snow") {
+        makeFlake(P.snow);
         const fall = 46 + wx.intensity * 50;
-        g.fillStyle = rgba(P.snow, 0.9);
-        g.beginPath();
+        g.globalAlpha = 0.9;
         for (let k = 0; k < count; k++) {
           const sway = Math.sin(s.t * 0.9 + k) * 14;
           dy[k] += fall * dv[k] * s.dt;
@@ -833,28 +878,25 @@ export default {
           if (dx[k] > 1090) dx[k] -= 1100;
           else if (dx[k] < -10) dx[k] += 1100;
           const q = 1.5 + 1.7 * (dv[k] - 0.7);
-          g.moveTo(dx[k] + q, dy[k]);
-          g.arc(dx[k], dy[k], q, 0, TAU);
+          g.drawImage(flakeSpr, dx[k] - q * 1.2, dy[k] - q * 1.2, q * 2.4, q * 2.4);
         }
-        g.fill();
+        g.globalAlpha = 1;
       } else {
+        makeDrop(P.rain, slant);
         const fall = wx.falling === "drizzle" ? 420 : 640 + wx.intensity * 260;
         const len = wx.falling === "drizzle" ? 12 : 20 + wx.intensity * 16;
-        g.strokeStyle = rgba(mix(P.stand, "#dfe7f5", 0.55 + 0.45 * env.dayK), 0.34);
-        g.lineWidth = 1.5;
-        g.lineCap = "round";
-        g.beginPath();
+        g.globalAlpha = 0.34;
         for (let k = 0; k < count; k++) {
           dy[k] += fall * dv[k] * s.dt;
           dx[k] += slant * fall * dv[k] * s.dt;
           if (dy[k] > 1930) { dy[k] -= 1960; dx[k] = hash(k, s.frame) * 1080; }
           if (dx[k] > 1090) dx[k] -= 1100;
           else if (dx[k] < -10) dx[k] += 1100;
-          const l = len * dv[k];
-          g.moveTo(dx[k], dy[k]);
-          g.lineTo(dx[k] - slant * l, dy[k] - l);
+          const l = len * dv[k]; // the sprite is 50 units of streak: scale it to this drop
+          const sc = l / 50;
+          g.drawImage(dropSpr, dx[k] - 20 * sc, dy[k] - 53 * sc, 40 * sc, 56 * sc);
         }
-        g.stroke();
+        g.globalAlpha = 1;
       }
     }
 
@@ -863,12 +905,10 @@ export default {
     let lastMs = 0;
     let lastH = -1;
     let lastM = -1;
-    let jumped = false;
-    let flood = 0;
     let flashWas = 0;
     let refreshLeft = 0;
     let drawAt = 0;
-    const DRAW_BUDGET = 64;
+    const DRAW_BUDGET = 40;
 
     function frame(s) {
       const t = s.t;
@@ -908,9 +948,11 @@ export default {
       }
 
       if (jump) {
+        // The clock jumped (a cut, a wake from sleep, a racing gallery clock): go
+        // straight to the new picture.
         snapAll();
-        if (first || !jumped) dirty.fill(1);
-        else flood = 4; // racing clock: spread the colour refresh over a few frames
+        dirty.fill(1);
+        refreshLeft = 0;
       } else {
         // Does anyone need to turn their card, open an umbrella, nod off?
         for (let i = s.frame & 3; i < N; i += 4) {
@@ -922,12 +964,8 @@ export default {
           const slow = w === F_UMB || prev[i] === F_UMB ? 2.6 : w === F_SLEEP || prev[i] === F_SLEEP ? 5 : 0.5;
           ap[i] = -hash(i, s.frame) * slow * TURN;
           stage[i] = 0;
+          steps[i] = 3;
         }
-      }
-      jumped = jump;
-      if (flood > 0) {
-        flood--;
-        for (let i = flood; i < N; i += 4) dirty[i] = 1;
       }
 
       // Turns in progress.
@@ -936,7 +974,7 @@ export default {
         if (ap[i] >= 1) continue;
         const a = ap[i] + step;
         ap[i] = a >= 1 ? 1 : a;
-        const q = a <= 0 ? 0 : a >= 1 ? 7 : 1 + ((a * 6) | 0);
+        const q = a <= 0 ? 0 : a >= 1 ? 7 : 1 + ((a * steps[i]) | 0);
         if (q !== stage[i]) {
           stage[i] = q;
           dirty[i] = 1;
@@ -945,7 +983,7 @@ export default {
 
       // Gusts set off stadium waves that travel downwind.
       if (!jump && env.gusty > 0.01) {
-        gustAcc += dt * lerp(1 / 50, 1 / 7, env.gusty);
+        gustAcc += dt * lerp(1 / 50, 1 / 10, env.gusty);
         if (gustAcc >= 1) {
           gustAcc -= 1;
           for (let k = 0; k < WAVES; k++) {
@@ -1006,7 +1044,7 @@ export default {
           fidOf[i] = -1;
         }
       }
-      fidAcc += dt * (3 + 9 * env.dayK);
+      fidAcc += dt * (3 + 9 * env.dayK) * (1 + 2.5 * env.heat);
       while (fidAcc >= 1) {
         fidAcc -= 1;
         const i = Math.floor(r() * N);
@@ -1017,14 +1055,16 @@ export default {
           fSeat[k] = i;
           fidOf[i] = k;
           fT0[k] = t;
-          fDur[k] = 1.4 + r() * 1.6;
-          fKind[k] = f === F_UMB ? 1 : f === F_SLEEP || f === F_HOLD ? 0 : r() < 0.6 ? 0 : 1;
+          const fan = f <= F_CORE && r() < env.heat * 0.8;
+          fDur[k] = (fan ? 2.5 : 1.4) + r() * 1.6;
+          fKind[k] = fan ? 2 : f === F_UMB ? 1 : f === F_SLEEP || f === F_HOLD ? 0 : r() < 0.6 ? 0 : 1;
           break;
         }
       }
 
-      // The rolling refresh: everyone by day; at night mostly the lights, which breathe.
-      const nightly = env.lit ? 30 : 0;
+      // The lit numerals breathe, a few at a time; after a palette change everyone
+      // is repainted, a few dozen a frame.
+      const nightly = env.lit ? 14 : 0;
       for (let k = 0; k < nightly && numCount; k++) {
         numAt = (numAt + 1) % numCount;
         dirty[numList[numAt]] = 1;
@@ -1036,7 +1076,7 @@ export default {
 
       // Draw what changed, at most a budget of seats a frame, round-robin, so a
       // busy moment is spread over a few frames instead of costing one big one.
-      let budget = first ? N : jump ? 700 : DRAW_BUDGET;
+      let budget = jump ? N : DRAW_BUDGET;
       let i = drawAt;
       for (let n = 0; n < N && budget > 0; n++) {
         if (dirty[i]) {

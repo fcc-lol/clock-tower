@@ -122,8 +122,8 @@ function layTime(out, hh, mm, ampm) {
       x += g.w + (ch === "1" ? 2 : 3);
     }
   };
-  row(hh, 27 - width(hh), 3);
-  row(mm, 6 + Math.floor((30 - width(mm)) / 2), 29);
+  row(hh, 26 - width(hh), 3);
+  row(mm, 5 + Math.floor((31 - width(mm)) / 2), 29);
   stamp(GLYPH[ampm[0]] || GLYPH.A, 29, 3);
   stamp(GLYPH.M, 29, 15);
 }
@@ -168,6 +168,7 @@ const COL = {
   sunHigh: [1.0, 0.98, 0.9],
   sunLow: [1.0, 0.7, 0.4],
   lampCol: [0.75, 1.0, 0.95],
+  glow: [0.64, 0.96, 1.0],
 };
 
 // ---------------------------------------------------------------------------
@@ -302,7 +303,7 @@ void main() {
   if (u_rain.x > 0.0) rg += rainCells(p, 150.0, u_rain.w, u_rain.x, 3.0) * u_rain.z;
   if (u_rain.y > 0.0) rg += rainCells(p, 62.0, u_rain.w * 1.25, u_rain.y, 17.0) * (u_rain.z * 0.55);
 
-  vec2 disp = (s * u_wave.x + rs * 1.3 + rg) * open;
+  vec2 disp = (s * u_wave.x + rs * 1.3 + rg * 0.5) * open;
   float dl = length(disp);
   disp *= inversesqrt(1.0 + dl * dl / (u_cap * u_cap)); // soft limit
   vec2 sl = (s * (u_wave.x * 0.12) + rs * 0.6 + rg * 0.22) * open;
@@ -316,6 +317,8 @@ void main() {
   float ink = 0.0;
   float shade = 0.0;
   float floorK = 1.0;
+  float halo = 0.0;
+  float pale = 0.0;
   if (m <= u_kd) {
     // the floor
     vec2 w = qr / u_kd;
@@ -324,8 +327,9 @@ void main() {
     vec2 f = fract(tc) - 0.5;
     vec4 tx = texture2D(u_tiles, (cell + 0.5) / GRID);
     ink = tx.r;
+    if (u_glowC.a > 0.001) halo = texture2D(u_glow, tc / GRID).r;
     float thr = 0.1 + 0.74 * (cell.x / GRID.x * 0.45 + cell.y / GRID.y * 0.55) + tx.b * 0.1;
-    float pale = step(thr, u_flip);
+    pale = step(thr, u_flip);
     float v = tx.g - 0.5;
     vec3 inkc = mix(u_inkA, u_inkB, pale) * (1.0 + v * mix(0.5, 0.14, pale));
     vec3 fieldc = u_field * (1.0 + v * 0.13) * (1.0 + (tx.b - 0.5) * vec3(-0.1, 0.02, 0.08));
@@ -374,6 +378,15 @@ void main() {
   float cs = u_light.x * mix(1.0, min(1.0, fall * 2.4), u_light.w) * floorK * (1.0 - 0.8 * shade) * (1.0 - 0.75 * ice);
   col *= vec3(lit) + u_sunCol * (cs * (c * 1.9 - 0.3));
   col += u_light.w * vec3(0.012, 0.085, 0.095) * fall * fall * (1.0 - 0.6 * ink);
+  // The figures are set in lit glass tiles: after dark they glow, spill a halo
+  // into the water around them, and the waves throw that light about.
+  float gk = u_glowC.a;
+  if (gk > 0.001) {
+    float on = ink * pale;
+    float hz = halo * (1.0 - ink);
+    col = mix(col, col * 0.5 + u_glowC.rgb * 0.82, on * gk);
+    col += u_glowC.rgb * gk * (hz * hz * 0.3 + hz * c * 0.55 * (1.0 - 0.5 * ice));
+  }
   col *= 0.72 + 0.28 * smoothstep(0.0, 16.0, dEdge); // under the coping's lip
 
   if (u_float.w > 0.0) {
@@ -388,8 +401,12 @@ void main() {
   float steep = length(sl);
   float fres = u_refl.x * (1.0 + 0.7 * patch) + u_refl.y * smoothstep(0.3, 1.5, steep);
   col = mix(col, sky * (1.0 + 0.2 * steep), clamp(fres, 0.0, 0.8));
-  vec2 gd = sl * 0.5 + 0.1 * vec2(cos(p.x * 0.23 + p.y * 0.05 + t * 3.1), cos(p.y * 0.21 - p.x * 0.04 - t * 2.6)) - u_glint.xy;
-  col += u_sunCol * (exp(-dot(gd, gd) * u_glint.z) * u_light.y * open);
+  // Sun glints: where a wave tilts to mirror the sun. Kept off the figures.
+  vec2 gd = sl * 0.5 - u_glint.xy;
+  float gl = exp(-dot(gd, gd) * u_glint.z) * smoothstep(0.72, 0.95, vnoise(p * 0.09 + vec2(t * 0.9, -t * 0.7)));
+  col += u_sunCol * (gl * u_light.y * open * (1.0 - 0.7 * ink));
+  // Ring crests catch the light: rain reads in any light.
+  col += u_hl.rgb * (clamp(dot(rg, vec2(-0.45, -0.89)) * u_hl.a, -0.25, 0.6) * open);
 
   float guard = 1.0 - 0.55 * ink; // keep veils from washing out the time
   if (u_cold.y > 0.002) {
@@ -450,28 +467,29 @@ const STYLE = `
 .de .clip { position: absolute; left: ${PX0}px; top: ${PY0}px; width: ${PX1 - PX0}px; height: ${PY1 - PY0}px; overflow: hidden; }
 .de .floaty { position: absolute; left: 0; top: 0; width: 160px; height: 160px; margin: -80px 0 0 -80px; will-change: transform; }
 .de .txt { position: absolute; inset: 0; color: var(--paint); }
-.de .date { position: absolute; left: 64px; top: 60px; font-weight: 600; font-size: 48px; line-height: 56px; letter-spacing: 0.15em; text-transform: uppercase; white-space: nowrap; }
-.de .cond { position: absolute; left: 64px; top: 132px; width: 560px; height: 104px; display: flex; align-items: center;
-  font-weight: 500; font-size: 46px; line-height: 50px; letter-spacing: 0.1em; text-transform: uppercase; }
-.de .temp { position: absolute; right: 64px; top: 132px; height: 104px; display: flex; gap: 8px; }
+.de .date { position: absolute; left: 64px; top: 62px; font-weight: 600; font-size: 56px; line-height: 64px; letter-spacing: 0.13em; text-transform: uppercase; white-space: nowrap; }
+.de .cond { position: absolute; left: 64px; top: 140px; width: 560px; height: 104px; display: flex; align-items: center;
+  font-weight: 500; font-size: 52px; line-height: 52px; letter-spacing: 0.09em; text-transform: uppercase; }
+.de .temp { position: absolute; right: 64px; top: 140px; height: 104px; display: flex; gap: 8px; }
 .de .temp span { width: 100px; height: 104px; border-radius: 5px; background: var(--tile); color: var(--glyph);
   box-shadow: inset 0 3px 0 rgba(255,255,255,.14), inset 0 -4px 0 rgba(0,0,10,.25), 0 0 0 2px var(--jd);
   font-weight: 600; font-size: 96px; line-height: 104px; text-align: center; }
 .de .temp span.deg { width: 72px; }
-.de .rowA { position: absolute; left: 64px; right: 64px; top: 1630px; height: 78px; display: flex; justify-content: space-between; align-items: flex-start; }
-.de .it { display: flex; flex-direction: column; white-space: nowrap; }
-.de .lb { font-weight: 600; font-size: 24px; line-height: 28px; letter-spacing: 0.2em; text-transform: uppercase; opacity: 0.86; }
-.de .vl { font-weight: 500; font-size: 42px; line-height: 48px; letter-spacing: 0.02em; }
-.de .plaque { position: absolute; left: 64px; right: 64px; top: 1722px; height: 134px; box-sizing: border-box; padding: 13px 44px 0 44px;
+.de .rowA { position: absolute; left: 64px; right: 64px; top: ${PY1 + 18}px; display: grid; grid-template-columns: 252px 1fr 120px 96px; column-gap: 28px; align-items: start; }
+.de .it { display: flex; flex-direction: column; white-space: nowrap; min-width: 0; }
+.de .it.end { align-items: flex-end; }
+.de .lb { font-weight: 600; font-size: 28px; line-height: 32px; letter-spacing: 0.16em; text-transform: uppercase; }
+.de .vl { font-weight: 500; font-size: 48px; line-height: 54px; letter-spacing: 0.01em; }
+.de .plaque { position: absolute; left: 64px; right: 64px; top: ${PY1 + 120}px; bottom: 64px; box-sizing: border-box; padding: 14px 44px 0 44px;
   border-radius: 7px; background: var(--tile); color: var(--glyph);
   box-shadow: inset 0 3px 0 rgba(255,255,255,.14), inset 0 -4px 0 rgba(0,0,10,.25), inset 0 0 0 2px rgba(255,255,255,.1), 0 0 0 2px var(--jd), 0 5px 0 var(--jd); }
-.de .plaque .lb { opacity: 0.8; }
-.de .fv { font-weight: 500; font-size: 36px; line-height: 40px; letter-spacing: 0.01em; overflow: hidden; max-height: 80px; }
+.de .plaque .lb { opacity: 0.85; }
+.de .fv { font-weight: 500; font-size: 38px; line-height: 44px; letter-spacing: 0.005em; overflow: hidden; max-height: 88px; }
 .de .screw { position: absolute; width: 11px; height: 11px; border-radius: 50%; background: var(--glyph); opacity: 0.5; box-shadow: inset 0 -2px 0 rgba(0,0,0,.35); }
 .de.nofact .plaque { display: none; }
-.de.nofact .rowA { top: 1716px; }
-.de.nofact .lb { font-size: 26px; line-height: 32px; }
-.de.nofact .vl { font-size: 52px; line-height: 60px; }
+.de.nofact .rowA { top: ${PY1 + 76}px; }
+.de.nofact .lb { font-size: 30px; line-height: 36px; }
+.de.nofact .vl { font-size: 56px; line-height: 64px; }
 `;
 
 function speckle(r) {
@@ -555,21 +573,67 @@ export default {
       bytes[i * 4 + 2] = Math.floor(r() * 256);
       bytes[i * 4 + 3] = 255;
     }
+    // the halo: the figure mask blurred, sampled with linear filtering on unit 1
+    const glowA = new Float32Array(GW * GH), glowB = new Float32Array(GW * GH);
+    const glowBytes = new Uint8Array(GW * GH);
+    let glowTex = null;
+    let glowDirty = true;
+    function blurGlow() {
+      for (let i = 0; i < GW * GH; i++) glowA[i] = mask[i];
+      for (let pass = 0; pass < 2; pass++) {
+        for (let y = 0; y < GH; y++)
+          for (let x = 0; x < GW; x++) {
+            let a = 0;
+            for (let k = -2; k <= 2; k++) {
+              const xx = x + k;
+              if (xx >= 0 && xx < GW) a += glowA[y * GW + xx];
+            }
+            glowB[y * GW + x] = a / 5;
+          }
+        for (let y = 0; y < GH; y++)
+          for (let x = 0; x < GW; x++) {
+            let a = 0;
+            for (let k = -2; k <= 2; k++) {
+              const yy = y + k;
+              if (yy >= 0 && yy < GH) a += glowB[yy * GW + x];
+            }
+            glowA[y * GW + x] = a / 5;
+          }
+      }
+      for (let i = 0; i < GW * GH; i++) glowBytes[i] = Math.min(255, Math.round(glowA[i] * 330));
+      glowDirty = true;
+    }
+    const makeTex = (filter) => {
+      const t = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      return t;
+    };
     function upload() {
       if (!gl || !water.ok) return;
       if (!tex || texLost) {
-        tex = gl.createTexture();
         texLost = false;
+        gl.activeTexture(gl.TEXTURE1);
+        glowTex = makeTex(gl.LINEAR);
+        glowDirty = true;
         gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, tex);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        tex = makeTex(gl.NEAREST);
+        // the kit's program is the current one: point u_glow at unit 1 (samplers default to 0)
+        const prog = gl.getParameter(gl.CURRENT_PROGRAM);
+        if (prog) gl.uniform1i(gl.getUniformLocation(prog, "u_glow"), 1);
+      }
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      if (glowDirty) {
+        glowDirty = false;
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, glowTex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, GW, GH, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, glowBytes);
       }
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, tex);
-      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, GW, GH, 0, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
     }
 
@@ -605,8 +669,9 @@ export default {
     };
     const sunIt = item("");
     const moonIt = item("Moon");
-    const aqiIt = item("Air quality");
-    const uvIt = item("UV index");
+    const aqiIt = item("AQI");
+    const uvIt = item("UV");
+    uvIt.node.classList.add("end");
     const rowA = el("div", { class: "rowA" }, sunIt.node, moonIt.node, aqiIt.node, uvIt.node);
     const factLb = el("div", { class: "lb" });
     const factVl = el("div", { class: "fv" });
@@ -645,6 +710,7 @@ export default {
       wind: [1, 0], wave: [0, 0, 0, 0], light: [0, 0, 0, 0], sunCol: [1, 1, 1], sun: [0, 0, 0, -1], glint: [0, 0, 60],
       skyW: [0, 0, 0], skyNW: [0, 0, 0], skyNE: [0, 0, 0], skyE: [0, 0, 0], refl: [0, 0],
       rain: [0, 0, 0, 0], cold: [0, 0, 0, 0], veil: [0, 0, 0], float: [0, 0, 0, 0],
+      glowC: [0, 0, 0, 0], hl: [0, 0, 0, 0], cap: 6,
     };
     const rings = [];
     for (let i = 0; i < 8; i++) rings.push({ u: [0, 0, 0, 0], age: 9, life: 1, amp: 0 });
@@ -670,6 +736,15 @@ export default {
       fl[i * 6 + 3] = r.range(2.4, 4.4);
       fl[i * 6 + 4] = r.range(0.75, 1.35);
       fl[i * 6 + 5] = r.range(-1, 1);
+    }
+    // ----- raindrops: falling away from the viewer, toward where each one lands -----
+    const NR = 150;
+    const rd = new Float32Array(NR * 4); // land x, land y, phase, speed
+    for (let i = 0; i < NR; i++) {
+      rd[i * 4] = r.range(-40, W + 40);
+      rd[i * 4 + 1] = r.range(-40, H + 40);
+      rd[i * 4 + 2] = r();
+      rd[i * 4 + 3] = r.range(1.6, 2.4);
     }
     // ----- rain on the coping: small splashes -----
     const NS = 70;
@@ -808,7 +883,7 @@ export default {
         mix3(U.sunCol, COL.sunHigh, COL.sunLow, low * (1 - lamp));
         mix3(U.sunCol, U.sunCol, COL.lampCol, lamp);
         U.light[0] = lerp(direct * (0.5 + 0.2 * heat) + 0.03 * day, 0.22, lamp) * (1 - 0.6 * e.storm * lamp);
-        U.light[1] = direct * (0.3 + 0.5 * heat + 0.25 * U.wave[1]);
+        U.light[1] = direct * (0.25 + 0.35 * heat + 0.15 * U.wave[1]);
         U.light[2] = direct * 0.36;
         U.light[3] = lamp;
         const az = (s.sun.az * Math.PI) / 180;
@@ -825,6 +900,15 @@ export default {
         U.glint[2] = lerp(55, 90, heat);
         U.refl[0] = (0.04 + 0.1 * cloud + 0.04 * e.wet) * (0.55 + 0.45 * dw) + 0.05 * ice;
         U.refl[1] = 0.3 + 0.22 * cloud;
+
+        // the lit figures after dark, ring crests, and how rough the surface may get
+        set3(U.glowC, COL.glow);
+        U.glowC[3] = lamp * (1 - 0.3 * e.fog);
+        mix3(tmp, skyMean, COL.white, 0.45);
+        mul3(tmp, tmp, 0.3 + 0.5 * dw);
+        mix3(U.hl, tmp, COL.glow, lamp * 0.55);
+        U.hl[3] = 0.075 * (1 - ice);
+        U.cap = 4.5 + 6 * Math.max(smoothstep(4, 32, wind), e.rain * 0.8, e.storm);
 
         // ----- rain -----
         U.rain[0] = clamp(e.rain * 1.5 - 0.35) * 0.95;
@@ -867,6 +951,7 @@ export default {
         if (shown.stamp !== stamp) {
           shown.stamp = stamp;
           layTime(mask, s.text.hh, s.text.mm, s.text.ampm);
+          blurGlow();
           if (jump) {
             for (let i = 0; i < GW * GH; i++) {
               bytes[i * 4] = mask[i] * 255;
@@ -971,6 +1056,9 @@ export default {
           water.set("u_veil", U.veil);
           water.set("u_float", U.float);
           water.set("u_flash", flash);
+          water.set("u_glowC", U.glowC);
+          water.set("u_hl", U.hl);
+          water.set("u_cap", U.cap);
           water.draw(s.t);
         } else if (fallback && (jump || s.t - cssAt > 0.5)) drawFallback(s);
 
@@ -994,6 +1082,7 @@ export default {
             }
             mix3(paint, COL.paintNight, COL.white, lum(COL.paintNight) >= want ? 0 : hi);
           }
+          shown.rainInk = `rgba(${Math.round(lerp(150, 235, dw))},${Math.round(lerp(225, 245, dw))},255,${(0.16 + 0.1 * e.rain).toFixed(2)})`;
           mix3(tileBg, COL.tileNight, COL.tileDay, dw);
           mix3(glyph, COL.glyphNight, COL.white, dw);
           mix3(nose, stone, COL.white, 0.3 * dw + 0.08);
@@ -1016,8 +1105,33 @@ export default {
         const { ctx } = over;
         const nFl = Math.round(NF * clamp(e.snow * 1.15));
         const nSp = ice < 0.5 ? Math.round(NS * clamp(e.rain * 1.3)) : 0;
-        if (nFl || nSp || overDirty) over.clear();
-        overDirty = nFl > 0 || nSp > 0;
+        const nRd = ice < 0.5 ? Math.round(NR * clamp(e.rain * 1.1)) : 0;
+        if (nFl || nSp || nRd || overDirty) over.clear();
+        overDirty = nFl > 0 || nSp > 0 || nRd > 0;
+        if (nRd) {
+          // short motion-blurred streaks, converging on the floor as they fall
+          ctx.lineWidth = 2.2;
+          ctx.lineCap = "round";
+          ctx.strokeStyle = shown.rainInk;
+          const drift = 6 + wind * 2.2;
+          ctx.beginPath();
+          for (let i = 0; i < nRd; i++) {
+            const j = i * 4;
+            let u = rd[j + 2] + dt * rd[j + 3];
+            if (u >= 1) {
+              u -= 1;
+              rd[j] = r.range(-40, W + 40);
+              rd[j + 1] = r.range(-40, H + 40);
+            }
+            rd[j + 2] = u;
+            const up0 = 1 - u, up1 = Math.max(0, 1 - u - 0.07);
+            const x = rd[j], y = rd[j + 1];
+            const ox = x - W / 2, oy = y - H / 2;
+            ctx.moveTo(x + ox * 0.6 * up0 - U.wind[0] * drift * up0, y + oy * 0.6 * up0 - U.wind[1] * drift * up0);
+            ctx.lineTo(x + ox * 0.6 * up1 - U.wind[0] * drift * up1, y + oy * 0.6 * up1 - U.wind[1] * drift * up1);
+          }
+          ctx.stroke();
+        }
         if (nFl) {
           const drift = 40 + wind * 9;
           const bright = 0.35 + 0.65 * dw;
@@ -1088,6 +1202,11 @@ export default {
 
         // ----- lettering -----
         const t = s.text;
+        const hasFact = t.factValue !== "";
+        if (shown.hasFact !== hasFact) {
+          shown.hasFact = hasFact;
+          wrap.classList.toggle("nofact", !hasFact);
+        }
         if (put("date", date, t.date)) fitText(date, W - 128);
         if (shown.temp !== t.temp) {
           shown.temp = t.temp;
@@ -1097,21 +1216,20 @@ export default {
         put("cond", cond.firstChild, t.condition);
         put("sunL", sunIt.lb, t.sunLabel);
         put("sunV", sunIt.vl, t.sunValue);
-        put("moon", moonIt.vl, t.moon);
+        if (put("moon", moonIt.vl, t.moon) || shown.moonFact !== hasFact) {
+          shown.moonFact = hasFact;
+          moonIt.vl.style.fontSize = "";
+          fitText(moonIt.vl, moonIt.node.offsetWidth || 380);
+        }
         put("aqi", aqiIt.vl, t.aqi);
         put("uv", uvIt.vl, t.uv);
-        const hasFact = t.factValue !== "";
-        if (shown.hasFact !== hasFact) {
-          shown.hasFact = hasFact;
-          wrap.classList.toggle("nofact", !hasFact);
-        }
         if (hasFact) {
           put("factL", factLb, t.factLabel);
           if (put("factV", factVl, t.factValue)) {
             // two lines at most: step the size down for a long one
-            let size = 36;
-            factVl.style.fontSize = "36px";
-            while (factVl.scrollHeight > 82 && size > 30) factVl.style.fontSize = `${--size}px`;
+            let size = 38;
+            factVl.style.fontSize = "38px";
+            while (factVl.scrollHeight > 90 && size > 32) factVl.style.fontSize = `${--size}px`;
           }
         }
         first = false;

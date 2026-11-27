@@ -9,9 +9,9 @@
 //   tide        the waterline is the interpolated tide at Hunters Point (about
 //               100 px between low and high water; it never reaches the deck).
 //               The pilings keep a dark wet stain up to the last high water.
-//               The tidal current carries the glints on the surface: right
-//               (north) on the flood, left on the ebb, and at slack water they
-//               stop.
+//               The tidal current carries the glints on the surface and trails
+//               a wake off every pile: right (north) on the flood, left on the
+//               ebb, and at slack water they stop.
 //   wind        how broken the reflection is: a near mirror under 3 mph,
 //               scattered dashes and whitecaps in a gale, with gusts crossing
 //               as bands of rougher water. It also slants the rain and snow.
@@ -25,7 +25,17 @@
 //               numerals and smear down the water.
 //   weather     rain rings at the real rate, snow that settles on the deck and
 //               on the numerals, fog that swallows the reflection first and
-//               then the far shore, drifting ice below about 22 degrees.
+//               then the far shore, drifting ice below about 22 degrees, a
+//               bleached, swimming horizon in a heat wave, and a brown haze
+//               when the air quality is poor.
+//
+// Readouts: the date and today's fact across the top of the sky; the weather
+// (temperature, condition, AQI, UV) and the sky (sunrise/sunset countdown,
+// moon) stand in the two flanks of the upper storey, on the hours' cap line
+// and above the slab. Their ink is one of two (paper white or the structure's
+// blue-black), chosen in one step from what is actually behind them; the sky
+// colours are nudged out of the mid-grey band so twilight passes through it
+// quickly.
 //
 // Layers, back to front: sky (CSS gradients), structure (SVG, so the type is
 // drawn at the panel's full resolution), water (CSS gradient that moves with
@@ -454,6 +464,7 @@ export default {
     // lamp streaks: per lamp and strip, a fixed jitter, width and phase
     const HK1 = new Float32Array(NL * NS), HK2 = new Float32Array(NL * NS), HK3 = new Float32Array(NL * NS);
     for (let q = 0; q < NL * NS; q++) { HK1[q] = r0(); HK2[q] = r0(); HK3[q] = r0(); }
+    const HB = new Uint8Array(NL * NS); // which tone each dash is drawn in, this frame
     const NSL = SHORE_LX.length;
     const SLK = new Float32Array(NSL * 16);
     for (let q = 0; q < SLK.length; q++) SLK[q] = r0();
@@ -491,9 +502,9 @@ export default {
     let WL = (WL_HIGH + WL_LOW) / 2;
     let haze = 0, direct = 0, night = 0;
     let driftX = 0;
-    let sceneKey = "", sceneDue = -1, snowDepth = 0, snowKey = "", capsKey = "";
+    let sceneKey = "", sceneDue = -1, lastPaint = -1, snowDepth = 0, snowKey = "", capsKey = "";
     let glitX = -999, glitK = 0, glitDp = 0;
-    let cold = 0, hot = 0;
+    let cold = 0, hot = 0, airWas = true;
     const caps = []; // snow caps on the numerals: flat arrays [x, yTop, thickness, ...] per run
 
     // ----- snow caps: where the numerals' upward-facing edges are -----------------
@@ -664,10 +675,13 @@ export default {
       const skW = unGrey(sk.west), skN = unGrey(sk.northWest);
       const skyMid = mix(skW, skN, 0.5);
       const zen = mix("#01030a", adjust(skyMid, { l: (l) => l * 0.74, c: (c) => c * 1.3 }), smoothstep(0, 0.6, dl));
-      const zenA = lerp(0.5, 0.62, dl) * (1 - 0.6 * haze);
+      const zenA = lerp(0.5, 0.62, dl) * (1 - 0.6 * haze) * (1 - 0.45 * hot);
       let hzCol = mix("#6a5238", mix(skyMid, "#ffffff", 0.5), smoothstep(0.05, 0.5, dl));
       const hzA = clamp(lerp(0.2, 0.46 - 0.22 * cloud, smoothstep(0.05, 0.5, dl)) * (1 - 0.7 * haze) + (0.3 * hot + 0.25 * smog) * dl);
       hzCol = mix(mix(hzCol, "#f3ead6", 0.55 * hot * dl), "#b89c74", 0.45 * smog * dl);
+      // a low sun behind the river warms the horizon and rims the structure
+      const backLit = direct * warm * Math.max(0, cosd(s.sun.az - 270));
+      hzCol = mix(hzCol, sunCol, 0.55 * backLit);
       P.mirage = rgba(mix(hzCol, "#ffffff", 0.35), 0.5 * hot * dl);
       const skyHz = mix(skyMid, hzCol, hzA);
       const skyTop = mix(mix(skW, skN, 0.4), zen, zenA * 0.75);
@@ -675,7 +689,7 @@ export default {
       const lumBehind = luminance(mix(skyMid, skyHz, 0.35));
       lampT = 1 - smoothstep(0.085, 0.14, lumBehind);
       // what is actually behind a point of the sky (the CSS layers below, in colour)
-      const zenEnd = WL * 0.66, hzStart = WL * 0.6;
+      const zenEnd = WL * 0.66, hzStart = WL * (0.6 - 0.3 * hot);
       const skyAt = (x, y) => {
         let c = mix(skW, skN, clamp((x / W - 0.28) / 0.72));
         c = mix(c, zen, zenA * clamp(1 - y / zenEnd));
@@ -717,29 +731,27 @@ export default {
       P.glit = s.sun.alt > 0 ? rgba(mix(sunCol, "#ffffff", 0.45), 0.92) : rgba("#dfe7f5", 0.25 + 0.5 * moonLight);
       const sunGlow = s.sun.alt > -7 && s.sun.alt < 14 ? inView * (1 - cloud * 0.75) * (1 - haze) * Math.sin(((s.sun.alt + 7) / 21) * Math.PI) : 0;
       const sky =
-        (sunGlow > 0.02 ? `radial-gradient(ellipse 620px 360px at ${glitX.toFixed(0)}px ${WL}px, ${rgba(sunCol, 0.62 * sunGlow)}, ${rgba(sunCol, 0)} 72%), ` : "") +
-        `linear-gradient(180deg, ${rgba(zen, zenA)} 0px, ${rgba(zen, 0)} ${Math.round(WL * 0.66)}px, ${rgba(hzCol, 0)} ${Math.round(WL * 0.6)}px, ${rgba(hzCol, hzA)} ${WL}px), ` +
+        (sunGlow > 0.02 ? `radial-gradient(ellipse 820px 470px at ${glitX.toFixed(0)}px ${WL}px, ${rgba(sunCol, 0.72 * sunGlow)}, ${rgba(sunCol, 0)} 72%), ` : "") +
+        `linear-gradient(180deg, ${rgba(zen, zenA)} 0px, ${rgba(zen, 0)} ${Math.round(zenEnd)}px), linear-gradient(180deg, ${rgba(hzCol, 0)} ${Math.round(hzStart)}px, ${rgba(hzCol, hzA)} ${WL}px), ` +
         `linear-gradient(90deg, ${skW} 0%, ${skW} 28%, ${skN} 100%)`;
       setStyle("sky", skyDiv, "background", sky);
 
       // the structure
       const inkD = mix("#0a1017", skyMid, 0.07);
-      const warmUp = mix("#c4503c", "#ffffff", smoothstep(0.1, 0.8, lamp)); // sodium lamps strike pink
       const lit = (day, nightCol) => mix(day, mix(nightCol, adjust(nightCol, { h: 25, c: (c) => c * 0.8 }), 1 - smoothstep(0.1, 0.8, lamp)), lamp);
       const coolTop = mix("#b56a12", "#8ea4c4", 0.3 * moonLight);
       P.f0 = lit(mix(inkD, sunCol, 0.16 * frontLit), "#dd8a24");
       P.f1 = lit(mix(mix(inkD, skyMid, 0.05), sunCol, 0.22 * frontLit), "#c8781a");
       P.f2 = lit(mix(mix(inkD, skyMid, 0.13), sunCol, 0.26 * frontLit), coolTop);
       P.side = mix(mix(mix(inkD, skyMid, 0.36), mix(sunCol, "#ffffff", 0.25), 0.9 * sideLit), "#030508", lamp);
-      P.top = mix(mix(mix(inkD, skyMid, 0.55), mix(sunCol, "#ffffff", 0.5), 0.85 * sideLit), "#1a1109", lamp);
-      P.out = mix(mix(inkD, "#000000", 0.4), "#030508", lamp);
+      P.top = mix(mix(mix(mix(inkD, skyMid, 0.55), mix(sunCol, "#ffffff", 0.5), 0.85 * sideLit), sunCol, clamp(1.4 * backLit)), "#1a1109", lamp);
+      P.out = mix(mix(mix(inkD, "#000000", 0.4), mix(sunCol, "#ffffff", 0.25), clamp(1.6 * backLit)), "#030508", lamp);
       P.fasc = mix(mix(inkD, skyMid, 0.03), "#0b0806", lamp);
       P.pile = mix(mix(inkD, skyHz, 0.42), "#0a0c10", Math.max(lamp, night));
       P.wet = mix(mix(inkD, "#0c1f1a", 0.5), "#030605", night);
       P.snow = mix(mix("#f6f8fa", skyMid, 0.1), mix("#3b4250", "#e3a55c", lamp), night);
       const shoreDay = mix(skyHz, inkD, 0.55);
       P.shore = mix(mix(shoreDay, "#05070a", night), skyHz, clamp(haze * 1.15));
-      void warmUp;
 
       // water: the horizon colour, darker, and darker still toward the viewer
       const deep = mix("#010306", "#0a2431", dl);
@@ -846,12 +858,17 @@ export default {
         slow(s);
         if (first) { lamp = lampT; lampQ = Math.round(lamp * 40); slow(s); }
       }
-      if (sceneDue >= 0 && t >= sceneDue) { sceneDue = -1; paintScene(s); }
+      // (when the clock runs fast, at most five repaints a second)
+      if (sceneDue >= 0 && t >= sceneDue && (t - lastPaint >= 0.2 || t < lastPaint)) { sceneDue = -1; lastPaint = t; paintScene(s); }
 
       const { ctx } = fx;
 
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, W, H);
+      // only the water needs clearing unless something is drawn in the air
+      const airy = !!wx.falling || hot > 0.05;
+      const clearTop = airy || airWas || jump ? 0 : WL_HIGH - 60;
+      airWas = airy;
+      ctx.clearRect(0, clearTop, W, H - clearTop);
 
       const rough = clamp(0.03 + Math.pow(wx.wind / 26, 1.15) + 0.12 * wx.intensity) * (1 - 0.55 * hot);
       const gustK = clamp((wx.gust - wx.wind) / (wx.wind + 6), 0.2, 1.2);
@@ -917,21 +934,29 @@ export default {
       ctx.globalAlpha = 1;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-      // ---- sodium light smeared down the water
+      // ---- sodium light smeared down the water (brightness worked out once per
+      // dash, then drawn in three tones)
       if (lamp > 0.02) {
         const decayInv = 1 / (150 + rough * 260);
+        for (let k = 0; k < NL; k++) {
+          const d0 = (WL - LAMP_Y[k]) / stretch;
+          for (let i = 0; i < nVis; i++) {
+            const qi = k * NS + i;
+            const d = SD[i];
+            if (d < d0 - 8) { HB[qi] = 3; continue; }
+            const e = Math.exp(-Math.max(0, d - d0) * decayInv) * (0.55 + 0.45 * Math.sin(t * (1 + HK3[qi] * 2) + HK3[qi] * 40)) * AL[i];
+            HB[qi] = e > 0.5 ? 0 : e > 0.26 ? 1 : e > 0.09 ? 2 : 3;
+          }
+        }
         for (let b = 0; b < 3; b++) {
           ctx.fillStyle = P.stk[b];
           ctx.beginPath();
           for (let k = 0; k < NL; k++) {
             const d0 = (WL - LAMP_Y[k]) / stretch;
             for (let i = 0; i < nVis; i++) {
-              const d = SD[i];
-              if (d < d0 - 8) continue;
               const qi = k * NS + i;
-              const e = Math.exp(-Math.max(0, d - d0) * decayInv) * (0.55 + 0.45 * Math.sin(t * (1 + HK3[qi] * 2) + HK3[qi] * 40)) * AL[i];
-              const bb = e > 0.5 ? 0 : e > 0.26 ? 1 : e > 0.09 ? 2 : 3;
-              if (bb !== b) continue;
+              if (HB[qi] !== b) continue;
+              const d = SD[i];
               const spread = 5 + (d - d0) * (0.035 + rough * 0.12);
               const w = (7 + 26 * HK2[qi]) * (0.7 + rough * 0.7);
               ctx.rect(LAMP_X[k] + OFF[i] * 1.1 + (HK1[qi] - 0.5) * spread - w / 2, WL + d, w, SH[i] * 0.78);
@@ -993,6 +1018,30 @@ export default {
         }
         ctx.fill();
       }
+      // ---- the river against the piles: a bright collar where each pile enters
+      // the water and, on a running tide, a wake trailing downstream (none at slack)
+      {
+        const cur = P.current, dir = cur < 0 ? -1 : 1, str = Math.abs(cur);
+        const ph = (Math.abs(driftX) * 0.9) % 18;
+        ctx.fillStyle = P.gl[2];
+        ctx.beginPath();
+        for (let k = 0; k < PILES.length; k++) {
+          const px = PILES[k] + PILE_W / 2;
+          const bob = Math.sin(t * 1.3 + k * 1.7) * (0.5 + rough * 1.5);
+          ctx.rect(px - PILE_W / 2 - 4 - 3 * str, WL + 0.5 + bob, PILE_W + 8 + 6 * str, 1.6);
+          if (str < 0.12) continue;
+          for (let j = 0; j < 5; j++) {
+            const jj = j + ph / 18; // continuous position along the wake, so nothing pops
+            const off = 12 + jj * 18;
+            const len = (17 - jj * 3) * str * (0.7 + 0.3 * Math.sin(t * 0.9 + k * 2.3));
+            if (len < 1.5) continue;
+            const x = dir > 0 ? px + PILE_W / 2 + off - 12 : px - PILE_W / 2 - off + 12 - len;
+            ctx.rect(x, WL + 2.5 + jj * 1.6 + bob * 0.5, len, 1.3);
+          }
+        }
+        ctx.fill();
+      }
+
       if (wx.wind > 15) { // whitecaps
         const fk = smoothstep(15, 32, wx.wind);
         ctx.fillStyle = P.foam;
@@ -1095,7 +1144,8 @@ export default {
               const inLight = litOn && Math.abs(x - CX) < 330 + (y - 400) * 0.1 && y > 400;
               if (inLight !== (pass === 1)) continue;
               const sz = 1.4 + PS[p] * PS[p] * 2.5;
-              ctx.rect(x, y, sz, sz);
+              if (sz < 2.6) ctx.rect(x, y, sz, sz);
+              else { ctx.moveTo(x + sz * 0.6, y); ctx.arc(x, y, sz * 0.6, 0, TAU); } // the near flakes are round
             }
             ctx.fill();
           }

@@ -43,7 +43,7 @@ import { zoned } from "../lib/time.js";
 // Geometry
 // ---------------------------------------------------------------------------
 
-const CELL = 3; // stage px per distance-field texel
+const CELL = 4; // stage px per distance-field texel
 const FC = W / CELL;
 const FR = H / CELL;
 const NCELL = FC * FR;
@@ -54,10 +54,11 @@ const NK = 6; // frost cracks
 const NUM_FAMILY = '"Shippori Mincho B1"';
 const NUM_SIZE = 590; // font size of the time
 const NUM_LEFT = 88; // left edge of the numerals
-const NUM_TOP = 236; // top of the hour figures
-const ROW_GAP = 76; // between the hour and the minute figures
-const LANE_X = 846; // the quiet right-hand lane (date, countdown, seal) starts fading in here
-const FOOT_Y = 1436; // and the quiet foot (weather, fact) here
+const NUM_TOP = 300; // top of the hour figures
+const ROW_GAP = 74; // between the hour and the minute figures
+const HEAD_Y = 290; // the quiet head (date, countdown) fades out above here
+const FOOT_Y = 1450; // and the quiet foot (weather, fact) below here
+const SEAL_X = 916; // left edge of the AM/PM seal
 const MORPH_S = 5.5; // seconds a changed numeral takes to melt into the next
 
 const SUMI = "#16130f";
@@ -122,7 +123,7 @@ float fieldFast(vec2 p) {
 // Exact bilinear from four unfiltered taps: the distance is 16 bits across two
 // channels, which a GPU's own filtering may not keep.
 float fieldAt(vec2 p) {
-  vec2 pc = clamp(p, vec2(${CELL * 0.5}), STAGE - ${CELL * 0.5});
+  vec2 pc = clamp(p, vec2(${(CELL * 0.5).toFixed(1)}), STAGE - ${(CELL * 0.5).toFixed(1)});
   float ext = length(p - pc);
   vec2 q = pc / ${CELL}.0 - 0.5;
   vec2 i = floor(q);
@@ -147,12 +148,16 @@ void main() {
 
   // Rain: each drop is the marbler's ink-drop operator run backwards. Newest first.
   float hole = 0.0;
+  float rimv = 0.0;
   for (int i = 0; i < ${ND}; i++) {
     if (float(i) >= u_ndrops) break;
     vec4 D = u_drops[i];
     vec2 r = p - D.xy;
     float r2 = dot(r, r) + 0.001;
-    hole = max(hole, (1.0 - smoothstep(D.z - u_px, D.z + u_px, sqrt(r2))) * step(0.5, D.z));
+    float rr = sqrt(r2);
+    float on = step(0.5, D.z);
+    hole = max(hole, (1.0 - smoothstep(D.z - u_px, D.z + u_px, rr)) * on);
+    rimv = max(rimv, exp(-abs(rr - D.z - 1.5) / (1.2 + u_px)) * on);
     p = D.xy + r * sqrt(max(0.0, 1.0 - D.z * D.z / r2));
   }
   p = mix(v_pos, p, near);
@@ -162,7 +167,7 @@ void main() {
   float q = dot(p, vec2(-wd.y, wd.x));
   float qq = q / u_comb.x + 0.6 * sin(q * 0.0043 + u_seed);
   float tine = exp(-abs(fract(qq) - 0.5) * 7.0);
-  float gust = 1.0 + u_wind.w * sin(u_comb.y + floor(qq) * 2.4);
+  float gust = 1.0 + u_wind.w * sin(u_comb.y + qq * 1.3);
   p -= wd * (u_wind.z * (0.42 + 1.05 * tine * gust) * max(d0, 0.0) * near);
 
   // The slow swirl of the water: three shears, one after the other.
@@ -186,7 +191,10 @@ void main() {
     }
   }
 
-  float d = fieldAt(p);
+  float dRaw = fieldAt(p);
+  // A lookup the swirl has carried into a figure reads as ink pressed against
+  // it, never as the figure itself: the figures stay where they are.
+  float d = abs(dRaw);
 
   // Bands. One unit of the band coordinate is an ink band and its gap.
   float dd = max(d, 0.0);
@@ -221,12 +229,14 @@ void main() {
   sky = mix(sky, u_skyOld, clamp(age / 30.0, 0.0, 1.0) * 0.85);
 
   // Where the ink is allowed to be.
-  float quiet = 1.0 - 0.9 * max(smoothstep(${LANE_X}.0, ${LANE_X + 96}.0, v_pos.x), smoothstep(${FOOT_Y}.0, ${FOOT_Y + 150}.0, v_pos.y));
+  float quiet = 1.0 - 0.88 * max(1.0 - smoothstep(${HEAD_Y - 84}.0, ${HEAD_Y}.0, v_pos.y), smoothstep(${FOOT_Y}.0, ${FOOT_Y + 150}.0, v_pos.y));
   float fade = mix(1.0, 0.62, smoothstep(180.0, 640.0, dd)) * quiet * smoothstep(7.0, 13.0, d) * (1.0 - hole);
   cov *= fade;
 
   vec2 c = v_uv - 0.5;
   vec3 paper = u_paper * (1.0 - 0.3 * dot(c, c)) + u_lift;
+  // clear water in a rain hole: a touch brighter than paper by day, deeper by night
+  paper *= 1.0 + hole * near * quiet * mix(0.035, -0.45, u_night);
   float rim = exp(-abs(de) / 2.6) * (1.0 - u_feather);
   // by day: ink on paper, darker at its edges
   vec3 dayCol = mix(paper, mix(u_sumi, sky, isSky), clamp(cov * dens * u_tone.x * (1.0 + u_tone.y * rim), 0.0, 1.0));
@@ -236,7 +246,10 @@ void main() {
   vec3 col = mix(dayCol, nightCol, u_night);
 
   col = mix(col, mix(vec3(1.0), u_film, u_night), crack * u_cold * 0.5 * quiet * near);
-  col = mix(col, u_num, 1.0 - smoothstep(-0.5 - 0.8 * u_px, -0.5 + 0.8 * u_px, d));
+  // the meniscus round each rain hole, where the pushed ink piles up
+  col = mix(col, mix(u_sumi, u_film, u_night), rimv * near * quiet * mix(0.55, 0.42, u_night));
+  float fig = (1.0 - smoothstep(-0.5 - 0.8 * u_px, -0.5 + 0.8 * u_px, dRaw)) * (1.0 - smoothstep(3.0, 8.0, d0));
+  col = mix(col, u_num, fig);
 
   col += (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 160.0;
   gl_FragColor = vec4(col, 1.0);
@@ -249,8 +262,8 @@ void main() {
 // ---------------------------------------------------------------------------
 
 const INF = 1e20;
-const gridOut = new Float64Array(NCELL);
-const gridIn = new Float64Array(NCELL);
+const gridOut = new Float32Array(NCELL);
+const gridIn = new Float32Array(NCELL);
 const edtF = new Float64Array(FR + 1);
 const edtZ = new Float64Array(FR + 2);
 const edtV = new Uint16Array(FR + 1);
@@ -359,11 +372,11 @@ function fieldJob(glyphs, target) {
         for (let y = 0; y < bh; y++) edt1d(gridIn, (by0 + y) * FC + bx0, 1, bw);
       } else if (stage === 3) {
         for (let i = 0; i < NCELL; i++) dist[i] = (Math.sqrt(gridOut[i]) - Math.sqrt(gridIn[i])) * CELL;
-        blurH(dist, blurA, 8);
-        blurV(blurA, blurB, 8);
+        blurH(dist, blurA, 6);
+        blurV(blurA, blurB, 6);
       } else {
-        blurH(blurB, blurA, 8);
-        blurV(blurA, blurB, 8);
+        blurH(blurB, blurA, 6);
+        blurV(blurA, blurB, 6);
         for (let i = 0; i < NCELL; i++) {
           const d = dist[i];
           let k = (d - 14) / 170;
@@ -438,32 +451,33 @@ export default {
   fonts: ["Shippori Mincho B1:wght@800", "Cormorant Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600"],
 
   mount(root, { state, seed }) {
+    const PT0 = performance.now(); const PT = (l) => console.warn(`PROF ${l} ${(performance.now() - PT0).toFixed(1)}`);
     addStyle(root, `
       .sm { position: absolute; inset: 0; overflow: hidden; background: var(--paper); color: var(--ink);
         font-family: "Cormorant Garamond", "Shippori Mincho B1", serif; font-weight: 600; font-kerning: normal; }
       .sm .layer { position: absolute; left: 0; top: 0; }
       .sm .num { font-family: ${NUM_FAMILY}, serif; font-weight: 800; font-size: ${NUM_SIZE}px; fill: var(--num); }
       .sm .seal text { font-family: ${NUM_FAMILY}, serif; font-weight: 800; fill: var(--sealtext); text-anchor: middle; }
-      .sm .lane { position: absolute; right: 66px; top: 86px; writing-mode: vertical-rl; white-space: nowrap;
-        display: flex; align-items: center; line-height: 1; }
-      .sm .date { font-size: 47px; letter-spacing: 0.012em; }
-      .sm .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--seal); margin: 34px 0 32px; }
-      .sm .sun { font-size: 39px; letter-spacing: 0.01em; }
-      .sm .sun i { font-weight: 500; }
+      .sm .head { position: absolute; left: 94px; right: 64px; top: 72px; white-space: nowrap; line-height: 1; }
+      .sm .date { font-size: 64px; font-weight: 600; letter-spacing: 0.004em; }
+      .sm .sun { display: flex; align-items: center; margin-top: 14px; font-size: 48px; letter-spacing: 0.01em; }
+      .sm .sun i { font-weight: 500; margin-right: 0.24em; }
+      .sm .dot { flex: none; width: 11px; height: 11px; border-radius: 50%; background: var(--seal); margin: 4px 20px 0 2px; }
       .sm .ampm { position: absolute; }
       .sm .foot { position: absolute; left: ${NUM_LEFT + 6}px; right: 64px; bottom: 60px; }
       .sm .wx { display: flex; align-items: flex-end; }
-      .sm .temp { font-family: ${NUM_FAMILY}, serif; font-weight: 800; font-size: 172px; line-height: 0.74; letter-spacing: -0.03em;
+      .sm .temp { font-family: ${NUM_FAMILY}, serif; font-weight: 800; font-size: 176px; line-height: 0.74; letter-spacing: -0.03em;
         margin-right: 30px; white-space: nowrap; }
+      .sm .temp.none .tn { display: inline-block; font-family: "Cormorant Garamond", serif; font-weight: 700; transform: translateY(-0.3em); margin-right: 0.04em; }
       .sm .lines { padding-bottom: 1px; min-width: 0; }
-      .sm .cond { font-style: italic; font-size: 56px; line-height: 1; white-space: nowrap; margin-bottom: 14px; }
-      .sm .moon { font-weight: 500; font-size: 40px; line-height: 0.86; white-space: nowrap; letter-spacing: 0.01em; }
+      .sm .cond { font-style: italic; font-size: 62px; line-height: 1; white-space: nowrap; margin-bottom: 12px; }
+      .sm .moon { font-weight: 500; font-size: 48px; line-height: 0.86; white-space: nowrap; letter-spacing: 0.01em; }
       .sm .seals { margin-left: auto; display: flex; gap: 22px; padding-bottom: 2px; }
       .sm .sealbox { display: flex; flex-direction: column; align-items: center; }
-      .sm .cap { font-weight: 700; font-size: 24px; line-height: 0.8; letter-spacing: 0.16em; margin: 12px -0.16em 0 0; }
-      .sm .fact { margin-top: 46px; }
-      .sm .flabel { font-weight: 700; font-size: 25px; line-height: 1; letter-spacing: 0.17em; text-transform: uppercase; }
-      .sm .fvalue { font-style: italic; font-weight: 500; font-size: 42px; line-height: 1.12; margin-top: 12px; text-wrap: balance; }
+      .sm .cap { font-weight: 700; font-size: 27px; line-height: 0.8; letter-spacing: 0.16em; margin: 12px -0.16em 0 0; }
+      .sm .fact { margin-top: 44px; }
+      .sm .flabel { font-weight: 700; font-size: 28px; line-height: 1; letter-spacing: 0.16em; text-transform: uppercase; }
+      .sm .fvalue { font-style: italic; font-weight: 500; font-size: 50px; line-height: 1.08; margin-top: 12px; text-wrap: balance; }
     `);
 
     const r = rng(seed);
@@ -471,19 +485,22 @@ export default {
     root.append(wrap);
 
     // ----- layers -----
-    const ink = shader(wrap, { frag: FRAG, maxScale: 0.75 });
+    PT("pre");
+    const ink = shader(wrap, { frag: FRAG, maxScale: 0.5 });
+    PT("shader");
     const gl = ink.ok ? ink.canvas.getContext("webgl") || ink.canvas.getContext("experimental-webgl") : null;
     const numLayer = svg("svg", { class: "layer", viewBox: `0 0 ${W} ${H}`, width: W, height: H });
     const numNodes = [0, 1, 2, 3].map(() => svg("text", { class: "num" }));
     numLayer.append(...numNodes);
     wrap.append(numLayer);
-    const snow = canvas2d(wrap, { maxScale: 1, adaptive: true });
+    // the snow layer is made only when snow first falls (a full-stage canvas is not free)
+    let snow = null;
 
     // ----- type -----
     const dateNode = el("span", { class: "date" });
     const sunLabel = el("i");
     const sunValue = el("span");
-    const lane = el("div", { class: "lane" }, dateNode, el("span", { class: "dot" }), el("span", { class: "sun" }, sunLabel, " ", sunValue));
+    const head = el("div", { class: "head" }, el("div", { class: "date" }, dateNode), el("div", { class: "sun" }, el("span", { class: "dot" }), sunLabel, sunValue));
 
     const SEAL_W = 100, SEAL_H = 176;
     const ampmSeal = makeSeal(SEAL_W, SEAL_H, false, r);
@@ -492,7 +509,9 @@ export default {
     ampmSeal.append(amA, amM);
     ampmSeal.classList.add("ampm");
 
-    const tempNode = el("div", { class: "temp" });
+    const tNum = el("span", { class: "tn" });
+    const tDeg = el("span");
+    const tempNode = el("div", { class: "temp" }, tNum, tDeg);
     const condNode = el("div", { class: "cond" });
     const moonNode = el("div", { class: "moon" });
     const roundSeal = (caption) => {
@@ -509,9 +528,10 @@ export default {
     const fValue = el("div", { class: "fvalue" });
     const factNode = el("div", { class: "fact" }, fLabel, fValue);
     const foot = el("div", { class: "foot" }, wxRow, factNode);
-    wrap.append(lane, ampmSeal, foot);
+    wrap.append(head, ampmSeal, foot);
     grain(wrap, { opacity: 0.07 });
 
+    PT("dom");
     // ----- the numerals: where each figure sits -----
     const mctx = document.createElement("canvas").getContext("2d");
     mctx.font = `800 ${NUM_SIZE}px ${NUM_FAMILY}`;
@@ -539,7 +559,7 @@ export default {
       row(mm, baseM);
       return out;
     }
-    ampmSeal.style.left = `${LANE_X + 62}px`;
+    ampmSeal.style.left = `${SEAL_X}px`;
     ampmSeal.style.top = `${Math.round(baseM - SEAL_H + 4)}px`;
 
     // ----- the field, three buffers taking turns: this minute, the last, the next -----
@@ -605,10 +625,10 @@ export default {
         }
       }
     }
-    function showTime(hh, mm, snap, t) {
+    function showTime(hh, mm, snap, t, ready = false) {
       const key = `${hh}:${mm}`;
       const list = layout(hh, mm);
-      if (snap || !nextDone || nextKey !== key) {
+      if (!ready && (snap || !nextDone || nextKey !== key)) {
         const job = fieldJob(list, bufNext);
         while (!job.step());
       }
@@ -642,17 +662,17 @@ export default {
       if (!fall || fall === "snow") return;
       const I = wx.intensity;
       const storm = fall === "storm";
-      const rate = fall === "drizzle" ? 0.5 + 1.2 * I : storm ? 1.5 + 1.3 * I : 0.8 + 2.1 * I;
+      const rate = fall === "drizzle" ? 0.7 + 1.2 * I : storm ? 1.3 + 1.2 * I : 0.9 + 1.8 * I;
       rainClock += rate * dt;
       while (rainClock >= 1) {
         rainClock -= 1;
-        const big = fall === "drizzle" ? r.range(13, 30) : storm ? r.range(44, 78 + 40 * I) : r.range(24, 44 + 34 * I);
+        const big = fall === "drizzle" ? r.range(16, 34) : storm ? r.range(60, 120 + 50 * I) : r.range(34, 64 + 40 * I);
         let x = 0, y = 0;
         for (let tries = 0; tries < 14; tries++) {
-          x = r.range(-10, LANE_X + 30);
-          y = r.range(10, FOOT_Y + 60);
+          x = r.range(-10, W + 10);
+          y = r.range(HEAD_Y - 60, FOOT_Y + 60);
           const d = fieldPx(x, y);
-          if (d > 30 + big * 0.75 && d < 600) break;
+          if (d > 24 + big * 0.6 && d < 700) break;
         }
         dropHead = (dropHead + ND - 1) % ND; // newest sits first in the ring
         dropX[dropHead] = x;
@@ -687,7 +707,7 @@ export default {
       for (let tries = 0; tries < 6; tries++) {
         fx[i] = r.range(-10, W + 10);
         fy[i] = r.range(-10, H + 10);
-        if (fx[i] < LANE_X + 70 && fy[i] < FOOT_Y + 90) break;
+        if (fy[i] > HEAD_Y - 40 && fy[i] < FOOT_Y + 90) break;
         if (tries > 3 && r() < 0.5) break; // a few rest among the type as well
       }
       const u = r();
@@ -713,8 +733,8 @@ export default {
       for (let i = 0; i < NK; i++) {
         let x = 0, y = 0;
         for (let tries = 0; tries < 20; tries++) {
-          x = r.range(30, LANE_X - 20);
-          y = r.range(60, FOOT_Y);
+          x = r.range(30, W - 30);
+          y = r.range(HEAD_Y, FOOT_Y);
           const d = fieldPx(x, y);
           if (d > 70 && d < 380) break;
         }
@@ -817,12 +837,29 @@ export default {
       pal.shade = dark ? "rgba(40,44,60,0.22)" : "rgba(0,0,0,0)";
     }
 
-    // ----- warm start: rain already on the water, cracks placed -----
-    {
-      const c = state.clock;
-      showTime(c.hh, c.mm, true, 0);
+    PT("setup");
+    // ----- start: the first field is worked out a step a frame over the first
+    // few (unseen) frames, so mount() stays quick; the figures show at once and
+    // the water is shown as soon as its field is ready, with rain already on it
+    // and the cracks placed.
+    let initKey = `${state.clock.hh}:${state.clock.mm}`;
+    let initJob = fieldJob(layout(state.clock.hh, state.clock.mm), bufNext);
+    setGlyphs(layout(state.clock.hh, state.clock.mm), false);
+    ink.canvas.style.visibility = "hidden";
+    function initStep(s) {
+      const c = s.clock;
+      const key = `${c.hh}:${c.mm}`;
+      if (key !== initKey) {
+        initKey = key;
+        initJob = fieldJob(layout(c.hh, c.mm), bufNext);
+      }
+      if (!initJob.step()) return false;
+      initJob = null;
+      showTime(c.hh, c.mm, true, s.t, true);
       placeCracks();
-      for (let t = -10; t < 0; t += 0.1) rainStep(state.weather, t, 0.1);
+      for (let t = s.t - 10; t < s.t; t += 0.1) rainStep(s.weather, t, 0.1);
+      ink.canvas.style.visibility = "";
+      return true;
     }
     let lastMs = state.ms;
     let mountMinute = Math.floor(state.ms / 60000);
@@ -842,12 +879,13 @@ export default {
 
         // ----- the time -----
         const key = `${c.hh}:${c.mm}`;
-        if (key !== shownKey) showTime(c.hh, c.mm, fast, t);
+        if (initJob) initStep(s);
+        else if (key !== shownKey) showTime(c.hh, c.mm, fast, t);
         else if (texLost) {
           texLost = false;
           upload();
         }
-        if (!fast && c.s >= 46 && !nextDone) {
+        if (!initJob && !fast && c.s >= 46 && !nextDone) {
           // work out the next minute's field a step a frame, before it is needed
           if (!nextJob) {
             const z = zoned(Math.floor(s.ms / 60000) * 60000 + 60000);
@@ -879,7 +917,15 @@ export default {
         put("sunL", sunLabel, s.text.sunLabel);
         put("sunV", sunValue, s.text.sunValue);
         put("ampm", amA, s.text.ampm.charAt(0));
-        put("temp", tempNode, s.text.temp);
+        if (shown.temp !== s.text.temp) {
+          // the string as given, in two spans so a missing reading's dash can sit at mid height
+          const tx = s.text.temp;
+          shown.temp = tx;
+          const cut = tx.endsWith("°") ? tx.length - 1 : tx.length;
+          tNum.textContent = tx.slice(0, cut);
+          tDeg.textContent = tx.slice(cut);
+          tempNode.classList.toggle("none", !/\d/.test(tx));
+        }
         put("moon", moonNode, s.text.moon);
         put("aqi", aqi.text, s.text.aqi);
         put("uv", uv.text, s.text.uv);
@@ -895,7 +941,7 @@ export default {
           fLabel.textContent = s.text.factLabel;
           fValue.textContent = s.text.factValue;
           fValue.style.fontSize = "";
-          if (fact && fValue.offsetHeight > 42 * 1.12 * 2 + 4) fValue.style.fontSize = "37px";
+          if (fact && fValue.offsetHeight > 50 * 1.08 * 2 + 4) fValue.style.fontSize = "44px";
         }
 
         // ----- temperature: viscosity -----
@@ -943,7 +989,7 @@ export default {
         ink.set("u_feather", wx.fog ? 0.86 : 0.1 * damp * damp + 0.12 * smoothstep(3, 0.5, wx.visibility));
 
         // ----- rain, and the storm's soft lift -----
-        rainStep(wx, t, dt);
+        if (!initJob) rainStep(wx, t, dt);
         rainUniforms(t);
         let lift = 0;
         if (storm) {
@@ -962,6 +1008,10 @@ export default {
           const count = Math.min(NS, Math.round(160 + 780 * snowing));
           const drift = 1.2 + wx.wind * 0.5;
           const vx = windU[0] * drift * dt, vy = windU[1] * drift * dt;
+          if (!snow) {
+            snow = canvas2d(wrap, { maxScale: 1, adaptive: true });
+            wrap.insertBefore(snow.canvas, head);
+          }
           const { ctx } = snow;
           for (let i = 0; i < count; i++) {
             if (t - fb[i] > fl[i]) placeFleck(i, t);

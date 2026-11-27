@@ -6,23 +6,35 @@
 // and ruled lines, the things a woodblock print is made of.
 //
 // How the conditions drive it:
+//   - The sky is a bokashi block: a dark strip at the top (Prussian blue when
+//     clear, sumi grey under cloud, near-black at night), a flat tint keyed to
+//     the measured sky, and a horizon band that climbs and turns ochre in heat.
+//   - Cloud cover sets how many lobed cumulus clouds (cream body, grey belly,
+//     printed a hair out of register) drift across at the wind's speed; past
+//     about 80% they close up into broad grey stratus bands. Fog, haze and low
+//     cloud slide round-ended mist bands across the sky and the towers; fog
+//     dissolves the skyline, the far water and the bridge into grey.
 //   - Rain is two sets of ruled lines at the angle the real wind gives them
-//     (wind direction against the west-facing view, and its speed); their
-//     number is how hard it is raining. Snow is paper-white dots, and white
-//     caps on the steel and the rooftops.
-//   - Cloud, fog and poor visibility slide round-ended mist bands across the
-//     sky and the towers; thick fog hides the skyline and pales the bridge.
-//   - The sky block takes its colour from the measured sky (the flat tint from
-//     the north-west, the horizon band from the west), deepening to indigo
-//     at night; windows come on one at a time through dusk.
+//     (wind across the west-facing view, and its speed); their number is how
+//     hard it is raining, drizzle is short and sparse. Snow is paper-white dots
+//     in two depths, drifting with the wind, and white caps on the steel.
 //   - Water lines drift with the tide (upstream on the flood, downstream on
-//     the ebb) and tighten into chop in wind. A barge passes now and then.
+//     the ebb) and tighten into chop in wind; glints are sun on a clear day and
+//     lamplight at night. Windows come on one at a time through dusk. A barge
+//     passes now and then; birds cross on dry days.
 //   - A red sun or a paper moon is only ever an incidental printed disc at a
 //     fixed spot behind the skyline, shown when it is really there to see.
-//   - The time is the sumi block cut into the sky; the date and the condition
-//     hang in beni-red cartouches; the rest is a colophon in the margin.
+//   - The paper margin is cream by day, indigo-dyed through the half-light
+//     and the evening, near-black at night; the type switches ink with it.
+//   - The time is the sumi block cut into the sky (with a paper keyline so the
+//     rain never eats it); the date and the condition hang in beni-red
+//     cartouches; AM/PM is the seal; the rest is a colophon in the margin.
+//
+// Performance: everything static is SVG built once; rain and snow are
+// periodic textures drawn once into canvases the compositor slides, so a
+// frame only moves layers and writes a few transforms.
 
-import { W, H, TAU, clamp, lerp, smoothstep, remap, approach, rng, mix, adjust, toOklch, el, svg, addStyle, canvas2d, grain } from "../lib/kit.js";
+import { W, H, TAU, clamp, lerp, smoothstep, remap, approach, rng, mix, adjust, toOklch, el, svg, addStyle, canvas2d } from "../lib/kit.js";
 
 // The print inside its paper margin, and the far waterline.
 const X0 = 44, Y0 = 44, X1 = 1036, Y1 = 1744;
@@ -326,16 +338,21 @@ export default {
       for (let i = 0; i < 7; i++) {
         const w = r.range(250, 560), h = w * r.range(0.28, 0.36);
         const n = Math.max(3, Math.round(w / 78));
-        let body = rect(0, h * 0.62, w, h * 0.38);
+        const bh = h * 0.2;
+        const cap = (x0, y0, x1, y1) => {
+          const rr = (y1 - y0) / 2;
+          return `M${f1(x0 + rr)} ${f1(y0)}H${f1(x1 - rr)}a${f1(rr)} ${f1(rr)} 0 0 1 0 ${f1(2 * rr)}H${f1(x0 + rr)}a${f1(rr)} ${f1(rr)} 0 0 1 0 ${f1(-2 * rr)}Z`;
+        };
+        let body = cap(0, h - bh * 2.3, w, h);
         for (let k = 0; k < n; k++) {
           const t = (k + 0.5) / n;
-          const rr = Math.min(h * (0.36 + 0.64 * Math.sin(Math.PI * t)) * r.range(0.82, 1.08), h) * 0.5 + h * 0.08;
-          const cx = clamp(t * w + r.range(-0.15, 0.15) * (w / n), rr * 0.7, w - rr * 0.7);
-          const cy = h - rr;
-          body += `M${f1(cx + rr)} ${f1(cy)}a${f1(rr)} ${f1(rr)} 0 1 0 ${f1(-2 * rr)} 0a${f1(rr)} ${f1(rr)} 0 1 0 ${f1(2 * rr)} 0Z`;
+          let rr = (h - bh) * (0.3 + 0.36 * Math.sin(Math.PI * t)) * r.range(0.85, 1.1);
+          const cx = clamp(t * w + r.range(-0.12, 0.12) * (w / n), bh + rr * 0.8, w - bh - rr * 0.8);
+          const cy = h - bh * 1.3 - rr * 0.8;
+          // clockwise, like the base, so the overlaps fill (nonzero) instead of cancelling
+          body += `M${f1(cx + rr)} ${f1(cy)}a${f1(rr)} ${f1(rr)} 0 1 1 ${f1(-2 * rr)} 0a${f1(rr)} ${f1(rr)} 0 1 1 ${f1(2 * rr)} 0Z`;
         }
-        const bh = h * 0.2;
-        const belly = `M${f1(w * 0.03 + bh / 2 + 2)} ${f1(h - bh)}H${f1(w * 0.97 - bh / 2 + 2)}a${f1(bh / 2)} ${f1(bh / 2)} 0 0 1 0 ${f1(bh)}H${f1(w * 0.03 + bh / 2 + 2)}a${f1(bh / 2)} ${f1(bh / 2)} 0 0 1 0 ${f1(-bh)}Z`;
+        const belly = cap(bh * 0.4 + 2, h - bh, w - bh * 0.4 + 2, h);
         const node = svg("svg", { class: "cloud", viewBox: `0 0 ${f1(w + 4)} ${f1(h + 2)}`, width: f1(w + 4), height: f1(h + 2) });
         node.append(svg("path", { d: body, style: "fill: var(--cloud)" }), svg("path", { d: belly, style: "fill: var(--cloudB)" }));
         clouds.push({ node, w, h, y: ys[i] - h, level: levels[i], speed: r.range(0.6, 1.2), x0: r.range(0, PW + w), shownO: -1 });
@@ -444,28 +461,125 @@ export default {
       gaCaps,
     );
 
-    // ----- rain and snow: the one layer drawn every frame -----
-    const live = canvas2d(inner, { maxScale: 2, adaptive: true });
-    const NR = 900;
-    const RP = 3300; // lines wrap over this distance along their fall
-    const rU = new Float32Array(NR), rV = new Float32Array(NR), rL = new Float32Array(NR), rS = new Float32Array(NR);
-    for (let i = 0; i < NR; i++) {
-      rU[i] = r.range(-1080, 1080);
-      rV[i] = r.range(0, RP);
-      rL[i] = r.range(420, 1180);
-      rS[i] = r.range(0.8, 1.25);
+    // ----- rain and snow -----
+    // Each is a periodic texture, drawn once (and again only when the wind,
+    // the rate or the ink changes) into a canvas one period larger than the
+    // print, then slid by the compositor along the fall and wrapped by one
+    // period. Nothing is rasterised per frame. The canvases are made the
+    // first time the weather calls for them.
+    const weather = el("div");
+    inner.append(weather);
+    let k1 = 1;
+    {
+      const b = root.getBoundingClientRect();
+      if (b.width > 0) k1 = (b.width / W) * (window.devicePixelRatio || 1);
     }
-    const NS = 460;
-    const sX = new Float32Array(NS), sY = new Float32Array(NS), sR = new Float32Array(NS), sF = new Float32Array(NS), sP = new Float32Array(NS);
-    for (let i = 0; i < NS; i++) {
-      sX[i] = r.range(0, PW + 80);
-      sY[i] = r.range(0, PH + 40);
-      const c = r();
-      sR[i] = c < 0.5 ? 2.3 : c < 0.85 ? 3.5 : 5.2;
-      sF[i] = r.range(0.75, 1.2) * (0.6 + sR[i] / 6);
-      sP[i] = r.range(0, TAU);
+    const makeSheet = (Tx, Ty, kMax) => {
+      const k = clamp(k1, 0.25, kMax);
+      const tw = Math.max(8, Math.round(Tx * k)), th = Math.max(8, Math.round(Ty * k));
+      const px = tw / k, py = th / k; // the period, in stage units
+      const tile = document.createElement("canvas");
+      tile.width = tw;
+      tile.height = th;
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.ceil((PW + px) * k);
+      canvas.height = Math.ceil((PH + py) * k);
+      Object.assign(canvas.style, { position: "absolute", left: "0", top: "0", width: `${canvas.width / k}px`, height: `${canvas.height / k}px`, willChange: "transform", visibility: "hidden" });
+      weather.append(canvas);
+      return { canvas, ctx: canvas.getContext("2d"), tile, tctx: tile.getContext("2d"), k, px, py, key: "", at: -99, ox: 0, oy: 0, on: false, o: -1 };
+    };
+    // Fill the big canvas from the tile, once the tile is drawn.
+    const spread = (sh) => {
+      const c = sh.ctx;
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      c.clearRect(0, 0, sh.canvas.width, sh.canvas.height);
+      c.fillStyle = c.createPattern(sh.tile, "repeat");
+      c.fillRect(0, 0, sh.canvas.width, sh.canvas.height);
+    };
+    const showSheet = (sh, o, x, y) => {
+      const on = o > 0.01;
+      if (on !== sh.on) {
+        sh.on = on;
+        sh.canvas.style.visibility = on ? "visible" : "hidden";
+      }
+      if (!on) return;
+      const q = Math.round(o * 40) / 40;
+      if (q !== sh.o) {
+        sh.o = q;
+        sh.canvas.style.opacity = q;
+      }
+      sh.canvas.style.transform = `translate3d(${f1(x)}px,${f1(y)}px,0)`;
+    };
+
+    // Rain: lines at random places in a tile; each is drawn with every wrapped
+    // copy that touches the tile. Shorter than the tile is tall, so a line
+    // never joins its own copy into a stripe.
+    const RN = 180;
+    const rX = new Float32Array(RN), rY = new Float32Array(RN), rL = new Float32Array(RN);
+    for (let i = 0; i < RN; i++) {
+      rX[i] = r();
+      rY[i] = r();
+      rL[i] = r.range(260, 700);
     }
-    let rainTravel = 0, snowFall = 0, snowDrift = 0, liveDirty = false;
+    let rain = null;
+    const paintRain = (sh, n, deg, delta, lenK, rgb, alpha, lw) => {
+      const c = sh.tctx, { px, py, k } = sh;
+      c.setTransform(k, 0, 0, k, 0, 0);
+      c.clearRect(0, 0, px, py);
+      c.lineCap = "butt";
+      for (let set = 0; set < 2; set++) {
+        const a = ((deg + (set ? delta : 0)) * Math.PI) / 180;
+        const sa = Math.sin(a), ca = Math.cos(a);
+        c.strokeStyle = `rgba(${rgb},${f1(alpha * (set ? 0.7 : 1) * 100) / 100})`;
+        c.lineWidth = lw * (set ? 0.75 : 1);
+        c.beginPath();
+        for (let i = set; i < n; i += 2) {
+          const L = rL[i] * lenK, dx = L * sa, dy = L * ca;
+          const x = rX[i] * px, y = rY[i] * py;
+          for (let ix = -2; ix <= 1; ix++) {
+            for (let iy = -2; iy <= 0; iy++) {
+              const x0 = x + ix * px, y0 = y + iy * py;
+              if (Math.max(x0, x0 + dx) < 0 || Math.min(x0, x0 + dx) > px || y0 + dy < 0 || y0 > py) continue;
+              c.moveTo(x0, y0);
+              c.lineTo(x0 + dx, y0 + dy);
+            }
+          }
+        }
+        c.stroke();
+      }
+      spread(sh);
+    };
+
+    // Snow: two textures, small and middle flakes far off, big flakes near.
+    const SN = 40;
+    const snX = new Float32Array(SN * 2), snY = new Float32Array(SN * 2), snR = new Float32Array(SN * 2);
+    for (let i = 0; i < SN * 2; i++) {
+      snX[i] = r();
+      snY[i] = r();
+      snR[i] = i < SN ? (r.chance(0.6) ? 2.3 : 3.5) : r.range(4.6, 5.6);
+    }
+    let snowA = null, snowB = null;
+    const paintSnow = (sh, from, n, col) => {
+      const c = sh.tctx, { px, py, k } = sh;
+      c.setTransform(k, 0, 0, k, 0, 0);
+      c.clearRect(0, 0, px, py);
+      c.fillStyle = col;
+      c.beginPath();
+      for (let i = from; i < from + n; i++) {
+        const rad = snR[i];
+        for (let ix = -1; ix <= 1; ix++) {
+          for (let iy = -1; iy <= 1; iy++) {
+            const x = snX[i] * px + ix * px, y = snY[i] * py + iy * py;
+            if (x < -rad || x > px + rad || y < -rad || y > py + rad) continue;
+            c.moveTo(x + rad, y);
+            c.arc(x, y, rad, 0, TAU);
+          }
+        }
+      }
+      c.fill();
+      spread(sh);
+    };
+    let rainTravel = 0, snowFall = 0, snowDrift = 0;
 
     // ----- type: the time as a sumi block, the temperature beside it -----
     const type = svgBox(inner, X0, 150, PW, 760);
@@ -530,7 +644,25 @@ export default {
         c.stroke();
       }
     }
-    grain(wrap, { opacity: 0.05 });
+    // film grain baked into the same layer (one full-stage overlay, not two)
+    {
+      const g = document.createElement("canvas");
+      g.width = g.height = 256;
+      const gc = g.getContext("2d");
+      const img = gc.createImageData(256, 256);
+      const gr = rng(7);
+      for (let i = 0; i < img.data.length; i += 4) {
+        const v = gr();
+        img.data[i] = img.data[i + 1] = img.data[i + 2] = v > 0.5 ? 255 : 0;
+        img.data[i + 3] = Math.abs(v - 0.5) * 2 * 255;
+      }
+      gc.putImageData(img, 0, 0);
+      const c = paper.ctx;
+      c.globalAlpha = 0.05;
+      c.fillStyle = c.createPattern(g, "repeat");
+      c.fillRect(0, 0, W, H);
+      c.globalAlpha = 1;
+    }
 
     // ----- helpers -----
     const shown = {};
@@ -662,7 +794,7 @@ export default {
       setVar("--lamp", "#f1d68c");
       setVar("--beacon", "#d5432e");
       setVar("--sun", "#d6402b");
-      setVar("--moon", mix("#cfc8b2", "#f6efdb", d));
+      setVar("--moon", "#efe5c4");
       setVar("--star", "#bfc4d4");
       setVar("--bird", onLight ? "#23252f" : "#9ea3b4");
       setOpacity("birds", birds, smoothstep(0.25, 0.6, d) * (1 - f.wet) * (1 - f.snow) * (1 - f.fog) * smoothstep(30, 20, w.wind));
@@ -677,7 +809,7 @@ export default {
       const west = s.sun.az > 180 ? 1 : 0;
       setOpacity("sun", sunDisc, west * smoothstep(-5, -1, alt) * smoothstep(15, 8, alt) * (1 - 0.9 * cl * cl) * (1 - f.wet) * (1 - f.fog));
       const mo = s.moon;
-      const moonOn = smoothstep(-1, 5, mo.alt) * smoothstep(0.35, 0.08, d) * (1 - 0.92 * cl) * (1 - f.fog) * (mo.illumination > 0.03 ? 1 : 0);
+      const moonOn = smoothstep(-1, 5, mo.alt) * smoothstep(0.35, 0.08, d) * (1 - smoothstep(0.5, 0.8, cl)) * (1 - f.fog) * (1 - f.wet) * (1 - f.snow) * (mo.illumination > 0.03 ? 1 : 0);
       setOpacity("moon", moonDisc, moonOn);
       if (moonOn > 0) {
         const k = clamp(mo.illumination, 0.04, 1);
@@ -722,6 +854,12 @@ export default {
         if (put("mm", mm, tx.mm) || first) seal.style.left = `${Math.round(LX - 8 + mm.getComputedTextLength() + 26)}px`;
         put("ampm", seal, tx.ampm);
         if (put("temp", temp, tx.temp)) {
+          // The face's en dash is a hairline: with no reading, cut it heavier.
+          const dash = tx.temp.indexOf("–");
+          if (dash >= 0) {
+            temp.textContent = tx.temp.slice(0, dash);
+            temp.append(svg("tspan", { style: "stroke: var(--timeInk); stroke-width: 10px" }, "–"), tx.temp.slice(dash + 1));
+          }
           temp.setAttribute("font-size", 156);
           const len = temp.getComputedTextLength();
           if (len > 330) temp.setAttribute("font-size", Math.max(96, Math.floor((156 * 330) / len)));
@@ -834,53 +972,51 @@ export default {
         // ----- rain: two sets of ruled lines at the wind's angle -----
         const inten = clamp(w.intensity);
         const drizzle = falling === "drizzle" ? 1 : 0;
-        const nRain = f.wet > 0.02 ? Math.round(f.wet * (drizzle ? lerp(90, 230, inten * 2) : lerp(170, NR, Math.pow(inten, 0.85)))) : 0;
-        const nSnow = f.snow > 0.02 ? Math.round(f.snow * lerp(130, NS, inten)) : 0;
-        if (nRain > 0 || nSnow > 0) {
-          const ctx = live.ctx;
-          live.clear();
-          liveDirty = true;
-          if (nRain > 0) {
-            // slant: mostly the wind across the view, a little of it however it blows
-            const deg = dir * clamp(4 + 1.2 * Math.abs(cross) + 0.45 * (w.wind - Math.abs(cross)), 5, 50);
-            rainTravel += (190 + 250 * inten) * dt;
-            const lenK = drizzle ? 0.36 : 1;
-            ctx.lineCap = "butt";
-            for (let set = 0; set < 2; set++) {
-              const a = ((deg + (set ? dir * (3.2 + 2.5 * f.storm) : 0)) * Math.PI) / 180;
-              const ca = Math.cos(a), sa = Math.sin(a);
-              ctx.strokeStyle = `rgba(${rainRGB},${f1((rainAlpha * (set ? 0.7 : 1) * (drizzle ? 0.7 : 1)))})`;
-              ctx.lineWidth = (set ? 1.1 : 1.5) * (drizzle ? 0.8 : 1 + 0.25 * inten);
-              ctx.beginPath();
-              for (let i = set; i < nRain; i += 2) {
-                const u = rU[i], L = rL[i] * lenK;
-                const v = ((rV[i] + rainTravel * rS[i]) % RP) - RP * 0.56;
-                const x = 540 + u * ca + v * sa, y = 894 - u * sa + v * ca;
-                ctx.moveTo(x, y);
-                ctx.lineTo(x + L * sa, y + L * ca);
-              }
-              ctx.stroke();
-            }
+        if (f.wet > 0.02) {
+          if (!rain) rain = makeSheet(560, 900, 1.25);
+          // slant: mostly the wind across the view, a little of it however it blows
+          const deg = dir * clamp(4 + 1.2 * Math.abs(cross) + 0.45 * (w.wind - Math.abs(cross)), 5, 50);
+          const n = Math.round(drizzle ? lerp(24, 56, clamp(inten * 2)) : lerp(40, RN, Math.pow(inten, 0.85)));
+          const key = `${Math.round(deg)}|${Math.round(n / 4)}|${drizzle}|${rainRGB}|${Math.round(f.storm * 4)}`;
+          if (key !== rain.key && (jump || s.t - rain.at > 2)) {
+            rain.key = key;
+            rain.at = s.t;
+            rain.deg = deg;
+            paintRain(rain, n, deg, dir * (3.2 + 2.5 * f.storm), drizzle ? 0.4 : 1, rainRGB, rainAlpha * (drizzle ? 0.7 : 1), (drizzle ? 1.1 : 1.5) * (1 + 0.25 * inten));
           }
-          if (nSnow > 0) {
-            snowFall += (26 + 30 * inten) * dt;
-            snowDrift += clamp(cross * 3.2, -80, 80) * dt;
-            const sw = PW + 80, sh = PH + 40;
-            ctx.fillStyle = snowCol;
-            ctx.beginPath();
-            for (let i = 0; i < nSnow; i++) {
-              const rad = sR[i];
-              const y = Y0 - 20 + ((sY[i] + snowFall * sF[i]) % sh);
-              const xx = sX[i] + snowDrift * sF[i] + 9 * Math.sin(sP[i] + snowFall * 0.02 * sF[i]);
-              const x = X0 - 40 + ((((xx % sw) + sw) % sw));
-              ctx.moveTo(x + rad, y);
-              ctx.arc(x, y, rad, 0, TAU);
-            }
-            ctx.fill();
+          const a = (rain.deg * Math.PI) / 180;
+          const v = (190 + 250 * inten) * dt;
+          rain.ox = (rain.ox + v * Math.sin(a)) % rain.px;
+          rain.oy = (rain.oy + v * Math.cos(a)) % rain.py;
+          const ox = rain.ox < 0 ? rain.ox + rain.px : rain.ox;
+          showSheet(rain, Math.min(1, f.wet * 1.2), X0 - rain.px + ox, Y0 - rain.py + rain.oy);
+        } else if (rain) showSheet(rain, 0, 0, 0);
+
+        // ----- snow: dots in two depths, drifting with the wind -----
+        if (f.snow > 0.02) {
+          if (!snowA) {
+            snowA = makeSheet(300, 380, 1);
+            snowB = makeSheet(400, 470, 1);
           }
-        } else if (liveDirty) {
-          live.clear();
-          liveDirty = false;
+          const nA = Math.round(lerp(10, SN, inten)), nB = Math.round(lerp(3, 12, inten));
+          const key = `${nA}|${nB}|${snowCol}`;
+          if (key !== snowA.key && (jump || s.t - snowA.at > 2)) {
+            snowA.key = key;
+            snowA.at = s.t;
+            paintSnow(snowA, 0, nA, snowCol);
+            paintSnow(snowB, SN, nB, snowCol);
+          }
+          snowFall += (26 + 30 * inten) * dt;
+          snowDrift += clamp(cross * 3.2, -80, 80) * dt;
+          for (let j = 0; j < 2; j++) {
+            const sh = j ? snowB : snowA, sp = j ? 1.45 : 0.8;
+            const xx = snowDrift * sp + 8 * Math.sin(s.t * (j ? 0.31 : 0.23) + j * 2);
+            const ox = ((xx % sh.px) + sh.px) % sh.px, oy = (snowFall * sp) % sh.py;
+            showSheet(sh, f.snow, X0 - sh.px + ox, Y0 - sh.py + oy);
+          }
+        } else if (snowA) {
+          showSheet(snowA, 0, 0, 0);
+          showSheet(snowB, 0, 0, 0);
         }
         first = false;
       },

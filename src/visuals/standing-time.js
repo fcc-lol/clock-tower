@@ -1,77 +1,115 @@
 // Standing Time
 //
-// Four slab-serif numerals stand outdoors like a monument, hours on a ledge
-// above minutes on a plinth, and the weather happens to them. Each numeral
-// shows how long it has stood: the last minute digit is at most sixty seconds
-// old and nearly clean, the hour digit carries up to an hour of weather, the
-// AM/PM block half a day of it and the date line the whole day.
+// Four slab-serif numerals stand like monuments on a stone plaza by the East
+// River, looking west across the water to Manhattan, and the weather happens
+// to them. Each numeral wears exactly as much weather as the time it has stood:
+// the last minute digit is under a minute old and nearly clean, the tens of
+// minutes up to ten minutes, the hour up to an hour, the little AM/PM block half
+// a day, and the date, a row of small far-off stones, the whole day. A small
+// plate on each pedestal says how long that figure has stood. On the minute the
+// old figure sinks into its pedestal, snow and all, and a clean one rises.
 //
 // How the conditions drive it
-//   snow     caps grow on every upward-facing edge of a glyph at the real rate
-//            of snowfall times that glyph's age, lean and thin out on the
-//            windward side, and never fill a counter. The ledges collect it
-//            too, with a heap where each minute digit has shed its cap, and
-//            are swept on the hour.
-//   rain     a glyph darkens from its top edges down, with a few bold rivulets
-//            running ahead; an hour-old digit is soaked, a new one is dry with
-//            its first drops. The ledges hold a film of water and drip.
-//   dry      nothing accumulates: dust motes ride the real wind (more of them
-//            in bad air) and the sun or the moon puts a clean rim on the side
-//            it stands on, with the side face of each block turned away from it.
-//   colour   the field is the measured sky, west at the left to east at the
-//            right. The monoliths are one pigment that travels with the season
-//            from cobalt (January) to oxide red (July). By day they stand dark
-//            against the sky; when the sky goes dark they stand pale against it.
+//   light    The sun throws real shadows across the plaza: their direction is
+//            the sun's bearing seen from a studio facing west (afternoon sun is
+//            behind the figures and throws their shadows toward you, morning
+//            sun is behind you and lights their faces), their length is its
+//            height, their edge is the cloud. Low sun puts a warm rim on the
+//            top edges. When the sky darkens the floodlights come on: the faces
+//            are lit from below, their tops go dark, and pools of light lie in
+//            front of the pedestals.
+//   snow     Caps grow on every upward-facing edge of a figure at the real
+//            rate of snowfall times that figure's age, thinner on the windward
+//            side, never closing a counter. The plaza whitens, and shed caps
+//            heap up on the pedestals until the hour.
+//   rain     A figure darkens from its top edges down, with a few bold
+//            rivulets; the plaza goes wet and glossy, holds reflections of the
+//            figures and rings with drops.
+//   dry      Dust motes ride the real wind, more of them in bad air; heat
+//            shimmers at the horizon; fog dissolves the far side of the plaza;
+//            partly cloudy skies drag cloud shadows across the stones.
+//   colour   The strip of sky is the measured sky (west to north-west). The
+//            figures are one pigment chosen by the season: cobalt in winter,
+//            viridian in spring, oxide red in summer, ochre in autumn. Every
+//            face is set against the ground it stands on for contrast.
 //
-// Everything that accumulates is a function of (glyph age, weather), not of
+// Everything that accumulates is a function of (figure age, weather), not of
 // what happened since the page loaded, so the first frame is already right
 // and a jump of the clock goes straight to the new state.
 //
-// Not in the kit, written here: per-glyph offscreen canvases and surface
-// tracing (the upward-facing edges of a rasterised letterform).
+// Not in the kit, written here: per-figure canvases with extrusion, surface
+// tracing (the upward-facing edges of a rasterised letterform), and shadows
+// projected onto the ground with an affine transform.
 
 import { W, H, TAU, clamp, lerp, smoothstep, ease, hash, createNoise, mix, oklch, toOklch, luminance, contrast, rgba, el, addStyle, canvas2d, mask, grain, fitText } from "../lib/kit.js";
 
-const MX = 64; // side margin
-const GAP = 22; // between numerals
+const MX = 64;
 const SLAB = '"Alfa Slab One", "Rockwell", serif';
-const BIG_PX = 520;
-const AP_PX = 132;
-// Each row: the strip of the stage it owns on the canvas, and the line its glyphs stand on.
-const ROWS = [
-  { y0: 0, y1: 186, base: 170, ledge: 12 }, // the date
-  { y0: 186, y1: 746, base: 732, ledge: 46 }, // hours
-  { y0: 746, y1: 1326, base: 1312, ledge: 60 }, // minutes, on the plinth
+const D2R = Math.PI / 180;
+const HZ = 246; // the far edge of the plaza; the river and Manhattan beyond
+const RIV = 9; // the river's strip
+const FE = 1440; // the near edge of the plaza; the podium face below it
+const LIP = 8;
+const ROW = [
+  { base: 334, ped: 0, pt: 0, k: 0.12 }, // the date, far away
+  { base: 828, ped: 40, pt: 8, k: 0.3 }, // the hours
+  { base: 1372, ped: 46, pt: 10, k: 0.42 }, // the minutes
 ];
-const PLINTH = ROWS[2].base;
-const T_SINK = 1.25; // the old numeral goes down into its slot
-const T_RISE0 = 1.05; // the new one starts up
-const T_RISE = 1.95;
-const GW = W / 2; // collision grid, 2 px cells
+const GAP = 34; // between the pedestals' cells
+const T_SINK = 1.2; // the old figure goes down into its pedestal
+const T_RISE0 = 0.9; // the new one starts up
+const T_RISE = 2.0;
+const GW = W / 2; // particle collision grid, 2 px cells
 const GH = H / 2;
+const GK0 = 0.1; // where the ground goes from night to day (daylight)
+const GK1 = 0.24;
+
+// The season's pigment: [hue, chroma] in OKLCh, changing over about three weeks
+// around each solstice and equinox.
+const PIG = [
+  [262, 0.165], // winter: cobalt
+  [160, 0.11], // spring: viridian
+  [31, 0.165], // summer: oxide red
+  [70, 0.13], // autumn: ochre
+];
+const BND = [79, 172, 265, 355]; // day of year each of spring, summer, autumn, winter starts
+function pigmentAt(doy) {
+  let bi = 0;
+  let bd = 999;
+  for (let i = 0; i < 4; i++) {
+    let d = doy - BND[i];
+    if (d > 182) d -= 365;
+    if (d < -182) d += 365;
+    if (Math.abs(d) < Math.abs(bd)) { bd = d; bi = i; }
+  }
+  const a = PIG[(bi + 4) % 4];
+  const b = PIG[(bi + 1) % 4];
+  const t = smoothstep(-10, 10, bd);
+  const dh = ((b[0] - a[0] + 540) % 360) - 180;
+  return [(a[0] + dh * t + 360) % 360, lerp(a[1], b[1], t)];
+}
 
 const CSS = `
-.st { position: absolute; inset: 0; overflow: hidden; font-family: "Rokkitt", Georgia, serif; }
-.st .field, .st .swell { position: absolute; inset: 0; }
-.st .swell { opacity: 0; background: radial-gradient(900px 620px at 62% 16%, rgba(214,226,255,0.9), rgba(214,226,255,0) 70%); }
-.st .wisp { position: absolute; left: 0; top: 0; border-radius: 50%; opacity: 0; will-change: transform; }
-.st .ledge { position: absolute; left: 0; width: ${W}px; }
-.st .plinth { position: absolute; left: 0; top: ${PLINTH}px; width: ${W}px; height: ${H - PLINTH}px; }
-.st .groove { position: absolute; left: 0; width: ${W}px; height: 3px; }
-.st .t { position: absolute; white-space: nowrap; line-height: 1; text-shadow: 0 -1.5px 0 rgba(0,0,0,0.42), 0 1.5px 0 rgba(255,255,255,0.09); }
-.st .plate { font-weight: 600; font-size: 25px; letter-spacing: 0.16em; text-transform: uppercase; transform: translateX(-50%); }
-.st .temp { font-family: ${SLAB}; font-size: 128px; left: ${MX - 4}px; }
-.st .cond { font-weight: 600; font-size: 52px; letter-spacing: 0.05em; text-transform: uppercase; }
-.st .sub { font-weight: 400; font-size: 38px; }
-.st .lab { font-weight: 600; font-size: 25px; letter-spacing: 0.16em; text-transform: uppercase; }
-.st .val { font-weight: 500; font-size: 48px; }
-.st .fact { font-weight: 400; font-size: 42px; line-height: 50px; white-space: normal; left: ${MX}px; width: ${W - MX * 2}px; text-wrap: balance; }
-.st .rule { position: absolute; left: ${MX}px; width: ${W - MX * 2}px; height: 2px; box-shadow: 0 1.5px 0 rgba(255,255,255,0.07); background: rgba(0,0,0,0.34); }
+.st { position: absolute; inset: 0; overflow: hidden; background: #14161b; font-family: "Rokkitt", Georgia, serif; }
+.st .gbox { position: absolute; overflow: hidden; }
+.st .gbox canvas { position: absolute; left: 0; top: 0; will-change: transform; }
+.st .clip { position: absolute; left: 0; top: ${HZ}px; width: ${W}px; height: ${FE - HZ}px; overflow: hidden; }
+.st .blob { position: absolute; left: 0; top: 0; border-radius: 50%; opacity: 0; will-change: transform; }
+.st .swell { position: absolute; inset: 0; opacity: 0; background: radial-gradient(1100px 760px at 58% 6%, rgba(222,230,255,0.95), rgba(222,230,255,0) 72%); }
+.st .t { position: absolute; white-space: nowrap; line-height: 1; color: var(--ink); text-shadow: 0 -1.5px 0 rgba(0,0,0,0.6), 0 1px 0 rgba(255,255,255,0.08); }
+.st .temp { font-family: ${SLAB}; font-size: 116px; left: ${MX - 3}px; }
+.st .cond { font-weight: 600; font-size: 52px; letter-spacing: 0.06em; text-transform: uppercase; }
+.st .sub { font-weight: 400; font-size: 36px; color: var(--soft); }
+.st .lab { font-weight: 600; font-size: 25px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--lab); }
+.st .val { font-weight: 500; font-size: 44px; }
+.st .fact { font-weight: 400; font-size: 40px; line-height: 46px; white-space: normal; left: ${MX}px; width: ${W - MX * 2}px; text-wrap: balance; }
+.st .rule { position: absolute; left: ${MX}px; width: ${W - MX * 2}px; height: 2px; background: rgba(0,0,0,0.55); box-shadow: 0 1px 0 rgba(255,255,255,0.09); }
+.st .age { position: absolute; font-weight: 600; font-size: 26px; letter-spacing: 0.12em; text-transform: uppercase; white-space: nowrap; line-height: 1; transform: translateX(-50%); color: var(--lab); text-shadow: 0 -1px 0 rgba(0,0,0,0.65), 0 1px 0 rgba(255,255,255,0.07); }
 `;
 
 export default {
   title: "Standing Time",
-  description: "Four monolith numerals stand out in the weather, and each one wears exactly as much snow or rain as the time it has stood.",
+  description: "Four monolith numerals stand on a plaza by the East River, and each one wears exactly as much snow, rain and sun as the time it has stood.",
   fonts: ["Alfa Slab One", "Rokkitt:wght@400;500;600"],
   fps: 30,
 
@@ -81,28 +119,32 @@ export default {
     const wrap = el("div", { class: "st" });
     root.append(wrap);
 
-    // ---- the still parts, in DOM: sky field, ledges, plinth ----------------
-    const field = el("div", { class: "field" });
-    const swell = el("div", { class: "swell" });
-    const wisps = [];
-    for (let i = 0; i < 6; i++) {
-      const w = 760 + hash(i, seed) * 520;
-      const h = 300 + hash(i, seed + 1) * 260;
-      wisps.push({ node: el("div", { class: "wisp", style: { width: `${w}px`, height: `${h}px` } }), w, h, y: 150 + (i / 6) * 1050 + hash(i, seed + 2) * 120, ph: hash(i, seed + 3), sp: 0.5 + hash(i, seed + 4) });
+    // ---- layers, back to front ----------------------------------------------
+    const ground = canvas2d(wrap, { maxScale: 2, alpha: false }); // sky strip, plaza, pedestals, podium
+    const R = ground.ratio; // real pixels per stage unit, for the figures too
+    const fx = canvas2d(wrap, { maxScale: 1 }); // shadows and reflections on the ground
+    const clipBox = el("div", { class: "clip" });
+    const fogBox = el("div", { class: "clip" });
+    wrap.append(clipBox, fogBox);
+    const blobs = [];
+    for (let i = 0; i < 5; i++) {
+      const w = 760 + hash(i, seed + 5) * 520;
+      const h = 210 + hash(i, seed + 6) * 120;
+      const node = el("div", { class: "blob", style: { width: `${w}px`, height: `${h}px` } });
+      clipBox.append(node);
+      blobs.push({ node, w, h, y: 60 + (i / 5) * (FE - HZ - 200) + hash(i, seed + 7) * 120, ph: hash(i, seed + 8), sp: 0.6 + 0.8 * hash(i, seed + 9), o: "" });
     }
-    const ledges = [0, 1].map((i) => el("div", { class: "ledge", style: { top: `${ROWS[i].base}px`, height: `${ROWS[i].ledge}px` } }));
-    const plinth = el("div", { class: "plinth" });
-    const groove = el("div", { class: "groove", style: { top: `${PLINTH + ROWS[2].ledge}px` } });
-    wrap.append(field, swell, ...wisps.map((w) => w.node), ...ledges, plinth, groove);
+    const wisps = [];
+    const mkWisp = (i, parent, y0, y1) => {
+      const w = 700 + hash(i, seed + 21) * 600;
+      const h = 220 + hash(i, seed + 22) * 200;
+      const node = el("div", { class: "blob", style: { width: `${w}px`, height: `${h}px` } });
+      parent.append(node);
+      wisps.push({ node, w, h, y: y0 + hash(i, seed + 23) * (y1 - y0), ph: hash(i, seed + 24), sp: 0.5 + hash(i, seed + 25), o: "", front: parent !== fogBox });
+    };
+    for (let i = 0; i < 5; i++) mkWisp(i, fogBox, -60, 640);
 
-    // ---- canvases: the monoliths and what has settled on them (drawn only
-    // when something changes), and the air (redrawn every frame) -------------
-    const mono = canvas2d(wrap, { maxScale: 2 });
-    const air = canvas2d(wrap, { adaptive: true });
-    const R = mono.ratio;
-    const mctx = mono.ctx;
-
-    // ---- type metrics -------------------------------------------------------
+    // ---- type metrics ---------------------------------------------------------
     const meas = document.createElement("canvas").getContext("2d");
     const metricsOf = (font) => {
       meas.font = font.replace("%", "100");
@@ -111,99 +153,124 @@ export default {
     };
     const mSlab = metricsOf(`%px ${SLAB}`);
     const mRok = metricsOf('500 %px "Rokkitt"');
-    // top of a line box (line-height `lh`) whose first baseline should sit at `baseline`
     const topFor = (baseline, px, m, lh = px) => baseline - ((lh - (m.a + m.d) * px) / 2 + m.a * px);
-    const advance = (font, str, ls = 0) => {
-      meas.font = font;
-      let w = 0;
-      for (const ch of str) w += meas.measureText(ch).width + ls;
-      return w - ls;
+    meas.font = `100px ${SLAB}`;
+    const inkOf = (ch) => {
+      const m = meas.measureText(ch);
+      return (m.actualBoundingBoxLeft + m.actualBoundingBoxRight) / 100;
     };
-    // The date is set as two groups, weekday at the left margin and month-day
-    // at the right: size it so the longest pair still leaves a gap.
-    const DATE_LS = 0.07;
-    const worst = advance(`100px ${SLAB}`, "WEDNESDAY", DATE_LS * 100) + advance(`100px ${SLAB}`, "SEPTEMBER 30", DATE_LS * 100);
-    const DATE_PX = Math.max(46, Math.min(62, Math.floor((100 * (W - MX * 2 - 44)) / worst)));
+    let digitInk = 0;
+    for (const d of "0123456789") digitInk = Math.max(digitInk, inkOf(d));
+    const digitCap = meas.measureText("0").actualBoundingBoxAscent / 100;
+    const mCap = meas.measureText("M").actualBoundingBoxAscent / 100;
+    const mInk = inkOf("M");
 
-    // ---- glyph classes ------------------------------------------------------
-    const scratch = (bw, bh) => {
+    // ---- figure classes ----------------------------------------------------------
+    const mkClass = (kind, px, dz, capMax, k, cellW, inkH) => {
+      const padX = Math.ceil(18 + 16 * k);
+      const padT = Math.ceil(dz + capMax + 12);
+      const bw = Math.ceil(cellW + padX * 2);
+      const bh = Math.ceil(padT + inkH + 3);
+      return { kind, px, font: `${px}px ${SLAB}`, dz, capMax, k, cellW, inkH, padX, padT, bw, bh, oy: bh - 3 };
+    };
+    const MPX = 620;
+    const HPX = 540;
+    const APX = 112;
+    const DPX = 72;
+    const CLS = {
+      min: mkClass(0, MPX, 26, 84, 1, Math.ceil(digitInk * MPX + 6), digitCap * MPX),
+      hour: mkClass(0, HPX, 22, 70, 0.87, Math.ceil(digitInk * HPX + 6), digitCap * HPX),
+      ap: mkClass(1, APX, 9, 26, 0.4, Math.ceil(mInk * APX + 8), 2 * mCap * APX + 6),
+      date: mkClass(2, DPX, 5, 10, 0.2, W - MX * 2, mCap * DPX),
+    };
+    let sbw = 0;
+    let sbh = 0;
+    for (const k in CLS) { sbw = Math.max(sbw, CLS[k].bw); sbh = Math.max(sbh, CLS[k].bh); }
+    const scratch = () => {
       const c = document.createElement("canvas");
-      c.width = Math.ceil(bw * R);
-      c.height = Math.ceil(bh * R);
+      c.width = Math.ceil(sbw * R);
+      c.height = Math.ceil(sbh * R);
       return c;
     };
-    const mkClass = (kind, px, padX, padT, padB, inkW, inkH, depth, dmax, k) => {
-      const bw = Math.ceil(inkW + padX * 2);
-      const bh = Math.ceil(inkH + padT + padB);
-      const sa = scratch(bw, bh);
-      const sb = scratch(bw, bh);
-      return { kind, px, font: `${px}px ${SLAB}`, padX, padT, padB, bw, bh, depth, dmax, k, sa, sb, sactx: sa.getContext("2d"), sbctx: sb.getContext("2d") };
-    };
-    const CLS = {
-      big: mkClass(0, BIG_PX, 34, 108, 14, BIG_PX * 0.76, BIG_PX * 0.83, 1, 84, 1),
-      ap: mkClass(1, AP_PX, 18, 62, 8, AP_PX * 1.17, AP_PX * 0.8 * 2 + 8, 0.5, 40, 0.5),
-      date: mkClass(2, DATE_PX, 14, 40, 6, W - MX * 2, DATE_PX * 0.8, 0.24, 19, 0.24),
-    };
+    const SA = scratch();
+    const SB = scratch();
+    const sa = SA.getContext("2d");
+    const sb = SB.getContext("2d");
 
-    function makeSlot(id, row, cls, hasPlate) {
-      const comp = scratch(cls.bw, cls.bh);
-      const old = scratch(cls.bw, cls.bh);
-      const sl = {
-        id, row, cls,
-        str: "", x: 0, gy: ROWS[row].base - (cls.bh - cls.padB),
-        comp, cctx: comp.getContext("2d"), old, octx: old.getContext("2d"), oldX: 0, hadOld: false,
+    function makeSlot(id, row, cls, hasAge) {
+      const box = el("div", { class: "gbox" });
+      wrap.append(box);
+      const faces = [0, 1].map(() => {
+        const cv = document.createElement("canvas");
+        cv.width = Math.ceil(cls.bw * R);
+        cv.height = Math.ceil(cls.bh * R);
+        cv.style.width = `${cls.bw}px`;
+        cv.style.height = `${cls.bh}px`;
+        box.append(cv);
+        const sil = document.createElement("canvas");
+        sil.width = cls.bw;
+        sil.height = cls.bh;
+        return { cv, ctx: cv.getContext("2d"), sil, sctx: sil.getContext("2d"), str: "", off: 0, vis: true, offTxt: "" };
+      });
+      return {
+        id, row, cls, box, faces, cur: 0,
+        str: "", px: cls.px, font: cls.font, cellX: 0, x: 0, gy: 0, sx: 0, present: true,
         anim: false, t0: 0,
         mask: null, chains: [], inkL: 0, inkR: 0, inkT: 0, inkB: 0,
-        ox: 0, oy: 0, ox2: 0, oy2: 0, chars: [], cx: [],
+        ox: 0, oy: cls.oy, ox2: 0, oy2: 0, chars: [], cx: [],
         rv: new Float32Array(16 * 6), nrv: 0, seed: 0,
-        age: 0, D: 0, Ddrawn: -1, wetKey: -2, wetDrawn: -2, palDrawn: -1,
-        plate: hasPlate ? el("div", { class: "t plate" }) : null, plateText: "", plateX: -1,
+        age: 0, D: 0, Ddrawn: -1, wetKey: -1, wetDrawn: -2, palDrawn: -1,
+        heap: 0,
+        age_: hasAge ? el("div", { class: "age" }) : null, ageText: "",
       };
-      return sl;
     }
     const S = {
-      h1: makeSlot(0, 1, CLS.big, true),
-      h2: makeSlot(1, 1, CLS.big, true),
-      m1: makeSlot(2, 2, CLS.big, true),
-      m2: makeSlot(3, 2, CLS.big, true),
-      ap: makeSlot(4, 2, CLS.ap, true),
       date: makeSlot(5, 0, CLS.date, false),
+      h1: makeSlot(0, 1, CLS.hour, true),
+      h2: makeSlot(1, 1, CLS.hour, true),
+      ap: makeSlot(4, 1, CLS.ap, true),
     };
+    for (let i = 5; i < 9; i++) mkWisp(i, wrap, 380, 1100); // fog between the hours and the minutes
+    S.m1 = makeSlot(2, 2, CLS.min, true);
+    S.m2 = makeSlot(3, 2, CLS.min, true);
     const slots = [S.h1, S.h2, S.m1, S.m2, S.ap, S.date];
-    const rowSlots = [[S.date], [S.h1, S.h2], [S.m1, S.m2, S.ap]];
+    const pedSlots = [S.h1, S.h2, S.ap, S.m1, S.m2];
 
-    // ---- inscriptions on the plinth (DOM) -----------------------------------
-    const T = (cls, style) => el("div", { class: `t ${cls}`, style });
+    const air = canvas2d(wrap, { adaptive: true });
+    const swell = el("div", { class: "swell" });
+    wrap.append(swell);
+
+    // ---- inscriptions on the podium (DOM) --------------------------------------
+    const T = (cls) => el("div", { class: `t ${cls}` });
     const n = {
       temp: T("temp"), cond: T("cond"), sub: T("sub"),
-      sunL: T("lab"), sunV: T("val"), moonL: T("lab", null), moonV: T("val"), aqiL: T("lab"), aqiV: T("val"), uvL: T("lab"), uvV: T("val"),
+      sunL: T("lab"), sunV: T("val"), moonL: T("lab"), moonV: T("val"), aqiL: T("lab"), aqiV: T("val"), uvL: T("lab"), uvV: T("val"),
       factL: T("lab"), factV: T("fact"),
       rule1: el("div", { class: "rule" }), rule2: el("div", { class: "rule" }),
     };
     n.moonL.textContent = "Moon";
     n.aqiL.textContent = "Air quality";
     n.uvL.textContent = "UV index";
-    const COL = [MX, 318, 668, 872];
-    const colW = [230, 326, 180, W - MX - 872];
-    wrap.append(...Object.values(n), ...slots.filter((s) => s.plate).map((s) => s.plate));
+    const COL = [MX, 300, 642, 850];
+    const colW = [226, 330, 196, W - MX - 850];
+    wrap.append(...Object.values(n), ...pedSlots.map((s) => s.age_));
     function layoutText(shift) {
       const y = (v) => `${Math.round(v + shift)}px`;
-      const tempBase = 1508;
-      n.temp.style.top = y(topFor(tempBase, 128, mSlab));
-      n.cond.style.top = y(topFor(tempBase - mSlab.cap * 128 + mRok.cap * 52, 52, mRok));
-      n.sub.style.top = y(topFor(tempBase, 38, mRok));
-      n.rule1.style.top = y(1546);
+      const tb = 1562;
+      n.temp.style.top = y(topFor(tb, 116, mSlab));
+      n.cond.style.top = y(topFor(tb - mSlab.cap * 116 + mRok.cap * 52, 52, mRok));
+      n.sub.style.top = y(topFor(tb, 36, mRok));
+      n.rule1.style.top = y(1592);
       for (const [l, v, c] of [[n.sunL, n.sunV, 0], [n.moonL, n.moonV, 1], [n.aqiL, n.aqiV, 2], [n.uvL, n.uvV, 3]]) {
         l.style.left = v.style.left = `${COL[c]}px`;
-        l.style.top = y(topFor(1594, 25, mRok));
-        v.style.top = y(topFor(1646, 48, mRok));
+        l.style.top = y(topFor(1636, 25, mRok));
+        v.style.top = y(topFor(1688, 44, mRok));
       }
-      n.rule2.style.top = y(1682);
+      n.rule2.style.top = y(1714);
       n.factL.style.left = `${MX}px`;
-      n.factL.style.top = y(topFor(1728, 25, mRok));
-      n.factV.style.top = y(topFor(1780, 42, mRok, 50));
+      n.factL.style.top = y(topFor(1754, 25, mRok));
+      n.factV.style.top = y(topFor(1798, 40, mRok, 46));
     }
-    for (const sl of slots) if (sl.plate) sl.plate.style.top = `${Math.round(topFor(ROWS[sl.row].base + ROWS[sl.row].ledge / 2 + mRok.cap * 12.5, 25, mRok))}px`;
     grain(wrap, { opacity: 0.05 });
 
     const shown = {};
@@ -219,10 +286,10 @@ export default {
       node.style[prop] = value;
     };
 
-    // ---- letterforms --------------------------------------------------------
+    // ---- letterforms ----------------------------------------------------------------
     function drawShape(c, sl, dx, dy) {
       const k = sl.cls.kind;
-      c.font = sl.cls.font;
+      c.font = sl.font;
       c.textBaseline = "alphabetic";
       c.textAlign = "left";
       if (k === 0) c.fillText(sl.str, sl.ox + dx, sl.oy + dy);
@@ -232,7 +299,7 @@ export default {
       } else for (let i = 0; i < sl.chars.length; i++) c.fillText(sl.chars[i], sl.cx[i] + dx, sl.oy + dy);
     }
 
-    // Trace the upward-facing edges of the glyph ("surfaces": runs of columns
+    // Trace the upward-facing edges of the figure ("surfaces": runs of columns
     // whose top is continuous) and how much open air is above each column.
     function analyse(sl) {
       const { bw, bh } = sl.cls;
@@ -259,7 +326,7 @@ export default {
             if (x < L) L = x;
             if (x > Rt) Rt = x;
             if (y < Tp) Tp = y;
-          } else if (!s && prev && y > B) B = y;
+          } else if (!s && prev) { lastEnd = y; if (y > B) B = y; }
           prev = s;
         }
         if (prev) B = bh;
@@ -279,12 +346,11 @@ export default {
     // Where the rivulets will run: a few columns on the open top edges.
     function seedRivulets(sl) {
       const k = sl.cls.k;
-      const max = sl.cls.kind === 0 ? 7 : sl.cls.kind === 1 ? 4 : 16;
-      const spacing = sl.cls.kind === 2 ? 34 : 50 * k + 6;
+      const max = sl.cls.kind === 0 ? 7 : sl.cls.kind === 1 ? 3 : 16;
+      const spacing = sl.cls.kind === 2 ? 30 : 50 * k + 6;
+      const open = sl.chains.filter((c) => c.open && c.n > 8);
       let count = 0;
-      for (let tries = 0; tries < 90 && count < max; tries++) {
-        const open = sl.chains.filter((c) => c.open && c.n > 8);
-        if (!open.length) break;
+      for (let tries = 0; tries < 90 && count < max && open.length; tries++) {
         const ch = open[Math.floor(hash(tries, sl.seed) * open.length)];
         const i = 2 + Math.floor(hash(tries, sl.seed + 11) * (ch.n - 4));
         const x = ch.x0 + i;
@@ -294,165 +360,280 @@ export default {
         const o = count * 6;
         sl.rv[o] = x;
         sl.rv[o + 1] = ch.y[i];
-        sl.rv[o + 2] = (13 + 19 * hash(tries, sl.seed + 12)) * (0.35 + 0.65 * k); // width
-        sl.rv[o + 3] = 0.55 + 1.5 * hash(tries, sl.seed + 13) ** 1.6; // speed
-        sl.rv[o + 4] = count === 0 ? 2 : 34 * hash(tries, sl.seed + 14); // delay, s
-        sl.rv[o + 5] = hash(tries, sl.seed + 15) * TAU; // meander phase
+        sl.rv[o + 2] = (13 + 19 * hash(tries, sl.seed + 12)) * (0.35 + 0.65 * k);
+        sl.rv[o + 3] = 0.55 + 1.5 * hash(tries, sl.seed + 13) ** 1.6;
+        sl.rv[o + 4] = count === 0 ? 2 : 34 * hash(tries, sl.seed + 14);
+        sl.rv[o + 5] = hash(tries, sl.seed + 15) * TAU;
         count++;
       }
       sl.nrv = count;
     }
 
-    function setGlyph(sl, str, s) {
+    const DATE_LS = 0.06;
+    const advance = (font, str, ls) => {
+      meas.font = font;
+      let w = 0;
+      for (const ch of str) w += meas.measureText(ch).width + ls;
+      return w - ls;
+    };
+    const PT={};const pn=()=>performance.now();
+    function setGlyph(sl, f, str, s) {
+      const _t=pn();
       sl.str = str;
-      if (!str) { sl.chains = []; sl.nrv = 0; sl.mask = null; return; }
+      f.str = str;
       const c = sl.cls;
-      sl.oy = c.bh - c.padB;
-      if (c.kind === 0) sl.ox = c.padX + 14;
-      else if (c.kind === 1) {
-        sl.ox = c.padX + 4;
-        meas.font = c.font;
-        sl.ox2 = sl.ox + (meas.measureText("M").width - meas.measureText(str[0]).width) / 2;
-        sl.oy2 = sl.oy - Math.round(mSlab.cap * c.px) - 6;
+      if (!str) { sl.chains = []; sl.nrv = 0; sl.mask = null; return; }
+      sl.oy = c.oy;
+      if (c.kind === 0) {
+        meas.font = sl.font;
+        const m = meas.measureText(str);
+        sl.ox = c.bw / 2 - (m.actualBoundingBoxRight - m.actualBoundingBoxLeft) / 2;
+      } else if (c.kind === 1) {
+        meas.font = sl.font;
+        const m = meas.measureText("M");
+        sl.ox = c.bw / 2 - (m.actualBoundingBoxRight - m.actualBoundingBoxLeft) / 2;
+        const p = meas.measureText(str[0]);
+        sl.ox2 = c.bw / 2 - (p.actualBoundingBoxRight - p.actualBoundingBoxLeft) / 2;
+        sl.oy2 = sl.oy - Math.round(m.actualBoundingBoxAscent) - Math.round(c.dz * 0.5) - 1;
       } else {
-        const ls = DATE_LS * c.px;
         const [a, b] = str.split("|");
+        const room = W - MX * 2 - 56;
+        const w100 = advance(`100px ${SLAB}`, a, DATE_LS * 100) + advance(`100px ${SLAB}`, b, DATE_LS * 100);
+        sl.px = Math.max(46, Math.min(DPX, Math.floor((100 * room) / w100)));
+        sl.font = `${sl.px}px ${SLAB}`;
+        const ls = DATE_LS * sl.px;
         sl.chars = [];
         sl.cx = [];
-        meas.font = c.font;
+        meas.font = sl.font;
         let x = c.padX;
         for (const ch of a) { sl.chars.push(ch); sl.cx.push(x); x += meas.measureText(ch).width + ls; }
-        x = c.padX + (W - MX * 2) - advance(c.font, b, ls);
+        x = c.padX + (W - MX * 2) - advance(sl.font, b, ls);
         for (const ch of b) { sl.chars.push(ch); sl.cx.push(x); x += meas.measureText(ch).width + ls; }
       }
-      sl.mask = mask(c.bw, c.bh, (ctx) => drawShape(ctx, sl, 0, 0)).data;
-      analyse(sl);
-      // the same glyph born at the same instant always weathers the same way
+      let _m=pn();sl.mask = mask(c.bw, c.bh, (ctx) => drawShape(ctx, sl, 0, 0)).data;PT.mask=(PT.mask||0)+pn()-_m;_m=pn();
+      analyse(sl);PT.an=(PT.an||0)+pn()-_m;
+      // the same figure put up at the same instant always weathers the same way
       sl.seed = (Math.floor((s.ms - sl.age * 1000) / 1000 + 0.5) % 100000) + sl.id * 7919;
       seedRivulets(sl);
+      paintSil(sl, f);
+      sl.palDrawn = -1;
+      PT.glyph=(PT.glyph||0)+pn()-_t;
+    }
+    function paintSil(sl, f) {
+      const c = f.sctx;
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      c.globalCompositeOperation = "source-over";
+      c.clearRect(0, 0, sl.cls.bw, sl.cls.bh);
+      if (!f.str) return;
+      c.fillStyle = pal.shadow;
+      drawShape(c, sl, 0, 0);
     }
 
-    // ---- palette ------------------------------------------------------------
+    // ---- palette --------------------------------------------------------------------
+    const mkP = () => ({ face: "#000", faceLo: "#000", top: "#000", side: "#000", rim: "#000", rimOn: false, wet1: "#000", wet2: "#000", glint: "#000", night: false });
     const pal = {
-      version: 0, key: "", lit: 0, ex: -12, rimShift: 1,
-      big: { face: "#000", side: "#000", rim: "#000", rimOn: false, wet1: "#000", wet2: "#000", glint: "#000" },
-      date: { face: "#000", side: "#000", rim: "#000", rimOn: false, wet1: "#000", wet2: "#000", glint: "#000" },
-      snow: "#fff", shade: "#ccd", puddle: "#888", rain: "#fff", rainA: 0.5, mote: "#fff", moteA: 0.5, field: "#000",
-    };
-    const toneL = (l) => (l <= 0.37 ? l : l <= 0.507 ? 0.37 + (l - 0.37) * (0.042 / 0.137) : l <= 0.575 ? 0.412 + (l - 0.507) * (0.228 / 0.068) : l <= 0.71 ? 0.64 + (l - 0.575) * (0.07 / 0.135) : Math.min(l, 0.85));
-    const tone = (hex) => {
-      const o = toOklch(hex);
-      const l2 = toneL(o.l);
-      return oklch(l2, o.c * (o.l > 0.05 ? clamp(l2 / o.l, 0.7, 1.25) : 1), o.h);
+      version: 0, key: "",
+      big: mkP(), date: mkP(),
+      night: false, gk: 1, sky0: "#888", sky1: "#888", sky2: "#888", zen: "#888", horizon: "#888", river: "#888",
+      skyline: "#777", winA: 0, starA: 0, gNear: "#ccc", gFar: "#ccc", joint: "#000", jointA: 0,
+      shadow: "#223", granite: "#222", graniteTop: "#333", lip: "#666", pool: "#ffd9a0", poolA: 0,
+      snow: "#fff", snowShade: "#ccd", rain: "#fff", mote: "#fff", fog: "#ddd", cloudShadow: "#445",
+      ink: "#eee", lab: "#ccc", soft: "#ccc",
+      shA: 0, shAx: 0, shBy: 0, shSoft: 2, nsA: 0, contactA: 0.4, refA: 0,
     };
     let hue = 262;
-    let chroma = 0.17;
-    // the pigment at a wanted luminance
+    let chroma = 0.16;
     const pig = (Y, c = 1) => {
       let L = Math.cbrt(Math.max(0.0005, Y));
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < 5; i++) {
         const y = luminance(oklch(L, chroma * c, hue));
-        L = clamp(L * Math.cbrt((Y + 0.003) / (y + 0.003)), 0.02, 0.99);
+        L = clamp(L * Math.cbrt((Y + 0.003) / (y + 0.003)), 0.02, 0.995);
       }
       return oklch(L, chroma * c, hue);
     };
-    let rainK = 0; // 0..1 it is raining
+    const lumOfL = (L, c = 1) => luminance(oklch(L, chroma * c, hue));
+    const farness = (y) => (y <= HZ ? 1 : Math.pow(clamp((FE - y) / (FE - HZ)), 2));
+    const groundAt = (y) => mix(pal.gNear, pal.gFar, farness(y));
+
     let snowK = 0; // 0..1 it is snowing
+    let rainK = 0; // 0..1 it is raining
+    let wet = 0; // 0..1 the plaza is wet
+    let cover = 0; // 0..1 snow lying on the plaza
+    let fogK = 0;
     let lat = 1; // which way the wind carries things across the picture, -1..1
     let capWind = 0;
-    let fogK = 0;
+    let partly = 0;
+    let heat = 0;
 
     function updatePalette(s) {
-      const season = 0.5 - 0.5 * Math.cos(TAU * (s.clock.yearFrac - 0.04)); // 0 mid-January, 1 mid-July
-      hue = (262 + 134 * season) % 360;
-      chroma = 0.175 - 0.03 * Math.sin(Math.PI * season);
-      const f0 = tone(s.sky.west), f1 = tone(s.sky.northWest), f2 = tone(s.sky.northEast), f3 = tone(s.sky.east);
-      const mean = tone(s.sky.mean);
-      const Lf = toOklch(mean).l;
-      const Yf = luminance(mean);
-      const lit = smoothstep(0.57, 0.45, Lf);
-      const cloud = clamp(s.weather.cloud / 100);
+      const w = s.weather;
+      const dl = s.daylight;
+      const alt = s.sun.alt;
+      const az = s.sun.az * D2R;
+      const cloud = clamp(w.cloud / 100);
+      const direct = Math.pow(1 - cloud, 1.6) * smoothstep(-0.5, 8, alt);
+      const gk = smoothstep(GK0, GK1, dl);
+      const sinA = Math.sin(az);
+      const cosA = Math.cos(az);
+      const frontSun = clamp(sinA) * Math.cos(Math.max(0, alt) * D2R);
+      const backSun = clamp(-sinA);
+      const golden = 1 - smoothstep(3, 26, alt);
+      const sunTint = mix("#ffa860", "#fff2dc", smoothstep(1, 30, alt));
+      [hue, chroma] = pigmentAt(s.clock.doy);
+      partly = smoothstep(8, 35, w.cloud) * (1 - smoothstep(70, 92, w.cloud));
+      heat = smoothstep(84, 96, w.temp) * smoothstep(0.3, 0.8, dl);
 
-      // which side the light stands on
-      const sunLx = Math.sin((s.sun.az * Math.PI) / 180);
-      const moonVis = smoothstep(-2, 8, s.moon.alt) * s.moon.illumination;
-      const nightLx = lerp(-0.75, Math.sin((s.moon.az * Math.PI) / 180), smoothstep(0.02, 0.2, moonVis));
-      const lx = lerp(nightLx, sunLx, smoothstep(0.08, 0.45, s.daylight));
-      const shape = (lx / Math.sqrt(lx * lx + 0.012)) * (0.45 + 0.55 * Math.abs(lx));
-      const ex = Math.round(-22 * shape * 2) / 2;
-      const direct = Math.pow(1 - cloud, 1.4) * smoothstep(-1, 10, s.sun.alt);
-      const moonS = moonVis * Math.pow(1 - cloud, 1.2);
-      const rimAmt = lerp(0.8 * direct, 0.9 * moonS, lit);
-      const rimTint = mix(mix("#ffb46a", "#fff3dc", smoothstep(0, 24, s.sun.alt)), "#eef2ff", lit);
+      // the sky, and Manhattan under it
+      const sw = s.sky.west, snw = s.sky.northWest, sne = s.sky.northEast, se = s.sky.east, mean = s.sky.mean;
+      const fogCol = mix(mean, gk > 0.5 ? "#dfe2e4" : "#2c3138", 0.45);
+      pal.fog = fogCol;
+      pal.sky0 = mix(sw, fogCol, fogK * 0.6);
+      pal.sky2 = mix(snw, fogCol, fogK * 0.6);
+      pal.sky1 = mix(pal.sky0, pal.sky2, 0.5);
+      pal.zen = mix(mix(mix(sne, se, 0.5), "#000000", 0.18), fogCol, fogK * 0.5);
+      const horizon = mix(pal.sky0, pal.sky2, 0.4);
+      pal.horizon = horizon;
+      const ho = toOklch(horizon);
+      pal.skyline = mix(mix(horizon, oklch(ho.l * 0.62, ho.c * 0.7, ho.h), 0.85), fogCol, fogK * 0.85);
+      pal.river = mix(horizon, gk > 0.5 ? "#ffffff" : "#000000", 0.14);
+      pal.winA = (1 - smoothstep(0.05, 0.35, dl)) * (1 - fogK * 0.8) * 0.85;
+      pal.starA = (1 - smoothstep(0.02, 0.12, dl)) * Math.pow(1 - cloud, 2) * (1 - fogK) * 0.7;
 
-      const dayY = clamp((Yf + 0.05) / 3.4 - 0.05, 0.012, 0.085);
-      const wetFloor = 3.25 * (Yf + 0.05) - 0.05;
-      const dryLit = clamp(wetFloor * (1.22 + 0.5 * rainK), 0.2, 0.62);
-      const b = pal.big;
-      b.face = mix(pig(dayY), pig(dryLit, 0.62), lit);
-      b.side = mix(pig(dayY * 0.4, 0.9), pig(dryLit * 0.27, 0.6), lit);
-      b.wet1 = mix(pig(dayY * 0.5), pig(Math.max(wetFloor * 1.14, dryLit * 0.66), 0.75), lit);
-      b.wet2 = mix(pig(dayY * 0.24), pig(wetFloor, 0.8), lit);
-      b.glint = mix(b.wet1, "#ffffff", 0.3);
-      b.rimOn = rimAmt > 0.04;
-      b.rim = mix(b.face, rimTint, rimAmt);
-      // the date line is smaller, so it gets more contrast
-      const dDayY = clamp((Yf + 0.05) / 4.9 - 0.05, 0.005, 0.06);
-      const d45 = 4.8 * (Yf + 0.05) - 0.05;
-      const d = pal.date;
-      d.face = mix(pig(dDayY), pig(clamp(d45 * (1 + 0.35 * rainK), dryLit, 0.75), 0.6), lit);
-      d.side = mix(pig(dDayY * 0.4, 0.9), pig(dryLit * 0.27, 0.6), lit);
-      d.wet1 = d.wet2 = mix(pig(dDayY * 0.45), pig(Math.min(0.7, d45), 0.75), lit);
-      d.glint = mix(d.wet1, "#ffffff", 0.3);
-      d.rimOn = b.rimOn;
-      d.rim = mix(d.face, rimTint, rimAmt);
-
-      const stone = mix(pig(0.021, 0.78), pig(Yf * 1.25 + 0.016, 0.5), lit);
-      const hi = mix(stone, mix("#fff4e0", "#c9d4f0", lit), lerp(0.42, 0.3, lit));
-      const ink = mix(oklch(0.955, 0.018, 85), oklch(0.86, 0.02, 250), lit);
-      let label = mix(ink, stone, 0.24);
-      if (contrast(label, stone) < 5.2) label = ink;
-      pal.snow = oklch(lerp(1, 0.9, lit), 0.012 * lit, 250);
-      pal.shade = oklch(lerp(0.86, 0.7, lit), 0.035, 255);
-      pal.puddle = mix(stone, mean, 0.6);
-      pal.rain = lit > 0.5 ? mix(mean, "#d6e4ff", 0.55) : mix(mean, "#16233d", 0.5);
-      pal.mote = lit > 0.5 ? mix(mean, "#b9c4e2", 0.6) : mix(mean, "#fffaf0", 0.85);
-      pal.field = mean;
-      pal.lit = lit;
-
-      css("field", field, "background", `linear-gradient(90deg, ${f0} 0%, ${f1} 34%, ${f2} 66%, ${f3} 100%)`);
-      for (let i = 0; i < 2; i++) {
-        css(`lg${i}`, ledges[i], "background", stone);
-        css(`lgs${i}`, ledges[i], "boxShadow", `inset 0 ${i ? 3 : 2}px 0 ${hi}, inset 0 -2px 0 rgba(0,0,0,0.28)`);
+      // the plaza: limestone lit by the sky by day, deep blue-grey at night
+      const mo = toOklch(mean);
+      const skyHue = Number.isFinite(mo.h) ? mo.h : 250;
+      let gDay = oklch(0.765 + 0.07 * direct - 0.035 * cloud, 0.014 + 0.024 * direct * golden, 78);
+      gDay = mix(gDay, sunTint, 0.16 * direct * golden);
+      gDay = mix(gDay, oklch(toOklch(gDay).l, Math.min(0.03, mo.c * 0.5), skyHue), 0.32);
+      const gNight = oklch(0.175, Math.min(0.034, mo.c * 0.6 + 0.012), skyHue);
+      let gNear = mix(gNight, gDay, gk);
+      if (wet > 0) {
+        const o = toOklch(gNear);
+        gNear = oklch(o.l * (1 - 0.2 * wet), o.c * (1 + 0.3 * wet), o.h);
       }
-      css("pl", plinth, "background", stone);
-      css("pls", plinth, "boxShadow", `inset 0 3px 0 ${hi}`);
-      css("gr", groove, "background", `linear-gradient(${rgba("#000000", 0.34)} 0 67%, ${rgba(hi, 0.5)} 67% 100%)`);
-      css("ink", wrap, "color", ink);
-      for (const k of ["sunL", "moonL", "aqiL", "uvL", "factL"]) css(`c${k}`, n[k], "color", label);
-      for (const sl of slots) if (sl.plate) css(`cp${sl.id}`, sl.plate, "color", label);
-      const wispCol = lit > 0.5 ? rgba(mix(mean, "#8f9ab4", 0.5), 0.5) : rgba(mix(mean, "#ffffff", 0.6), 0.85);
+      const snowG = mix(oklch(0.26, 0.03, 258), oklch(0.955, 0.012, 250), gk);
+      gNear = mix(gNear, snowG, cover);
+      let gFar = mix(gNear, horizon, 0.36 + 0.3 * wet * (1 - cover));
+      gFar = mix(gFar, fogCol, fogK * 0.85);
+      pal.gNear = gNear;
+      pal.gFar = gFar;
+      pal.gk = gk;
+      pal.joint = gk > 0.5 ? "#2a2620" : "#000000";
+      pal.jointA = (0.08 + 0.05 * wet) * (1 - cover) * (1 - fogK * 0.5);
+
+      // shadows: the sun's (direction from its bearing, length from its height,
+      // sharpness from the cloud), and at night the floodlights' (thrown back)
+      const shadowCol = mix(oklch(0.3, 0.05, 262), oklch(0.08, 0.02, skyHue), 1 - gk);
+      pal.shadow = shadowCol;
+      const cot = 1 / Math.tan(Math.max(4.5, alt) * D2R);
+      const len = Math.min(cot, 2.3);
+      pal.shAx = -cosA * len;
+      pal.shBy = sinA * len; // multiplied by the row's foreshortening when drawn
+      pal.shA = 0.62 * direct * smoothstep(0, 5, alt) * (1 - fogK * 0.8) * (1 - cover * 0.25);
+      pal.shSoft = 1.5 + 8 * cloud + len * 2.5;
+      pal.nsA = 0.5 * (1 - gk) * (1 - fogK * 0.6);
+      pal.contactA = lerp(0.55, 0.38, gk) * (1 - fogK * 0.3);
+      pal.refA = wet * (1 - cover) * lerp(0.42, 0.3, gk);
+      pal.cloudShadow = shadowCol;
+
+      // the figures: day faces dark against the light plaza, night faces lit
+      // by the floodlights against the dark one, always 3.4:1 or better
+      const sh = pal.shA * 0.75;
+      let ymin = 1, ymax = 0;
+      for (const y of [400, ROW[1].base, 1000, ROW[2].base]) {
+        const g = groundAt(y);
+        const Yg = luminance(g);
+        const Ys = luminance(mix(g, shadowCol, sh));
+        ymin = Math.min(ymin, Yg, Ys);
+        ymax = Math.max(ymax, Yg);
+      }
+      const night = 0.68 / (ymax + 0.05) > (ymin + 0.05) / 0.056;
+      pal.night = night;
+      const moonS = smoothstep(-2, 10, s.moon.alt) * s.moon.illumination * Math.pow(1 - cloud, 1.3);
+      const lamp = "#ffd7a3";
+      const setFaces = (P, CT, Ylo, Yhi, scale) => {
+        P.night = night;
+        if (!night) {
+          const L = 0.44 + 0.13 * frontSun * direct - 0.05 * backSun * direct + 0.02 * cloud;
+          const cap = (Ylo + 0.05) / CT - 0.05;
+          const Yf = clamp(Math.min(lumOfL(L), cap), 0.0035, 1);
+          P.face = pig(Yf);
+          P.faceLo = P.face;
+          P.side = pig(Yf * 0.42, 0.9);
+          const Yt = Math.min(Yf * 2.4 + 0.05 + 0.12 * direct * Math.sin(Math.max(0, alt) * D2R), 0.62);
+          P.top = mix(pig(Yt, 0.75), sunTint, 0.18 * direct);
+          const rimAmt = direct * (0.25 + 0.75 * backSun) * (0.35 + 0.65 * golden);
+          P.rimOn = rimAmt > 0.12;
+          P.rim = mix(P.top, mix(sunTint, "#ffffff", 0.3), clamp(rimAmt * 1.1));
+          P.wet1 = pig(Yf * 0.55);
+          P.wet2 = pig(Yf * 0.3);
+          P.glint = mix(P.wet1, "#ffffff", 0.32);
+        } else {
+          const need = CT * (Yhi + 0.05) - 0.05;
+          const Yt = clamp(Math.max(0.2, need), 0, 0.92);
+          const Yb = Math.min(0.92, Math.max(Yt * 1.5, Yt + 0.04));
+          P.face = pig(Yt, 0.82);
+          P.faceLo = mix(pig(Yb, 0.85), lamp, 0.12);
+          P.side = pig(Yt * 0.3, 0.7);
+          P.top = mix(pig(0.018, 0.6), "#c8d4ff", 0.3 * moonS);
+          P.rimOn = moonS > 0.15;
+          P.rim = mix(P.top, "#e4eaff", 0.75 * moonS);
+          P.wet1 = pig(Math.max(need, Yt * 0.86), 0.95);
+          P.wet2 = pig(Math.max(need, Yt * 0.74), 1);
+          P.glint = mix(P.faceLo, "#ffffff", 0.45);
+        }
+      };
+      setFaces(pal.big, 3.4, ymin, ymax, 1);
+      const gd = groundAt(ROW[0].base - 30);
+      const Ygd = luminance(gd);
+      setFaces(pal.date, 5, Ygd, Ygd, 0.2);
+
+      // stone, snow, water and the inscriptions
+      pal.granite = oklch(lerp(0.12, 0.2, gk), 0.008, 60);
+      pal.graniteTop = mix(pal.granite, mean, 0.28);
+      pal.lip = mix(oklch(lerp(0.2, 0.42, gk), 0.01, 70), mean, 0.2);
+      pal.pool = lamp;
+      pal.poolA = 0.3 * (1 - gk);
+      pal.snow = oklch(lerp(0.74, 0.985, gk), 0.012, 250);
+      pal.snowShade = oklch(lerp(0.55, 0.84, gk), 0.035, 255);
+      pal.rain = gk > 0.5 ? mix(mean, "#e8f0ff", 0.55) : mix(mean, "#c9d6ee", 0.45);
+      pal.mote = gk > 0.5 ? mix(gNear, w.aqi > 100 ? "#7a6448" : "#5b5246", 0.7) : mix(gNear, "#fff1d8", 0.7);
+      const ink = oklch(0.95, 0.018, 85);
+      let lab = mix(ink, oklch(0.8, chroma * 0.7, hue), 0.55);
+      if (contrast(lab, pal.granite) < 5.5) lab = mix(ink, oklch(0.85, chroma * 0.5, hue), 0.4);
+      pal.ink = ink;
+      pal.lab = lab;
+      pal.soft = mix(ink, pal.granite, 0.16);
+
+      wrap.style.setProperty("--ink", ink);
+      wrap.style.setProperty("--lab", lab);
+      wrap.style.setProperty("--soft", pal.soft);
+      const blobCol = rgba(pal.cloudShadow, 0.9);
+      if (shown.blob !== blobCol) {
+        shown.blob = blobCol;
+        for (const b of blobs) b.node.style.background = `radial-gradient(closest-side, ${blobCol}, ${rgba(pal.cloudShadow, 0)})`;
+      }
+      const wispCol = rgba(fogCol, 0.95);
       if (shown.wisp !== wispCol) {
         shown.wisp = wispCol;
-        for (const w of wisps) w.node.style.background = `radial-gradient(closest-side, ${wispCol}, ${wispCol.replace(/[\d.]+\)$/, "0)")})`;
+        for (const v of wisps) v.node.style.background = `radial-gradient(closest-side, ${wispCol}, ${rgba(fogCol, 0)})`;
       }
 
-      const key = `${b.face}${b.side}${b.rim}${b.wet1}${b.wet2}${d.face}${d.wet1}${d.rim}${ex}`;
+      const b = pal.big, d = pal.date;
+      const key = `${b.face}${b.faceLo}${b.top}${b.side}${b.rim}${b.rimOn}${b.wet1}${b.wet2}${d.face}${d.faceLo}${d.top}${d.rim}${d.wet1}${pal.snow}`;
       if (key !== pal.key) {
         pal.key = key;
-        pal.ex = ex;
         pal.version++;
       }
     }
 
-    // ---- building one glyph's picture: side face, rim, face, wet -------------
+    // ---- painting one figure: side, top faces, rim, face, wet, snow ---------------
     function paintWet(c, sl, age, P) {
       const cl = sl.cls;
       const k = cl.k;
       const I = rainK;
       const inkH = sl.inkB - sl.inkT;
       const B = inkH * 1.2 * (1 - Math.exp((-I * age) / 1000));
-      // the first drops
       const drops = Math.min(cl.kind === 2 ? 90 : 130, Math.floor(I * age * 1.5));
       c.fillStyle = P.wet2;
       c.beginPath();
@@ -464,7 +645,6 @@ export default {
         c.arc(x, y, r, 0, TAU);
       }
       c.fill();
-      // the wet creeping down from every top edge
       if (B > 1) {
         c.fillStyle = P.wet1;
         c.beginPath();
@@ -481,7 +661,6 @@ export default {
         }
         c.fill();
       }
-      // a few bold rivulets running ahead of it
       c.lineCap = "round";
       c.lineJoin = "round";
       for (let pass = 0; pass < 2; pass++) {
@@ -500,18 +679,17 @@ export default {
           const amp = 5 * k + 1;
           const lean = lat * capWind * capWind * 0.22;
           c.lineWidth = pass ? Math.max(1.2, w * 0.13) : w;
-          c.globalAlpha = pass ? 0.5 : 1;
+          c.globalAlpha = pass ? 0.55 : 1;
           c.beginPath();
           const a = pass ? Math.min(len * 0.2, 10) : 0;
           const z = pass ? len - w * 0.4 : len;
-          let px = 0, py = 0;
+          let px = 0;
           for (let dy = a; dy <= z + 0.01; dy += 14) {
-            px = x0 + lean * dy + amp * Math.sin(dy * 0.021 / (0.4 + 0.6 * k) + ph) * Math.min(1, dy / 40);
-            py = y0 + dy;
-            if (dy === a) c.moveTo(px, py);
-            else c.lineTo(px, py);
+            px = x0 + lean * dy + amp * Math.sin((dy * 0.021) / (0.4 + 0.6 * k) + ph) * Math.min(1, dy / 40);
+            if (dy === a) c.moveTo(px, y0 + dy);
+            else c.lineTo(px, y0 + dy);
           }
-          px = x0 + lean * z + amp * Math.sin(z * 0.021 / (0.4 + 0.6 * k) + ph) * Math.min(1, z / 40);
+          px = x0 + lean * z + amp * Math.sin((z * 0.021) / (0.4 + 0.6 * k) + ph) * Math.min(1, z / 40);
           c.lineTo(px, y0 + z);
           c.stroke();
           if (!pass) {
@@ -524,82 +702,13 @@ export default {
       c.globalAlpha = 1;
     }
 
-    function buildComp(sl) {
-      const cl = sl.cls;
-      const P = cl.kind === 2 ? pal.date : pal.big;
-      const c = sl.cctx;
-      const cw = sl.comp.width;
-      const chh = sl.comp.height;
-      c.setTransform(1, 0, 0, 1, 0, 0);
-      c.globalCompositeOperation = "source-over";
-      c.clearRect(0, 0, cw, chh);
-      sl.palDrawn = pal.version;
-      sl.wetDrawn = sl.wetKey;
-      if (!sl.str) return;
-      const a = cl.sactx;
-      const ex = Math.round(pal.ex * cl.depth * R); // device px, signed
-      const dir = Math.sign(ex) || 1;
-      // 1. the side face: the letterform swept sideways, away from the light
-      if (ex !== 0) {
-        a.setTransform(R, 0, 0, R, 0, 0);
-        a.globalCompositeOperation = "source-over";
-        a.clearRect(0, 0, cl.bw, cl.bh);
-        a.fillStyle = "#000";
-        drawShape(a, sl, 0, 0);
-        a.setTransform(1, 0, 0, 1, 0, 0);
-        let covered = 0;
-        const need = Math.abs(ex);
-        while (covered < need) {
-          const sh = Math.min(covered + 1, need - covered);
-          a.drawImage(cl.sa, dir * sh, 0);
-          covered += sh;
-        }
-        a.globalCompositeOperation = "source-in";
-        a.fillStyle = P.side;
-        a.fillRect(0, 0, cw, chh);
-        c.drawImage(cl.sa, 0, 0);
-      }
-      // 2. the face, with a rim on the edges that look toward the light
-      c.setTransform(R, 0, 0, R, 0, 0);
-      if (P.rimOn) {
-        c.fillStyle = P.rim;
-        drawShape(c, sl, 0, 0);
-        const rw = Math.max(1.5, 3.6 * (0.3 + 0.7 * cl.k));
-        a.setTransform(R, 0, 0, R, 0, 0);
-        a.globalCompositeOperation = "source-over";
-        a.clearRect(0, 0, cl.bw, cl.bh);
-        a.fillStyle = P.face;
-        drawShape(a, sl, dir * rw, rw * 0.45);
-        a.globalCompositeOperation = "destination-in";
-        drawShape(a, sl, 0, 0);
-        c.setTransform(1, 0, 0, 1, 0, 0);
-        c.drawImage(cl.sa, 0, 0);
-      } else {
-        c.fillStyle = P.face;
-        drawShape(c, sl, 0, 0);
-      }
-      // 3. what the rain has done to it
-      if (sl.wetKey >= 0 && rainK > 0.01) {
-        a.setTransform(R, 0, 0, R, 0, 0);
-        a.globalCompositeOperation = "source-over";
-        a.clearRect(0, 0, cl.bw, cl.bh);
-        paintWet(a, sl, sl.age, P);
-        a.globalCompositeOperation = "destination-in";
-        a.fillStyle = "#000";
-        drawShape(a, sl, 0, 0);
-        c.setTransform(1, 0, 0, 1, 0, 0);
-        c.drawImage(cl.sa, 0, 0);
-      }
-      c.setTransform(1, 0, 0, 1, 0, 0);
-    }
-
-    // ---- snow ---------------------------------------------------------------
-    const capD = new Float32Array(1200);
-    const capT = new Float32Array(1200);
-    // Chunky caps on every surface of a glyph. (ox, oy) is where the glyph's
-    // box sits in the context; D is the depth the oldest, most open surface has.
-    function paintCaps(c, sl, ox, oy, D) {
+    // Chunky caps on every surface of a figure, standing on the top of its
+    // extrusion. D is the depth the oldest, most open surface has.
+    const capD = new Float32Array(1400);
+    const capT = new Float32Array(1400);
+    function paintCaps(c, sl, oy, D) {
       const k = sl.cls.k;
+      const dz = sl.cls.dz;
       const lw = clamp(D * 0.2, 0, 8 * (0.4 + 0.6 * k));
       const R0 = clamp(D * 0.95, 3, 60);
       const lean = capWind * 0.3;
@@ -607,7 +716,7 @@ export default {
       c.lineCap = "round";
       c.lineWidth = lw;
       for (let pass = 0; pass < 2; pass++) {
-        c.fillStyle = c.strokeStyle = pass ? pal.snow : pal.shade;
+        c.fillStyle = c.strokeStyle = pass ? pal.snow : pal.snowShade;
         c.beginPath();
         for (const ch of sl.chains) {
           const len = ch.n;
@@ -619,27 +728,28 @@ export default {
             const sf = clamp(1.4 - 1.2 * Math.abs(slope));
             const e = Math.min(i, len - 1 - i) + 2;
             const sh = e >= R0 ? 1 : Math.sqrt(1 - (1 - e / R0) * (1 - e / R0));
-            const u = capWind >= 0 ? i / len : 1 - i / len; // 0 at the windward end
+            const u = capWind >= 0 ? i / len : 1 - i / len;
             const er = 1 - Math.abs(capWind) * 0.62 * (1 - smoothstep(0, 0.6, u));
             const xs = (ch.x0 + i) / k;
             const lump = 1 + 0.24 * noise.n2(xs * 0.026 + sl.seed * 0.13, 3.1) + 0.1 * noise.n2(xs * 0.08, sl.seed * 0.29);
             const gp = ch.gap[i];
             let d = D * sf * sh * er * lump * (gp >= 9000 ? 1 : 0.45);
-            if (gp < 9000 && d > gp * 0.3) d = gp * 0.3;
+            const room = (gp - dz) * 0.3;
+            if (gp < 9000 && d > room) d = Math.max(0, room);
             capT[i] = d;
           }
-          // soften the profile
           for (let i = 0; i < len; i++) {
             const a = capT[i > 1 ? i - 2 : 0], b = capT[i > 0 ? i - 1 : 0], d = capT[i], e = capT[i < len - 1 ? i + 1 : len - 1], f = capT[i < len - 2 ? i + 2 : len - 1];
             capD[i] = (a + 2 * b + 3 * d + 2 * e + f) / 9;
             if (capD[i] > top) top = capD[i];
           }
           if (top < 0.7) continue;
-          const lower = pass ? 0.36 : 0; // the white part stops short of the bottom: the rest is the shaded underside
-          c.moveTo(ox + ch.x0 - 0.5, oy + ch.y[0] + 1.5 - capD[0] * lower);
-          for (let i = 0; i < len; i++) c.lineTo(ox + ch.x0 + i + lean * capD[i], oy + ch.y[i] - capD[i]);
-          c.lineTo(ox + ch.x0 + len + 0.5, oy + ch.y[len - 1] + 1.5 - capD[len - 1] * lower);
-          for (let i = len - 1; i >= 0; i--) c.lineTo(ox + ch.x0 + i + lean * capD[i] * lower, oy + ch.y[i] + 1.5 - (capD[i] + 1.5) * lower);
+          const lower = pass ? 0.36 : 0;
+          const y0 = oy - dz;
+          c.moveTo(ch.x0 - 0.5, y0 + ch.y[0] + 1.5 - capD[0] * lower);
+          for (let i = 0; i < len; i++) c.lineTo(ch.x0 + i + lean * capD[i], y0 + ch.y[i] - capD[i]);
+          c.lineTo(ch.x0 + len + 0.5, y0 + ch.y[len - 1] + 1.5 - capD[len - 1] * lower);
+          for (let i = len - 1; i >= 0; i--) c.lineTo(ch.x0 + i + lean * capD[i] * lower, y0 + ch.y[i] + 1.5 - (capD[i] + 1.5) * lower);
           c.closePath();
         }
         c.fill();
@@ -647,193 +757,483 @@ export default {
       }
     }
 
-    // Snow lying on a ledge: a base layer since the ledge was last swept, plus a
-    // heap under each minute digit from the caps it has shed.
-    const led = [
-      { d: 0, drawn: -1, max: 13, heaps: [] },
-      { d: 0, drawn: -1, max: 28, heaps: [] },
-      { d: 0, drawn: -1, max: 34, heaps: [{ x: 0, a: 0, s: 1 }, { x: 0, a: 0, s: 1 }] },
-    ];
-    const ledgeDepth = (ri, x) => {
-      const L = led[ri];
-      let d = L.d * (0.76 + 0.34 * noise.n2(x * 0.011, ri * 9.3 + 0.5) + 0.1 * noise.n2(x * 0.045, ri * 3.7));
-      for (const h of L.heaps) if (h.a > 0.2) d += h.a * Math.exp(-(((x - h.x) / h.s) ** 2));
-      return d;
-    };
-    function paintLedgeSnow(c, ri) {
-      const L = led[ri];
-      const base = ROWS[ri].base;
-      let any = L.d > 0.4;
-      for (const h of L.heaps) if (h.a > 0.4) any = true;
-      if (!any) return;
-      const lipMax = ri === 0 ? 4 : 9;
-      for (let pass = 0; pass < 2; pass++) {
-        c.fillStyle = pass ? pal.snow : pal.shade;
-        c.beginPath();
-        c.moveTo(-4, base + 1);
-        for (let x = -4; x <= W + 4; x += 6) c.lineTo(x, base - ledgeDepth(ri, x));
-        if (pass) for (let x = W + 4; x >= -4; x -= 6) c.lineTo(x, base - ledgeDepth(ri, x) * 0.34);
-        else for (let x = W + 4; x >= -4; x -= 6) c.lineTo(x, base + Math.min(lipMax, ledgeDepth(ri, x) * 0.32) * (0.6 + 0.4 * noise.n2(x * 0.03, ri + 20)));
-        c.closePath();
-        c.fill();
+    function extrude(ctx, canvas, dist, horizontal) {
+      // grow the silhouette already in `canvas` by `dist` device pixels, upward
+      // or sideways, by drawing it onto itself at doubling offsets
+      let covered = 0;
+      const need = Math.abs(dist);
+      const dir = Math.sign(dist) || 1;
+      while (covered < need) {
+        const sh = Math.min(covered + 1, need - covered);
+        if (horizontal) ctx.drawImage(canvas, dir * sh, 0);
+        else ctx.drawImage(canvas, 0, -sh);
+        covered += sh;
       }
     }
-    function paintPuddle(c, ri) {
-      const L = led[ri];
-      if (L.d < 0.3) return;
-      const base = ROWS[ri].base;
-      c.fillStyle = pal.puddle;
-      c.beginPath();
-      c.moveTo(-4, base + 1.5);
-      for (let x = -4; x <= W + 4; x += 8) c.lineTo(x, base - L.d * clamp(0.7 + 0.9 * noise.n2(x * 0.006, ri * 5.1 + 40)));
-      c.lineTo(W + 4, base + 1.5);
-      c.closePath();
-      c.fill();
-    }
 
-    // ---- painting a row of the monument --------------------------------------
-    let now = 0; // animation clock
-    let precip = 0; // 0 dry, 1 rain, 2 snow
-    const TRAVEL = (sl) => sl.cls.bh - sl.cls.padB + 4;
-    function paintRow(ri, x0 = 0, x1 = W) {
-      const row = ROWS[ri];
-      const c = mctx;
-      x0 = Math.max(0, Math.floor(x0));
-      x1 = Math.min(W, Math.ceil(x1));
-      c.save();
-      c.beginPath();
-      c.rect(x0, row.y0, x1 - x0, row.y1 - row.y0);
-      c.clip();
-      c.clearRect(x0, row.y0, x1 - x0, row.y1 - row.y0);
-      c.save();
-      c.beginPath();
-      c.rect(x0, row.y0, x1 - x0, row.base - row.y0);
-      c.clip();
-      for (const sl of rowSlots[ri]) {
-        let off = 0;
-        const travel = TRAVEL(sl);
-        if (sl.anim) {
-          const a = now - sl.t0;
-          if (sl.hadOld && a < T_SINK) c.drawImage(sl.old, sl.oldX, sl.gy + travel * ease.in(clamp(a / T_SINK)), sl.cls.bw, sl.cls.bh);
-          off = travel * (1 - ease.cubicOut(clamp((a - T_RISE0) / T_RISE)));
-        }
-        if (sl.str && off < travel - 1) {
-          c.drawImage(sl.comp, sl.x, sl.gy + off, sl.cls.bw, sl.cls.bh);
-          if (precip === 2 && sl.D > 0.4) paintCaps(c, sl, sl.x, sl.gy + off, sl.D);
-        }
-        if (!sl.anim) sl.Ddrawn = sl.D;
+    function buildFace(sl, f) {
+      const cl = sl.cls;
+      const P = cl.kind === 2 ? pal.date : pal.big;
+      const c = f.ctx;
+      const cw = f.cv.width;
+      const chh = f.cv.height;
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      c.globalCompositeOperation = "source-over";
+      c.globalAlpha = 1;
+      c.clearRect(0, 0, cw, chh);
+      sl.palDrawn = pal.version;
+      sl.wetDrawn = sl.wetKey;
+      sl.Ddrawn = sl.D;
+      if (!sl.str) return;
+      const silhouette = () => {
+        sa.setTransform(1, 0, 0, 1, 0, 0);
+        sa.globalCompositeOperation = "source-over";
+        sa.clearRect(0, 0, cw, chh);
+        sa.setTransform(R, 0, 0, R, 0, 0);
+        sa.fillStyle = "#000";
+        drawShape(sa, sl, 0, 0);
+        sa.setTransform(1, 0, 0, 1, 0, 0);
+      };
+      const tint = (ctx, col) => {
+        ctx.globalCompositeOperation = "source-in";
+        ctx.fillStyle = col;
+        ctx.fillRect(0, 0, cw, chh);
+        ctx.globalCompositeOperation = "source-over";
+      };
+      const sxD = Math.round(sl.sx * R);
+      const dzD = Math.max(1, Math.round(cl.dz * R));
+      silhouette();
+      // 1. the side face the viewer can see, from where the figure stands
+      if (sxD !== 0) {
+        sb.setTransform(1, 0, 0, 1, 0, 0);
+        sb.globalCompositeOperation = "source-over";
+        sb.clearRect(0, 0, cw, chh);
+        sb.drawImage(SA, 0, 0);
+        extrude(sb, SB, sxD, true);
+        tint(sb, P.side);
+        c.drawImage(SB, 0, 0);
       }
-      c.restore();
-      if (precip === 2) paintLedgeSnow(c, ri);
-      else if (precip === 1) paintPuddle(c, ri);
-      led[ri].drawn = led[ri].d;
-      c.restore();
+      // 2. the top faces (seen from above), with a rim of light on their back edges
+      sb.setTransform(1, 0, 0, 1, 0, 0);
+      sb.globalCompositeOperation = "source-over";
+      sb.clearRect(0, 0, cw, chh);
+      sb.drawImage(SA, 0, 0);
+      extrude(sb, SB, dzD, false);
+      const snowTop = smoothstep(0.3, 4, sl.D);
+      if (P.rimOn && snowTop < 0.9) {
+        tint(sb, P.rim);
+        c.drawImage(SB, 0, -Math.max(1, Math.round(1.6 * R * (0.4 + 0.6 * cl.k))));
+      }
+      let top = P.top;
+      if (sl.wetKey >= 0) top = mix(top, P.wet2, 0.5 * rainK + 0.2);
+      if (snowTop > 0) top = mix(top, pal.snow, snowTop);
+      tint(sb, top);
+      c.drawImage(SB, 0, 0);
+      // 3. the face: flat by day, lit from below by the floodlights at night
+      c.setTransform(R, 0, 0, R, 0, 0);
+      if (P.night && P.faceLo !== P.face) {
+        const g = c.createLinearGradient(0, sl.oy - cl.inkH * (cl.kind === 1 ? 1 : 1.0), 0, sl.oy);
+        g.addColorStop(0, P.face);
+        g.addColorStop(1, P.faceLo);
+        c.fillStyle = g;
+      } else c.fillStyle = P.face;
+      drawShape(c, sl, 0, 0);
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      // 4. what the rain has done to it
+      if (sl.wetKey >= 0 && rainK > 0.01) {
+        sb.setTransform(1, 0, 0, 1, 0, 0);
+        sb.globalCompositeOperation = "source-over";
+        sb.clearRect(0, 0, cw, chh);
+        sb.setTransform(R, 0, 0, R, 0, 0);
+        paintWet(sb, sl, sl.age, P);
+        sb.setTransform(1, 0, 0, 1, 0, 0);
+        sb.globalCompositeOperation = "destination-in";
+        sb.drawImage(SA, 0, 0);
+        sb.globalCompositeOperation = "source-over";
+        c.drawImage(SB, 0, 0);
+      }
+      // 5. snow
+      if (snowK > 0 && sl.D > 0.4) {
+        c.setTransform(R, 0, 0, R, 0, 0);
+        paintCaps(c, sl, 0, sl.D);
+        c.setTransform(1, 0, 0, 1, 0, 0);
+      }
     }
 
-    // ---- collision grid: which row's stone, if any, is at each 2 px cell ------
+    // ---- Manhattan, stars --------------------------------------------------------------
+    const rr = (() => {
+      let st = (seed * 2654435761 + 977) >>> 0;
+      return () => (st = (Math.imul(st, 1664525) + 1013904223) >>> 0) / 4294967296;
+    })();
+    const bld = [];
+    const wins = [];
+    {
+      // Midtown straight across the water, lower towers to either side
+      let x = -10;
+      while (x < W + 10) {
+        const w = 14 + rr() * 46;
+        const mid = Math.exp(-(((x - 610) / 230) ** 2)) + 0.45 * Math.exp(-(((x - 120) / 120) ** 2));
+        let h = 8 + rr() * 22 + mid * (26 + rr() * 50);
+        if (rr() < 0.07) h += 20 + rr() * 22;
+        bld.push(x, w, h);
+        for (let wy = HZ - RIV - h + 5; wy < HZ - RIV - 3; wy += 5) for (let wx = x + 3; wx < x + w - 3; wx += 5) if (rr() < 0.13) wins.push(wx, wy);
+        x += w + (rr() < 0.25 ? 2 + rr() * 8 : 0);
+      }
+      // two spires the eye knows
+      bld.push(676, 18, 112, 470, 14, 98);
+    }
+    const stars = new Float32Array(90);
+    for (let i = 0; i < 30; i++) { stars[i * 3] = rr() * W; stars[i * 3 + 1] = 20 + rr() * (HZ - 140); stars[i * 3 + 2] = 1 + rr() * 1.6; }
+
+    // speckle for the granite, made once
+    const speck = document.createElement("canvas");
+    speck.width = speck.height = 160;
+    {
+      const c = speck.getContext("2d");
+      for (let i = 0; i < 900; i++) {
+        const x = rr() * 160, y = rr() * 160, r = 0.4 + rr() * 1.3;
+        c.fillStyle = rr() < 0.55 ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.28)";
+        c.fillRect(x, y, r, r);
+      }
+    }
+    const speckPat = ground.ctx.createPattern(speck, "repeat");
+
+    // ---- the ground layer: drawn when something in it changes ----------------------------
+    function drawGround() {
+      const _t=pn();try{drawGround_();}finally{PT.ground=(PT.ground||0)+pn()-_t;}}
+    function drawGround_() {
+      const g = ground.ctx;
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.globalAlpha = 1;
+      g.globalCompositeOperation = "source-over";
+      // the sky
+      let gr = g.createLinearGradient(0, 0, W, 0);
+      gr.addColorStop(0, pal.sky0);
+      gr.addColorStop(0.5, pal.sky1);
+      gr.addColorStop(1, pal.sky2);
+      g.fillStyle = gr;
+      g.fillRect(0, 0, W, HZ + 2);
+      gr = g.createLinearGradient(0, 0, 0, HZ);
+      gr.addColorStop(0, rgba(pal.zen, 0.7));
+      gr.addColorStop(1, rgba(pal.zen, 0));
+      g.fillStyle = gr;
+      g.fillRect(0, 0, W, HZ);
+      if (pal.starA > 0.02) {
+        g.fillStyle = rgba("#ffffff", pal.starA);
+        g.beginPath();
+        for (let i = 0; i < 30; i++) g.rect(stars[i * 3], stars[i * 3 + 1], stars[i * 3 + 2], stars[i * 3 + 2]);
+        g.fill();
+      }
+      // Manhattan
+      g.fillStyle = pal.skyline;
+      g.beginPath();
+      for (let i = 0; i < bld.length; i += 3) g.rect(bld[i], HZ - RIV - bld[i + 2], bld[i + 1], bld[i + 2] + 1);
+      g.fill();
+      g.beginPath();
+      g.moveTo(683, HZ - RIV - 112);
+      g.lineTo(685, HZ - RIV - 138);
+      g.lineTo(687, HZ - RIV - 112);
+      g.moveTo(475, HZ - RIV - 98);
+      g.lineTo(477, HZ - RIV - 122);
+      g.lineTo(479, HZ - RIV - 98);
+      g.fill();
+      if (pal.winA > 0.02) {
+        g.fillStyle = rgba("#ffd9a0", pal.winA);
+        g.beginPath();
+        for (let i = 0; i < wins.length; i += 2) g.rect(wins[i], wins[i + 1], 1.6, 1.6);
+        g.fill();
+      }
+      g.fillStyle = pal.river;
+      g.fillRect(0, HZ - RIV, W, RIV);
+      // the plaza
+      gr = g.createLinearGradient(0, HZ, 0, FE);
+      for (let i = 0; i <= 8; i++) {
+        const y = HZ + ((FE - HZ) * i) / 8;
+        gr.addColorStop(i / 8, mix(pal.gNear, pal.gFar, farness(y)));
+      }
+      g.fillStyle = gr;
+      g.fillRect(0, HZ, W, FE - HZ);
+      if (fogK > 0.02) {
+        gr = g.createLinearGradient(0, HZ - 120, 0, HZ + 520);
+        gr.addColorStop(0, rgba(pal.fog, 0.95 * fogK));
+        gr.addColorStop(1, rgba(pal.fog, 0));
+        g.fillStyle = gr;
+        g.fillRect(0, HZ - 120, W, 640);
+      }
+      // the joints between the paving slabs, in perspective
+      if (pal.jointA > 0.01) {
+        g.strokeStyle = rgba(pal.joint, pal.jointA);
+        g.lineWidth = 1.4;
+        g.beginPath();
+        for (let z = 1.08; z < 60; z *= 1.32) {
+          const y = HZ + (FE - HZ) / z;
+          g.moveTo(0, y);
+          g.lineTo(W, y);
+        }
+        for (let i = -6; i <= 12; i++) {
+          const xf = 540 + (i - 3) * 230;
+          g.moveTo(xf, FE);
+          g.lineTo(540 + (xf - 540) * 0.05, HZ + 30);
+        }
+        g.stroke();
+      }
+      // pools of floodlight in front of the pedestals
+      if (pal.poolA > 0.01) {
+        for (const sl of pedSlots) {
+          if (!sl.present) continue;
+          const row = ROW[sl.row];
+          const cx = sl.cellX + sl.cls.cellW / 2;
+          const cy = row.base + row.pt + row.ped + 6;
+          const r = sl.cls.cellW * 0.95 + 40;
+          g.save();
+          g.translate(cx, cy);
+          g.scale(1, 0.24);
+          const pg = g.createRadialGradient(0, 0, 0, 0, 0, r);
+          pg.addColorStop(0, rgba(pal.pool, pal.poolA * (wet > 0.3 ? 1.3 : 1)));
+          pg.addColorStop(1, rgba(pal.pool, 0));
+          g.fillStyle = pg;
+          g.fillRect(-r, -r, r * 2, r * 2);
+          g.restore();
+        }
+      }
+      // the pedestals, with what has settled on them
+      for (const sl of pedSlots) {
+        if (!sl.present) continue;
+        const row = ROW[sl.row];
+        const x0 = sl.cellX - 6;
+        const w = sl.cls.cellW + 12;
+        const yt = row.base - row.pt;
+        const yf = row.base + row.pt;
+        g.fillStyle = pal.graniteTop;
+        g.fillRect(x0, yt, w, row.pt * 2);
+        g.fillStyle = pal.granite;
+        g.fillRect(x0, yf, w, row.ped);
+        g.fillStyle = speckPat;
+        g.fillRect(x0, yf, w, row.ped);
+        g.fillStyle = "rgba(255,255,255,0.12)";
+        g.fillRect(x0, yf, w, 1.5);
+        g.fillStyle = "rgba(0,0,0,0.35)";
+        g.fillRect(x0 + w - 3, yf, 3, row.ped);
+        const lay = cover * row.pt * 1.2;
+        if (lay + sl.heap > 0.6) {
+          for (let pass = 0; pass < 2; pass++) {
+            g.fillStyle = pass ? pal.snow : pal.snowShade;
+            g.beginPath();
+            g.moveTo(x0 - 2, yf + (pass ? 0 : 3));
+            for (let x = 0; x <= w + 4; x += 4) {
+              const u = (x - w / 2) / (w * 0.4);
+              const hgt = lay * (0.8 + 0.3 * noise.n2((x0 + x) * 0.05, sl.id * 3.1)) + sl.heap * Math.exp(-u * u) * (0.85 + 0.25 * noise.n2((x0 + x) * 0.03, sl.id * 7.7));
+              g.lineTo(x0 - 2 + x, yt + row.pt - hgt * (pass ? 1 : 0.9) - (pass ? 2 : 0));
+            }
+            g.lineTo(x0 + w + 2, yf + (pass ? 0 : 3));
+            g.closePath();
+            g.fill();
+          }
+        }
+      }
+      // the podium face, with its lit lip
+      g.fillStyle = cover > 0.3 ? mix(pal.lip, pal.snow, cover) : pal.lip;
+      g.fillRect(0, FE, W, LIP);
+      g.fillStyle = pal.granite;
+      g.fillRect(0, FE + LIP, W, H - FE - LIP);
+      g.fillStyle = speckPat;
+      g.fillRect(0, FE + LIP, W, H - FE - LIP);
+      gr = g.createLinearGradient(0, FE + LIP, 0, FE + LIP + 60);
+      gr.addColorStop(0, "rgba(0,0,0,0.45)");
+      gr.addColorStop(1, "rgba(0,0,0,0)");
+      g.fillStyle = gr;
+      g.fillRect(0, FE + LIP, W, 60);
+    }
+
+    // ---- shadows and reflections: redrawn while a figure moves ---------------------------
+    function shadowOf(f, sl, face, ax, by, alpha, passes, soft) {
+      const row = ROW[sl.row];
+      const base = row.base;
+      const x = sl.x;
+      const y = sl.gy + face.off;
+      for (let p = 0; p < passes; p++) {
+        const j = passes > 1 ? p / (passes - 1) - 0.5 : 0;
+        const a = ax + j * soft * 0.02;
+        const b = by * (1 + j * 0.12) - 0.035;
+        f.save();
+        f.setTransform(1, 0, -a, b, a * base, base - b * base);
+        f.beginPath();
+        f.rect(x - 400, base - 1400, sl.cls.bw + 800, 1400);
+        f.clip();
+        f.globalAlpha = alpha / passes;
+        f.drawImage(face.sil, x, y, sl.cls.bw, sl.cls.bh);
+        f.restore();
+      }
+    }
+    function drawFx() {
+      fx.clear();
+      const f = fx.ctx;
+      f.save();
+      f.beginPath();
+      f.rect(0, HZ, W, FE - HZ);
+      f.clip();
+      for (const sl of slots) {
+        if (!sl.present) continue;
+        const row = ROW[sl.row];
+        const k = row.k;
+        for (let fi = 0; fi < 2; fi++) {
+          const face = sl.faces[fi];
+          if (!face.vis || !face.str) continue;
+          // contact: the stone darkens where it stands
+          shadowOf(f, sl, face, 0, 0, pal.contactA, 3, 8);
+          if (pal.shA > 0.01) shadowOf(f, sl, face, pal.shAx, pal.shBy * k, pal.shA, 4, pal.shSoft);
+          if (pal.nsA > 0.01) shadowOf(f, sl, face, 0.08 * ((sl.cellX + sl.cls.cellW / 2 - W / 2) / (W / 2)), 0.55 * k + 0.05, pal.nsA, 4, 10);
+        }
+      }
+      // on a wet plaza, each figure stands in its own broken reflection
+      if (pal.refA > 0.01) {
+        for (const sl of slots) {
+          if (!sl.present) continue;
+          const row = ROW[sl.row];
+          const base = row.base + row.pt + row.ped;
+          const face = sl.faces[sl.cur];
+          if (!face.str) continue;
+          const kr = 0.55;
+          for (let p = 0; p < 3; p++) {
+            f.save();
+            f.setTransform(1, 0, 0, -kr, 0, base * (1 + kr) + p * 7);
+            f.beginPath();
+            f.rect(sl.x - 50, row.base - 1400, sl.cls.bw + 100, 1400);
+            f.clip();
+            f.globalAlpha = pal.refA * (p === 0 ? 0.6 : 0.3);
+            f.drawImage(face.cv, sl.x, sl.gy + face.off, sl.cls.bw, sl.cls.bh);
+            f.restore();
+          }
+        }
+      }
+      f.restore();
+    }
+
+    // ---- collision grid: which row's stone is at each 2 px cell ---------------------------
+    // values: 1 date, 2 hours, 3 minutes, 4 the podium face
     const grid = new Uint8Array(GW * GH);
+    const RD = [0, 1, 2, 3, 3.4];
     function rebuildGrid() {
       grid.fill(0);
-      for (let ri = 0; ri < 2; ri++) {
-        const y0 = ROWS[ri].base >> 1;
-        const y1 = (ROWS[ri].base + ROWS[ri].ledge) >> 1;
-        for (let y = y0; y < y1; y++) grid.fill(ri + 1, y * GW, (y + 1) * GW);
-      }
+      for (let y = FE >> 1; y < GH; y++) grid.fill(4, y * GW, (y + 1) * GW);
       for (const sl of slots) {
-        if (!sl.str || !sl.mask) continue;
-        const { bw, bh } = sl.cls;
+        if (!sl.present || !sl.str || !sl.mask) continue;
+        const { bw } = sl.cls;
         const v = sl.row + 1;
-        const yEnd = Math.min(bh, ROWS[sl.row].base - sl.gy);
-        for (let y = 0; y < yEnd; y += 2) {
-          const gy = (sl.gy + y) >> 1;
-          if (gy < 0 || gy >= GH) continue;
-          for (let x = 0; x < bw; x += 2) {
-            if (sl.mask[y * bw + x] > 100) {
-              const gx = (sl.x + x) >> 1;
-              if (gx >= 0 && gx < GW) grid[gy * GW + gx] = v;
+        const row = ROW[sl.row];
+        if (row.ped) {
+          const y0 = (row.base - row.pt) >> 1;
+          const y1 = (row.base + row.pt + row.ped) >> 1;
+          const x0 = Math.max(0, (sl.cellX - 6) >> 1);
+          const x1 = Math.min(GW, (sl.cellX + sl.cls.cellW + 6) >> 1);
+          for (let y = y0; y < y1; y++) grid.fill(v, y * GW + x0, y * GW + x1);
+        }
+        const dz = sl.cls.dz;
+        const yEnd = Math.min(sl.cls.bh, row.base - sl.gy);
+        for (let x = 0; x < bw; x += 2) {
+          const gx = (sl.x + x) >> 1;
+          if (gx < 0 || gx >= GW) continue;
+          let wasSolid = false;
+          for (let y = 0; y < yEnd; y += 2) {
+            const solid = sl.mask[y * bw + x] > 100;
+            if (solid) {
+              const top = solid && !wasSolid ? y - dz : y;
+              for (let yy = Math.max(0, top); yy <= y; yy += 2) {
+                const gy = (sl.gy + yy) >> 1;
+                if (gy >= 0 && gy < GH) grid[gy * GW + gx] = v;
+              }
             }
+            wasSolid = solid;
           }
         }
       }
     }
 
-    // ---- the air: snow, rain or dust -----------------------------------------
-    const NP = 660;
-    const px = new Float32Array(NP), py = new Float32Array(NP), psz = new Float32Array(NP), pph = new Float32Array(NP);
-    const pk = new Uint8Array(NP); // 0 behind the stone, 1..3 lands on that row, 4 in front
-    let rs = (seed * 2654435761) >>> 0;
-    const rnd = () => ((rs = (Math.imul(rs, 1664525) + 1013904223) >>> 0) / 4294967296);
+    // ---- the air: snow, rain or dust, at six depths ----------------------------------------
+    const NP = 680;
+    const px = new Float32Array(NP), py = new Float32Array(NP), psz = new Float32Array(NP), pph = new Float32Array(NP), pland = new Float32Array(NP);
+    const plane = new Uint8Array(NP);
+    const PD = [0.5, 1.5, 2, 2.5, 3, 3.5]; // depth of each lane, against RD
+    const SC = [0.42, 0.56, 0.7, 0.8, 0.95, 1.3]; // size and speed of each lane
+    const landFor = (lane) => {
+      switch (lane) {
+        case 0: return lerp(HZ + 4, ROW[0].base - 2, rr());
+        case 1: return lerp(ROW[0].base + 6, ROW[1].base - 20, rr());
+        case 2: return lerp(ROW[1].base + 2, ROW[1].base + 60, rr());
+        case 3: return lerp(ROW[1].base + 60, ROW[2].base - 6, rr());
+        case 4: return lerp(ROW[2].base + 2, FE - 2, rr());
+        default: return H + 30;
+      }
+    };
     for (let i = 0; i < NP; i++) {
-      px[i] = -120 + rnd() * (W + 240);
-      py[i] = -60 + rnd() * (PLINTH + 60);
-      psz[i] = rnd();
-      pph[i] = rnd();
-      const c = i % 10;
-      pk[i] = c < 3 ? 0 : c < 4 ? 1 : c < 6 ? 2 : c < 8 ? 3 : 4;
+      const c = i % 25;
+      const lane = c < 3 ? 0 : c < 8 ? 1 : c < 11 ? 2 : c < 17 ? 3 : c < 22 ? 4 : 5;
+      plane[i] = lane;
+      px[i] = -120 + rr() * (W + 240);
+      psz[i] = rr();
+      pph[i] = rr();
+      pland[i] = landFor(lane);
+      py[i] = -60 + rr() * (pland[i] + 60);
     }
-    const NS = 72;
-    const spx = new Float32Array(NS), spy = new Float32Array(NS), spt = new Float32Array(NS).fill(-9);
+    const NR = 48;
+    const rpx = new Float32Array(NR), rpy = new Float32Array(NR), rpt = new Float32Array(NR).fill(-9), rps = new Float32Array(NR);
+    let rpi = 0;
+    const ripple = (x, y, sc) => {
+      rpx[rpi] = x; rpy[rpi] = y; rpt[rpi] = now; rps[rpi] = sc;
+      rpi = (rpi + 1) % NR;
+    };
+    const NS = 40;
+    const spx = new Float32Array(NS), spy = new Float32Array(NS), spt = new Float32Array(NS).fill(-9), sps = new Float32Array(NS);
     let spi = 0;
-    const splash = (x, y) => {
-      spx[spi] = x; spy[spi] = y; spt[spi] = now;
+    const splash = (x, y, sc) => {
+      spx[spi] = x; spy[spi] = y; spt[spi] = now; sps[spi] = sc;
       spi = (spi + 1) % NS;
     };
-    // where water drips from under the ledges
-    const ND = 9;
-    const drips = [];
-    for (let i = 0; i < ND; i++) {
-      const top = i < 3 ? 0 : 1;
-      drips.push({ x: 90 + hash(i, seed + 50) * (W - 180), y: ROWS[top].base + ROWS[top].ledge, per: 1.6 + 2.6 * hash(i, seed + 51), ph: hash(i, seed + 52) * 9, land: PLINTH });
-    }
-    function landDrips() {
-      for (const d of drips) {
-        let y = d.y + 4;
-        const gx = d.x >> 1;
-        while (y < PLINTH && grid[(y >> 1) * GW + gx] === 0) y += 2;
-        d.land = y;
-      }
-    }
+    const hidden = (x, y, lane) => {
+      if (x < 0 || x >= W || y < 0 || y >= H) return false;
+      const v = grid[(y >> 1) * GW + (x >> 1)];
+      return v !== 0 && RD[v] > PD[lane];
+    };
 
+    let now = 0;
+    let precip = 0; // 0 dry, 1 rain, 2 snow
     function drawAir(s) {
       const c = air.ctx;
       air.clear();
       const dt = s.dt;
       const w = s.weather;
       const gust = 1 + 0.3 * Math.sin(now * 0.31) + 0.18 * Math.sin(now * 0.83 + 1.7);
-      const wind = w.wind * gust * lat; // mph across the picture
+      const wind = w.wind * gust * lat;
       const I = w.intensity;
-      const floor = PLINTH - led[2].d * 0.7;
       if (precip === 2) {
-        // ---- snow
-        const count = Math.round(lerp(170, NP, clamp(I * 1.15)));
+        const count = Math.round(lerp(190, NP, clamp(I * 1.15)));
         const fall = 0.75 + 0.6 * I;
         for (let i = 0; i < count; i++) {
-          const z = psz[i];
-          const kd = pk[i];
-          const sp = kd === 0 ? 0.72 : kd === 4 ? 1.28 : 1;
-          py[i] += (52 + 92 * z) * fall * sp * dt;
-          px[i] += (wind * 7.2 * (0.55 + 0.6 * z) * sp + 16 * Math.sin(now * (0.5 + pph[i]) + pph[i] * 40)) * dt;
-          let x = px[i], y = py[i];
-          let dead = y > floor;
-          if (!dead && kd > 0 && kd < 4 && y > 0 && x >= 0 && x < W && grid[(y >> 1) * GW + (x >> 1)] === kd) dead = true;
+          const sc = SC[plane[i]];
+          py[i] += (50 + 90 * psz[i]) * fall * sc * dt;
+          px[i] += (wind * 7 * (0.55 + 0.6 * psz[i]) * sc + 16 * sc * Math.sin(now * (0.5 + pph[i]) + pph[i] * 40)) * dt;
+          const x = px[i], y = py[i];
+          const lane = plane[i];
+          let dead = y > pland[i];
+          if (!dead && (lane === 2 || lane === 4) && x >= 0 && x < W && y > 0 && grid[(y >> 1) * GW + (x >> 1)] === (lane === 2 ? 2 : 3)) dead = true;
           if (dead) {
-            py[i] = y = -12 - rnd() * 90;
-            px[i] = x = -260 * Math.sign(wind) * clamp(Math.abs(wind) / 20) - 80 + rnd() * (W + 160);
+            py[i] = -12 - rr() * 90;
+            px[i] = -260 * Math.sign(wind) * clamp(Math.abs(wind) / 20) - 80 + rr() * (W + 160);
           }
-          if (x < -280) px[i] += W + 560;
-          else if (x > W + 280) px[i] -= W + 560;
+          if (px[i] < -280) px[i] += W + 560;
+          else if (px[i] > W + 280) px[i] -= W + 560;
         }
+        c.fillStyle = pal.snow;
         for (let pass = 0; pass < 3; pass++) {
-          c.fillStyle = pal.snow;
-          c.globalAlpha = pass === 0 ? 0.62 : pass === 1 ? 1 : 0.94;
+          c.globalAlpha = pass === 0 ? 0.6 : pass === 1 ? 0.9 : 0.95;
           c.beginPath();
           for (let i = 0; i < count; i++) {
-            const kd = pk[i];
-            if ((pass === 0) !== (kd === 0) || (pass === 2) !== (kd === 4)) continue;
+            const lane = plane[i];
+            if ((lane < 2 ? 0 : lane < 4 ? 1 : 2) !== pass) continue;
             const x = px[i], y = py[i];
             if (y < -8 || x < -8 || x > W + 8) continue;
-            if (kd === 0 && y > 0 && x >= 0 && x < W && grid[(y >> 1) * GW + (x >> 1)] !== 0) continue;
-            const r = (1.5 + 3.3 * psz[i]) * (kd === 0 ? 0.72 : kd === 4 ? 1.3 : 1);
+            if (hidden(x, y, lane)) continue;
+            const r = (1.3 + 2.9 * psz[i]) * SC[lane];
             c.moveTo(x + r, y);
             c.arc(x, y, r, 0, TAU);
           }
@@ -841,120 +1241,126 @@ export default {
         }
         c.globalAlpha = 1;
       } else if (precip === 1) {
-        // ---- rain
-        const count = Math.round(lerp(90, 560, clamp(I * 1.05)));
+        const count = Math.round(lerp(110, 600, clamp(I * 1.05)));
         const slow = w.falling === "drizzle" ? 0.55 : 1;
         const vx = wind * 15;
         for (let i = 0; i < count; i++) {
-          const z = psz[i];
-          const kd = pk[i];
-          const vy = (700 + 420 * z) * slow * (kd === 0 ? 0.85 : 1);
-          py[i] += vy * dt;
-          px[i] += vx * (0.8 + 0.4 * z) * dt;
-          let x = px[i], y = py[i];
-          let dead = y > floor;
-          if (!dead && kd > 0 && kd < 4 && y > 0 && x >= 0 && x < W && grid[(y >> 1) * GW + (x >> 1)] === kd) dead = true;
+          const lane = plane[i];
+          const sc = SC[lane];
+          py[i] += (680 + 400 * psz[i]) * slow * sc * dt;
+          px[i] += vx * (0.8 + 0.4 * psz[i]) * sc * dt;
+          const x = px[i], y = py[i];
+          let dead = y > pland[i];
+          let onStone = false;
+          if (!dead && (lane === 2 || lane === 4) && x >= 0 && x < W && y > 0 && grid[(y >> 1) * GW + (x >> 1)] === (lane === 2 ? 2 : 3)) { dead = true; onStone = true; }
           if (dead) {
-            if (kd > 0 && x > 0 && x < W && (i & 1) === 0) splash(x, Math.min(y, floor));
-            py[i] = -20 - rnd() * 260;
-            px[i] = -vx * 1.2 - 60 + rnd() * (W + 120);
+            if (x > 0 && x < W && (i & 1) === 0) {
+              if (onStone) splash(x, y, sc);
+              else if (lane < 5) ripple(x, pland[i], sc);
+            }
+            py[i] = -20 - rr() * 240;
+            px[i] = -vx * 1.2 - 60 + rr() * (W + 120);
           }
         }
         c.strokeStyle = pal.rain;
         c.lineCap = "round";
         for (let pass = 0; pass < 3; pass++) {
-          c.globalAlpha = pass === 0 ? 0.4 : pass === 1 ? 0.75 : 0.6;
-          c.lineWidth = pass === 0 ? 1.5 : pass === 1 ? 2.1 : 2.8;
+          c.globalAlpha = pass === 0 ? 0.32 : pass === 1 ? 0.55 : 0.62;
+          c.lineWidth = pass === 0 ? 1.1 : pass === 1 ? 1.8 : 2.6;
           c.beginPath();
           for (let i = 0; i < count; i++) {
-            const kd = pk[i];
-            if ((pass === 0) !== (kd === 0) || (pass === 2) !== (kd === 4)) continue;
+            const lane = plane[i];
+            if ((lane < 2 ? 0 : lane < 4 ? 1 : 2) !== pass) continue;
             const x = px[i], y = py[i];
             if (y < 0 || x < -20 || x > W + 20) continue;
-            if (kd === 0 && x >= 0 && x < W && grid[(y >> 1) * GW + (x >> 1)] !== 0) continue;
-            const tau = (0.02 + 0.014 * psz[i]) * (kd === 4 ? 1.25 : 1);
+            if (hidden(x, y, lane)) continue;
+            const sc = SC[lane];
+            const tau = (0.022 + 0.014 * psz[i]) * sc;
             c.moveTo(x, y);
-            c.lineTo(x - vx * (0.8 + 0.4 * psz[i]) * tau, y - (700 + 420 * psz[i]) * slow * tau);
+            c.lineTo(x - vx * (0.8 + 0.4 * psz[i]) * tau, y - (680 + 400 * psz[i]) * slow * tau);
           }
           c.stroke();
         }
-        // splashes where drops land on stone
-        c.globalAlpha = 0.8;
-        c.lineWidth = 1.8;
+        // rings on the wet plaza
+        c.lineWidth = 1.3;
+        for (let pass = 0; pass < 2; pass++) {
+          c.globalAlpha = pass ? 0.28 : 0.55;
+          c.beginPath();
+          for (let i = 0; i < NR; i++) {
+            const a = (now - rpt[i]) / 0.7;
+            if (a < 0 || a >= 1 || (a >= 0.45) !== (pass === 1)) continue;
+            const r = (3 + 16 * a) * rps[i];
+            c.moveTo(rpx[i] + r, rpy[i]);
+            c.ellipse(rpx[i], rpy[i], r, r * 0.26, 0, 0, TAU);
+          }
+          c.stroke();
+        }
+        // splashes where drops hit stone
+        c.globalAlpha = 0.75;
+        c.lineWidth = 1.6;
         c.beginPath();
         for (let i = 0; i < NS; i++) {
           const a = (now - spt[i]) / 0.3;
           if (a < 0 || a >= 1) continue;
-          const x = spx[i], y = spy[i];
-          const r = 3 + 9 * a;
-          const h = 9 * a * (1 - a) * 4 * 0.5;
+          const x = spx[i], y = spy[i], sc = sps[i];
+          const r = (3 + 9 * a) * sc;
+          const h = 18 * a * (1 - a) * sc;
           c.moveTo(x - r * 0.4, y - 1);
           c.lineTo(x - r, y - 1 - h);
           c.moveTo(x + r * 0.4, y - 1);
           c.lineTo(x + r, y - 1 - h);
         }
         c.stroke();
-        // drips from under the ledges
-        c.globalAlpha = 0.85;
-        c.lineWidth = 3.2;
-        c.beginPath();
-        for (let i = 0; i < ND; i++) {
-          const d = drips[i];
-          const per = d.per / (0.35 + I);
-          const tt = (now + d.ph) % per;
-          const hang = Math.min(1, tt / (per * 0.45));
-          const tf = tt - per * 0.45;
-          if (tf < 0) {
-            c.moveTo(d.x, d.y - 1);
-            c.lineTo(d.x, d.y + 1 + 5 * hang);
-          } else {
-            const y = d.y + 6 + 520 * tf * tf + 40 * tf;
-            if (y < d.land) {
-              c.moveTo(d.x, y);
-              c.lineTo(d.x, y + 9);
-            } else if (y < d.land + 60) {
-              const a = (y - d.land) / 60;
-              c.moveTo(d.x - 3 - 8 * a, d.land - 1 - 5 * a * (1 - a) * 4 * 0.4);
-              c.lineTo(d.x - 2, d.land - 1);
-              c.moveTo(d.x + 3 + 8 * a, d.land - 1 - 5 * a * (1 - a) * 4 * 0.4);
-              c.lineTo(d.x + 2, d.land - 1);
-            }
-          }
-        }
-        c.stroke();
         c.globalAlpha = 1;
       } else {
-        // ---- dry: dust on the wind, more of it in bad air
-        const count = Math.round(clamp(70 + w.aqi * 1.5 + fogK * 60, 60, 330));
+        // dust on the wind, more of it in bad air
+        const count = Math.round(clamp(80 + w.aqi * 1.6 + fogK * 60, 70, 380));
         const stream = clamp(Math.abs(wind) / 26);
         for (let i = 0; i < count; i++) {
-          const z = psz[i];
+          const sc = SC[plane[i]];
           const ph = pph[i];
-          const vx = wind * (3.2 + 4.4 * z) + 9 * Math.sin(now * 0.27 + ph * 31);
-          const vy = 7 * Math.cos(now * 0.21 + ph * 47) + 3 * Math.sin(now * 0.5 + ph * 13) - 1.5;
+          const vx = (wind * (3.2 + 4.4 * psz[i]) + 9 * Math.sin(now * 0.27 + ph * 31)) * sc;
+          const vy = (7 * Math.cos(now * 0.21 + ph * 47) + 3 * Math.sin(now * 0.5 + ph * 13) - 1.5) * sc;
           px[i] += vx * dt;
           py[i] += vy * dt;
           if (px[i] < -40) px[i] += W + 80;
           else if (px[i] > W + 40) px[i] -= W + 80;
-          if (py[i] < -30) py[i] += PLINTH + 30;
-          else if (py[i] > PLINTH) py[i] -= PLINTH + 30;
+          const top = plane[i] === 0 ? HZ - 120 : 60;
+          if (py[i] < top) py[i] += pland[i] - top;
+          else if (py[i] > pland[i]) py[i] -= pland[i] - top;
         }
         c.strokeStyle = pal.mote;
         c.lineCap = "round";
-        const nightDim = lerp(1, 0.55, pal.lit);
+        const dim = pal.night ? 0.55 : 1;
         for (let pass = 0; pass < 2; pass++) {
-          c.globalAlpha = (pass ? 0.9 : 0.5) * nightDim;
-          c.lineWidth = pass ? 3.4 : 2.4;
+          c.globalAlpha = (pass ? 0.75 : 0.45) * dim;
+          c.lineWidth = pass ? 3.2 : 2;
           c.beginPath();
           for (let i = 0; i < count; i++) {
-            const front = pk[i] >= 3;
-            if (front !== (pass === 1)) continue;
+            const lane = plane[i];
+            if ((lane >= 3) !== (pass === 1)) continue;
             const x = px[i], y = py[i];
-            if (y < 0 || x < 0 || x >= W) continue;
-            if (!front && grid[(y >> 1) * GW + (x >> 1)] !== 0) continue;
-            const tail = 0.5 + stream * (10 + 22 * psz[i]);
+            if (y < 0 || x < 0 || x >= W || y > FE) continue;
+            if (hidden(x, y, lane)) continue;
+            const tail = (0.5 + stream * (10 + 22 * psz[i])) * SC[lane];
             c.moveTo(x, y);
             c.lineTo(x - Math.sign(wind || 1) * tail, y + 0.01);
+          }
+          c.stroke();
+        }
+        // heat: the far stones shimmer with a mirage of the sky
+        if (heat > 0.02) {
+          c.strokeStyle = pal.horizon;
+          c.lineWidth = 2.2;
+          c.globalAlpha = 0.55 * heat;
+          c.beginPath();
+          for (let j = 0; j < 9; j++) {
+            const y = HZ + 3 + j * 4.2 + 1.5 * Math.sin(now * 1.3 + j * 2.1);
+            for (let x = 0; x <= W; x += 24) {
+              const yy = y + 1.6 * Math.sin(x * 0.045 + now * (1.7 + j * 0.13) + j);
+              if (x === 0) c.moveTo(x, yy);
+              else c.lineTo(x, yy);
+            }
           }
           c.stroke();
         }
@@ -962,7 +1368,7 @@ export default {
       }
     }
 
-    // ---- per-glyph age and the amounts that follow from it --------------------
+    // ---- per-figure age and the amounts that follow from it ---------------------------------
     const fmtAge = (sec, coarse) => {
       if (sec < 60) return `${Math.floor(sec)} sec`;
       const m = Math.floor(sec / 60);
@@ -981,38 +1387,88 @@ export default {
       S.date.age = c.h24 * 3600 + inHour;
       return inHour;
     }
-    // How much snow the day has laid on the date line: hours of snowfall since
-    // midnight (from the hourly record), less what a thaw has taken back.
-    let dayKey = "";
-    let dayEff = 0;
-    function daySnow(s) {
-      const key = `${s.clock.h24}:${s.pastHours.length}:${s.pastHours[23]?.precip}`;
-      if (key === dayKey) return dayEff;
-      dayKey = key;
+    // Snow the day has brought (hours of it, weighted by rate) less what a thaw
+    // has taken back, over the last twelve hours.
+    let histKey = "";
+    let histSnow = 0;
+    let histWet = 0;
+    function history(s) {
+      const ph = s.pastHours;
+      const key = `${s.clock.h24}:${ph.length}:${ph.length ? ph[ph.length - 1].ms : 0}`;
+      if (key === histKey) return;
+      histKey = key;
       let e = 0;
-      const start = s.ms - s.clock.h24 * 3600000 - s.clock.m * 60000;
-      for (const h of s.pastHours) {
-        if (h.ms < start - 1800000) continue;
-        if (h.kind === "snow") e += 3600 * clamp(Math.sqrt(Math.max(0.004, h.precip) / 0.12), 0.15, 1);
-        else if (h.temp > 34) e = Math.max(0, e - 3600 * clamp((h.temp - 34) / 10));
+      let wetH = 0;
+      const start = s.ms - 12 * 3600000;
+      for (const h of ph) {
+        if (h.ms < start) continue;
+        if (h.kind === "snow") e += clamp(Math.sqrt(Math.max(0.004, h.precip) / 0.12), 0.15, 1);
+        else if (h.temp > 34) e = Math.max(0, e - clamp((h.temp - 34) / 10));
       }
-      dayEff = e;
-      return e;
+      for (let i = Math.max(0, ph.length - 2); i < ph.length; i++) if (ph[i].precip > 0.005 && ph[i].kind !== "snow") wetH = Math.max(wetH, i === ph.length - 1 ? 0.5 : 0.3);
+      histSnow = e;
+      histWet = wetH;
     }
 
     const wetKeyOf = (age) => (age < 90 ? Math.floor(age * 2) : age < 900 ? 180 + Math.floor((age - 90) / 3) : 450 + Math.floor((age - 900) / 20));
 
-    // ---- one frame's bookkeeping ----------------------------------------------
+    // ---- layout --------------------------------------------------------------------------
+    let tens = null;
+    function layout(hasTens) {
+      tens = hasTens;
+      let tot = CLS.min.cellW * 2 + GAP;
+      let x = Math.round((W - tot) / 2);
+      S.m1.cellX = x;
+      S.m2.cellX = x + CLS.min.cellW + GAP;
+      const cH = CLS.hour.cellW;
+      const cA = CLS.ap.cellW;
+      tot = (hasTens ? cH * 2 + GAP : cH) + GAP + cA;
+      x = Math.round((W - tot) / 2);
+      S.h1.present = hasTens;
+      if (hasTens) { S.h1.cellX = x; x += cH + GAP; }
+      S.h2.cellX = x;
+      x += cH + GAP;
+      S.ap.cellX = x;
+      S.date.cellX = MX;
+      for (const sl of slots) {
+        const row = ROW[sl.row];
+        sl.x = sl.cellX - sl.cls.padX;
+        sl.gy = row.base - sl.cls.oy;
+        sl.box.style.display = sl.present ? "" : "none";
+        sl.box.style.left = `${sl.x}px`;
+        sl.box.style.top = `${sl.gy}px`;
+        sl.box.style.width = `${sl.cls.bw}px`;
+        sl.box.style.height = `${row.base - sl.gy}px`;
+        const cxn = (sl.cellX + sl.cls.cellW / 2 - W / 2) / (W / 2);
+        sl.sx = sl.row === 0 ? 0 : -clamp(cxn, -1, 1) * 9 * sl.cls.k;
+        sl.palDrawn = -1;
+        if (sl.age_) {
+          sl.age_.style.display = sl.present ? "" : "none";
+          sl.age_.style.left = `${Math.round(sl.cellX + sl.cls.cellW / 2)}px`;
+          sl.age_.style.top = `${Math.round(topFor(row.base + row.pt + row.ped / 2 + (mRok.cap * 26) / 2, 26, mRok))}px`;
+        }
+      }
+    }
+
+    function place(f, travel) {
+      const vis = f.vis && f.str !== "" && f.off < travel - 1;
+      const txt = vis ? `translate3d(0,${f.off.toFixed(1)}px,0)` : "none";
+      if (f.offTxt !== txt) {
+        f.offTxt = txt;
+        f.cv.style.transform = vis ? txt : "";
+        f.cv.style.visibility = vis ? "visible" : "hidden";
+      }
+    }
+
+    // ---- one frame -----------------------------------------------------------------------
     let lastMs = null;
     let palClock = 0;
     let textShift = null;
-    const dirty = [false, false, false];
-    const dx0 = [0, 0, 0];
-    const dx1 = [W, W, W];
-    const mark = (ri, a = 0, b = W) => {
-      if (!dirty[ri]) { dirty[ri] = true; dx0[ri] = a; dx1[ri] = b; }
-      else { dx0[ri] = Math.min(dx0[ri], a); dx1[ri] = Math.max(dx1[ri], b); }
-    };
+    let groundKey = "";
+    let groundClock = 0;
+    let fxKey = "";
+    let layoutVer = 0;
+    let gridDirty = true;
 
     function update(s) {
       now = s.t;
@@ -1024,144 +1480,144 @@ export default {
       lastMs = s.ms;
 
       // weather drivers
+      history(s);
       const fall = w.falling;
       const I = w.intensity;
-      snowK = fall === "snow" ? clamp(I * 1.0) : 0;
+      snowK = fall === "snow" ? clamp(I) : 0;
       rainK = fall && fall !== "snow" ? clamp(I) : 0;
-      const newPrecip = snowK > 0.004 ? 2 : rainK > 0.004 ? 1 : 0;
-      const sn = Math.sin((w.windDir * Math.PI) / 180);
+      precip = snowK > 0.004 ? 2 : rainK > 0.004 ? 1 : 0;
+      const sn = Math.sin(w.windDir * D2R);
       lat = -(sn >= 0 ? 1 : -1) * (0.4 + 0.6 * Math.abs(sn));
-      const cw = Math.round(lat * clamp(w.wind / 32) * 20) / 20;
+      capWind = Math.round(lat * clamp(w.wind / 32) * 20) / 20;
       fogK = Math.max(w.fog ? 1 : 0, smoothstep(2.5, 0.25, w.visibility));
-      let all = jump || newPrecip !== precip;
-      if (cw !== capWind) {
-        capWind = cw;
-        if (newPrecip) all = true;
-      }
-      precip = newPrecip;
+      const inHour = ages(s);
+      let snowAmt = histSnow + snowK * (inHour / 3600);
+      if (!snowK && w.temp > 34) snowAmt *= smoothstep(46, 34, w.temp);
+      cover = Math.round((precip === 2 ? Math.max(1 - Math.exp(-snowAmt * 1.4), 0.6 + 0.4 * snowK) : 1 - Math.exp(-snowAmt * 1.4)) * 20) / 20;
+      wet = cover > 0.5 ? 0 : Math.round((precip === 1 ? 0.6 + 0.4 * rainK : histWet) * 20) / 20;
 
-      // palette (a few times a second is plenty)
       palClock -= s.dt;
       if (palClock <= 0 || fast) {
-        palClock = 0.3;
+        palClock = 0.5;
         updatePalette(s);
       }
 
       // what each slot should be showing
-      const inHour = ages(s);
       const c = s.clock;
-      const want = [c.hh.length > 1 ? c.hh[0] : "", c.hh[c.hh.length - 1], c.mm[0], c.mm[1], c.ampm, `${s.text.weekday.toUpperCase()}|${s.text.monthDay.toUpperCase()}`];
-      let changed = false;
+      const hasTens = c.hh.length > 1;
+      if (tens !== hasTens) { layout(hasTens); layoutVer++; gridDirty = true; }
+      const want = [hasTens ? c.hh[0] : "", c.hh[c.hh.length - 1], c.mm[0], c.mm[1], c.ampm, `${s.text.weekday.toUpperCase()}|${s.text.monthDay.toUpperCase()}`];
       for (let i = 0; i < 6; i++) {
         const sl = slots[i];
         if (sl.str === want[i]) continue;
-        changed = true;
-        if (!fast && sl.str !== "" || (!fast && want[i] !== "")) {
-          // keep a picture of the outgoing numeral, snow and all, to sink into the slot
-          sl.hadOld = sl.str !== "";
-          if (sl.hadOld) {
-            const o = sl.octx;
-            o.setTransform(1, 0, 0, 1, 0, 0);
-            o.clearRect(0, 0, sl.old.width, sl.old.height);
-            o.drawImage(sl.comp, 0, 0);
-            if (precip === 2 && sl.D > 0.4) {
-              o.setTransform(R, 0, 0, R, 0, 0);
-              paintCaps(o, sl, 0, 0, sl.D);
-            }
-            sl.oldX = sl.x;
-          }
+        gridDirty = true;
+        const animate = !fast && sl.str !== "" && want[i] !== "" && sl.row !== 0;
+        if (animate) {
+          // the outgoing figure keeps its picture, snow and all, and sinks
+          sl.faces[sl.cur].vis = true;
+          sl.cur = 1 - sl.cur;
           sl.anim = true;
           sl.t0 = now;
-        } else sl.anim = false;
-        setGlyph(sl, want[i], s);
-        sl.wetDrawn = -2;
-      }
-      if (changed) {
-        // lay the rows out again
-        let x = MX;
-        for (const sl of [S.h1, S.h2]) if (sl.str) { sl.x = x - sl.inkL; x += sl.inkR - sl.inkL + GAP; }
-        x = MX;
-        for (const sl of [S.m1, S.m2]) { sl.x = x - sl.inkL; x += sl.inkR - sl.inkL + GAP; }
-        S.ap.x = W - MX - S.ap.inkR;
-        S.date.x = MX - S.date.cls.padX;
-        rebuildGrid();
-        landDrips();
-        for (const sl of slots) {
-          if (!sl.plate) continue;
-          const cx = sl.str ? Math.round(sl.x + (sl.inkL + sl.inkR) / 2) : -1;
-          if (cx !== sl.plateX) {
-            sl.plateX = cx;
-            sl.plate.style.left = `${cx}px`;
-            sl.plate.style.display = cx < 0 ? "none" : "";
-          }
+        } else {
+          sl.anim = false;
+          sl.faces[1 - sl.cur].vis = false;
+          sl.faces[1 - sl.cur].str = "";
         }
-        all = true;
+        const f = sl.faces[sl.cur];
+        f.vis = true;
+        setGlyph(sl, f, want[i], s);
+      }
+      if (gridDirty) {
+        rebuildGrid();
+        gridDirty = false;
       }
 
       // amounts
-      const sweep = inHour < 3 && !fast ? ease.inOut(inHour / 3) : 1; // the ledges are swept on the hour
-      const since = sweep < 1 ? lerp(3600, inHour, sweep) : inHour;
+      const since = inHour;
+      let heapKey = "";
       for (const sl of slots) {
-        const eff = sl === S.date ? daySnow(s) + snowK * inHour : snowK * sl.age;
-        sl.D = precip === 2 ? sl.cls.dmax * (1 - Math.exp(-eff / 600)) : 0;
+        const eff = sl === S.date ? (histSnow * 3600 + snowK * inHour) / 4 : snowK * sl.age;
+        sl.D = precip === 2 ? sl.cls.capMax * (1 - Math.exp(-eff / 600)) : 0;
         sl.wetKey = precip === 1 ? wetKeyOf(sl.age) + Math.round(rainK * 12) * 1000 : -1;
       }
-      const cap = (age) => 84 * (1 - Math.exp((-snowK * age) / 600));
+      const capAt = (age) => 84 * (1 - Math.exp((-snowK * age) / 600));
       if (precip === 2) {
-        led[0].d = led[0].max * (1 - Math.exp(-(daySnow(s) + snowK * inHour) / 2400));
-        led[1].d = led[1].max * (1 - Math.exp((-snowK * since) / 900));
-        led[2].d = led[2].max * (1 - Math.exp((-snowK * since) / 900));
-        const mins = since / 60;
-        const hp = led[2].heaps;
-        hp[0].x = S.m1.x + (S.m1.inkL + S.m1.inkR) / 2;
-        hp[0].s = (S.m1.inkR - S.m1.inkL) * 0.44;
-        hp[0].a = Math.min(46, 0.9 * Math.sqrt(8 * Math.floor(mins / 10) * cap(600)));
-        hp[1].x = S.m2.x + (S.m2.inkL + S.m2.inkR) / 2;
-        hp[1].s = (S.m2.inkR - S.m2.inkL) * 0.44;
-        hp[1].a = Math.min(46, 0.9 * Math.sqrt(8 * Math.floor(mins) * cap(60)));
-      } else if (precip === 1) {
-        led[0].d = 3 * rainK + 1.5;
-        led[1].d = led[2].d = (2 + 4.5 * rainK) * (1 - Math.exp((-rainK * since) / 240));
-        led[2].heaps[0].a = led[2].heaps[1].a = 0;
-      } else {
-        led[0].d = led[1].d = led[2].d = 0;
-        led[2].heaps[0].a = led[2].heaps[1].a = 0;
-      }
+        const mins = Math.floor(since / 60);
+        S.m2.heap = Math.min(30, 2.2 * Math.sqrt(mins * capAt(60)));
+        S.m1.heap = Math.min(30, 2.2 * Math.sqrt(Math.floor(mins / 10) * capAt(600)));
+        const hourly = Math.min(22, 1.6 * Math.sqrt(c.h12 * capAt(3600) * 0.3));
+        S.h2.heap = hourly;
+        S.h1.heap = hourly * 0.6;
+        S.ap.heap = Math.min(10, hourly * 0.4);
+      } else for (const sl of pedSlots) sl.heap = 0;
+      for (const sl of pedSlots) heapKey += Math.round(sl.heap);
 
-      // rebuild what has changed; in real time, at most one glyph a frame
-      let budget = fast || all ? 99 : 1;
+      // rebuild what has changed; in real time, at most one figure a frame
+      let budget = fast ? 99 : 1;
+      let rebuilt = false;
       for (const sl of slots) {
-        const stale = sl.palDrawn !== pal.version || sl.wetDrawn !== sl.wetKey;
+        if (!sl.present || !sl.str) continue;
+        const stale = sl.palDrawn !== pal.version || sl.wetDrawn !== sl.wetKey || Math.abs(sl.D - sl.Ddrawn) >= 0.5;
         if (stale && budget > 0) {
           budget--;
-          buildComp(sl);
-          mark(sl.row, sl.x - 2, sl.x + sl.cls.bw + 2);
-        }
-        if (Math.abs(sl.D - sl.Ddrawn) >= 0.5 && !sl.anim) mark(sl.row, sl.x - 8, sl.x + sl.cls.bw + 8);
-        if (sl.anim) {
-          if (now - sl.t0 >= T_RISE0 + T_RISE || fast) {
-            sl.anim = false;
-            mark(sl.row);
-          } else mark(sl.row, Math.min(sl.x, sl.hadOld ? sl.oldX : sl.x) - 6, Math.max(sl.x, sl.hadOld ? sl.oldX : sl.x) + sl.cls.bw + 6);
+          {const _t=pn();buildFace(sl, sl.faces[sl.cur]);PT.face=(PT.face||0)+pn()-_t;}
+          if (sl.palDrawn !== shown[`sil${sl.id}`]) {
+            shown[`sil${sl.id}`] = sl.palDrawn;
+            paintSil(sl, sl.faces[sl.cur]);
+          }
+          rebuilt = true;
         }
       }
-      for (let ri = 0; ri < 3; ri++) {
-        if (all || Math.abs(led[ri].d - led[ri].drawn) >= 0.4) mark(ri);
-        if (dirty[ri]) {
-          paintRow(ri, dx0[ri], dx1[ri]);
-          dirty[ri] = false;
+
+      // the figures moving: the old one sinks, the new one rises
+      let moving = false;
+      for (const sl of slots) {
+        const cur = sl.faces[sl.cur];
+        const old = sl.faces[1 - sl.cur];
+        const travel = sl.cls.bh;
+        let offC = 0;
+        let offO = travel;
+        if (sl.anim) {
+          const a = now - sl.t0;
+          if (a >= T_RISE0 + T_RISE || fast) {
+            sl.anim = false;
+            old.vis = false;
+            old.str = "";
+          } else {
+            moving = true;
+            offO = travel * ease.in(clamp(a / T_SINK));
+            offC = travel * (1 - ease.cubicOut(clamp((a - T_RISE0) / T_RISE)));
+            if (a >= T_SINK) old.vis = false;
+          }
         }
+        cur.off = offC;
+        old.off = offO;
+        place(cur, travel);
+        place(old, travel);
+      }
+
+      // the ground: when what lies on it, the light or the layout changes
+      groundClock -= s.dt;
+      const gKey = `${pal.version}|${pal.gNear}|${pal.gFar}|${pal.sky0}|${pal.sky2}|${pal.winA.toFixed(2)}|${cover}|${wet}|${heapKey}|${layoutVer}`;
+      if (gKey !== groundKey && (groundClock <= 0 || fast)) {
+        groundKey = gKey;
+        groundClock = 0.5;
+        drawGround();
+      }
+      const fKey = `${pal.version}|${pal.shA.toFixed(2)}|${pal.shAx.toFixed(2)}|${pal.shBy.toFixed(2)}|${pal.nsA.toFixed(2)}|${pal.refA.toFixed(2)}|${layoutVer}`;
+      if (moving || rebuilt || fKey !== fxKey) {
+        fxKey = fKey;
+        drawFx();
       }
 
       // ---- text
       const tx = s.text;
       put("temp", n.temp, tx.temp);
-      const tw = shown.tempW ?? 0;
       if (shown.tempFor !== tx.temp) {
         shown.tempFor = tx.temp;
         shown.tempW = n.temp.offsetWidth;
       }
-      const left = MX + (shown.tempW || tw) + 26;
+      const left = MX + (shown.tempW || 0) + 30;
       css("condL", n.cond, "left", `${left}px`);
       css("subL", n.sub, "left", `${left}px`);
       if (put("cond", n.cond, tx.condition) || shown.condAt !== left) {
@@ -1174,59 +1630,73 @@ export default {
         fitText(n.sub, W - MX - left);
       }
       put("sunL", n.sunL, tx.sunLabel);
-      put("sunV", n.sunV, tx.sunValue);
+      if (put("sunV", n.sunV, tx.sunValue)) fitText(n.sunV, colW[0]);
       if (put("moonV", n.moonV, tx.moon)) fitText(n.moonV, colW[1]);
       put("aqiV", n.aqiV, tx.aqi);
       put("uvV", n.uvV, tx.uv);
       const hasFact = tx.factValue !== "";
       put("factL", n.factL, tx.factLabel);
       if (put("factV", n.factV, tx.factValue) && hasFact) {
-        n.factV.style.fontSize = "42px";
-        if (n.factV.offsetHeight > 104) n.factV.style.fontSize = "37px";
+        n.factV.style.fontSize = "40px";
+        n.factV.style.lineHeight = "46px";
+        if (n.factV.offsetHeight > 96) {
+          n.factV.style.fontSize = "36px";
+          n.factV.style.lineHeight = "42px";
+        }
       }
-      const shift = hasFact ? 0 : 84;
+      const shift = hasFact ? 0 : 58;
       if (shift !== textShift) {
         textShift = shift;
         layoutText(shift);
         n.factL.style.display = n.factV.style.display = n.rule2.style.display = hasFact ? "" : "none";
       }
-      for (const sl of slots) {
-        if (!sl.plate || !sl.str) continue;
+      for (const sl of pedSlots) {
+        if (!sl.present || !sl.str) continue;
         const txt = fmtAge(sl.age, sl === S.ap);
-        if (txt !== sl.plateText) {
-          sl.plateText = txt;
-          sl.plate.textContent = txt;
+        if (txt !== sl.ageText) {
+          sl.ageText = txt;
+          sl.age_.textContent = txt;
         }
       }
 
-      // ---- the sky's slow parts
-      const storm = fall === "storm" ? 1 : 0;
+      // ---- the slow parts of the sky
       let sw = 0;
-      if (storm) {
+      if (fall === "storm") {
         const per = 23;
         const k = Math.floor(now / per);
         const tt = now - k * per - 4 - 12 * hash(k, seed + 70);
         if (tt > 0 && tt < 4.5) sw = Math.sin((tt / 4.5) * Math.PI) ** 2 * (0.5 + 0.5 * hash(k, seed + 71));
       }
-      const swo = (sw * (pal.lit > 0.5 ? 0.1 : 0.28)).toFixed(3);
-      css("swell", swell, "opacity", swo);
-      const wo = fogK * (pal.lit > 0.5 ? 0.5 : 1);
+      css("swell", swell, "opacity", (sw * (pal.night ? 0.2 : 0.1)).toFixed(3));
+      const cloudO = partly * pal.shA * 0.75;
+      for (let i = 0; i < blobs.length; i++) {
+        const b = blobs[i];
+        const o = cloudO.toFixed(2);
+        if (b.o !== o) { b.o = o; b.node.style.opacity = o; }
+        if (cloudO > 0.01) {
+          const span = W + b.w;
+          const drift = (b.ph * span + now * (6 + Math.abs(w.wind) * 2.2) * b.sp * (lat >= 0 ? 1 : -1)) % span;
+          const x = ((drift + span) % span) - b.w;
+          b.node.style.transform = `translate3d(${x.toFixed(1)}px, ${b.y.toFixed(1)}px, 0)`;
+        }
+      }
       for (let i = 0; i < wisps.length; i++) {
-        const wv = wisps[i];
-        const o = (wo * (0.55 + 0.45 * Math.sin(now * 0.05 * wv.sp + wv.ph * 9))).toFixed(2);
-        if (wv.o !== o) { wv.o = o; wv.node.style.opacity = o; }
-        if (wo > 0.01) {
-          const span = W + wv.w;
-          const drift = (wv.ph * span + now * (5 + Math.abs(w.wind) * 1.6) * wv.sp * (lat >= 0 ? 1 : -1)) % span;
-          const x = ((drift + span) % span) - wv.w;
-          wv.node.style.transform = `translate3d(${x.toFixed(1)}px, ${(wv.y + 26 * Math.sin(now * 0.07 + wv.ph * 20)).toFixed(1)}px, 0)`;
+        const v = wisps[i];
+        const peak = v.front ? 0.2 : 0.8;
+        const o = (fogK * peak * (0.6 + 0.4 * Math.sin(now * 0.05 * v.sp + v.ph * 9))).toFixed(2);
+        if (v.o !== o) { v.o = o; v.node.style.opacity = o; }
+        if (fogK > 0.01) {
+          const span = W + v.w;
+          const drift = (v.ph * span + now * (5 + Math.abs(w.wind) * 1.6) * v.sp * (lat >= 0 ? 1 : -1)) % span;
+          const x = ((drift + span) % span) - v.w;
+          v.node.style.transform = `translate3d(${x.toFixed(1)}px, ${(v.y + 22 * Math.sin(now * 0.07 + v.ph * 20)).toFixed(1)}px, 0)`;
         }
       }
 
       drawAir(s);
     }
 
-    if (state && state.clock && state.clock.hh) update(state);
+    {const _t=pn();if (state && state.clock && state.clock.hh) update(state);PT.update=pn()-_t;console.warn(JSON.stringify(PT), digitCap, digitInk, mCap, R);}
     return { frame: update };
   },
 };

@@ -36,7 +36,7 @@ import {
 // ---- geometry (stage units) -------------------------------------------------
 const ROOF = 214; // top of the parapet
 const GX = 54, CW = 108, CH = 100; // window grid: 9 columns, 10 floors
-const WW = 76, WH = 80, FR = 5; // window opening and frame width
+const WW = 82, WH = 80, FR = 5; // window opening and frame width
 const HOURS_Y = 336, MINS_Y = 872;
 const SHOP = 1378, FASCIA = 1394, FRONT = 1518, WALK = 1800;
 const NWIN = 90;
@@ -216,7 +216,6 @@ export default {
     // ---- layers ---------------------------------------------------------------
     const skyDiv = lay("sky");
     const facade = canvas2d(wrap, { maxScale: 2 });
-    const shadow = canvas2d(wrap);
     const wetClip = lay("", { top: `${ROOF}px`, height: `${SHOP - ROOF}px`, overflow: "hidden", visibility: "hidden" });
     const wet = canvas2d(wetClip);
     const walkDiv = lay("", { top: `${WALK}px`, height: `${H - WALK}px` });
@@ -225,9 +224,10 @@ export default {
     const airDiv = lay("", { top: "0", height: `${H}px` });
     const flashDiv = lay("", { top: "0", height: `${ROOF}px`, background: "#c9d0ff", opacity: "0" });
     const glow = canvas2d(wrap);
+    const glassL = canvas2d(wrap);
     const win = canvas2d(wrap, { maxScale: 2 });
     const fx = canvas2d(wrap, { adaptive: true });
-    const fctx = fx.ctx, wctx = win.ctx, gctx = glow.ctx;
+    const fctx = fx.ctx, wctx = win.ctx, gctx = glow.ctx, gctx2 = glassL.ctx;
 
     // ---- type -----------------------------------------------------------------
     const tx = (cls, style, text) => {
@@ -414,7 +414,7 @@ export default {
       R(STONE, 0, 322, W, 7); R(STONE_DK, 0, 329, W, 3);
 
       // every window asleep: blind down in the recess
-      const blinds = ["#3c2a24", "#382d29", "#34302d", "#3f2c22"];
+      const blinds = ["#4a3029", "#46302a", "#4b3328", "#432f2b"];
       for (let i = 0; i < NWIN; i++) {
         const x = colX(i % 9), y = rowY((i / 9) | 0);
         // flat arch of soldier bricks
@@ -522,7 +522,7 @@ export default {
     // ---- sprites and textures --------------------------------------------------------
     const cloudW = cloudTile(noise, 512, "#ffffff", "#c3cedb", -0.06, 0.34, 0);
     const cloudD = cloudTile(noise, 512, "#566170", "#3b4450", -0.1, 0.4, 7.3);
-    const patWw = wctx.createPattern(cloudW, "repeat"), patDw = wctx.createPattern(cloudD, "repeat");
+    const patWg = gctx2.createPattern(cloudW, "repeat"), patDg = gctx2.createPattern(cloudD, "repeat");
     const patWf = fctx.createPattern(cloudW, "repeat"), patDf = fctx.createPattern(cloudD, "repeat");
     const matW = new DOMMatrix(), matD = new DOMMatrix();
     const warmGlow = glowSprite("#ffae5e", 0.6);
@@ -583,7 +583,7 @@ export default {
     };
     let lastMs = null, lastH = -1, lastM = -1, first = true;
     let wetness = 0, snowDepth = 0, scrollX = 0, palKey1 = -1, palKey2 = -1, skyKey = "", shKey = -1e9, glowKey = -1, digitVersion = 0;
-    let hasFact = false, frostK = 0;
+    let hasFact = false, frostK = 0, winDirty = true, shDx = 0, shDy = 1, lastFlash = 0;
 
     function setDigits(h12, m) {
       target.fill(0);
@@ -631,8 +631,6 @@ export default {
       const brickNow = fogged(brickBase, 1);
 
       css("sky", skyDiv, "background", `linear-gradient(90deg, ${sky.west}, ${sky.northWest} 34%, ${sky.northEast} 66%, ${sky.east})`);
-      css("shA", shadow.canvas, "opacity", env.sunS.toFixed(3));
-      css("shV", shadow.canvas, "visibility", env.sunS > 0.01 ? "visible" : "hidden");
       // Stack the flat washes (sky tint, sun, night veil) and the fog band into
       // one premultiplied color per gradient stop.
       const A1 = parse(amb), A2 = parse(sunCol), A3 = parse(VEIL), A4 = parse(fogCol);
@@ -678,7 +676,8 @@ export default {
       PAL.pipe = under("#e7dcc2");
       PAL.snow = blend(under("#f3f5f9"), "#aeb6c6", 0.25 * PAL.night);
       PAL.rain = blend("#dfe8f2", "#8fa0b8", 1 - dl);
-      PAL.curtain = under("#f1e9d8");
+      PAL.curtain = under("#f6f1e6");
+      PAL.curtainFold = under("#c9bfae");
       PAL.walker = under("#17161a");
       PAL.umbrella = under("#d9a531");
       PAL.steam = blend("#f2f3f6", "#59607a", 1 - dl);
@@ -698,9 +697,12 @@ export default {
       cssVar("--chanGlow", rgba("#ffb45a", 0.75 * nk));
     }
 
-    function paintShadows(dx, dy) {
-      shadow.clear();
-      const x = shadow.ctx;
+    // Hard sun shadows under the cornice, sills and fire escape, on the window
+    // layer (repainted with it).
+    function paintShadows(dx, dy, k) {
+      const x = wctx;
+      x.save();
+      x.globalAlpha = k;
       x.fillStyle = "rgba(26,6,12,0.44)";
       x.beginPath();
       x.rect(0, 254, W, Math.min(68, 13 * dy));
@@ -721,6 +723,7 @@ export default {
       x.beginPath(); x.rect(0, 332, W, SHOP - 332); x.clip();
       x.translate(dx * 18, dy * 13);
       x.fill(ironThick); x.fill(ironThin);
+      x.restore();
       x.restore();
     }
 
@@ -760,8 +763,9 @@ export default {
       }
     }
 
-    // One awake window: sky in the glass, or a lit room, behind a white frame.
-    function drawWin(i, a, lamp, s, flash) {
+    // One awake window on the window layer: the front (frame, blind, rail) by
+    // day, a lit room at night. The glass behind the front is on its own layer.
+    function drawWin(i, a, lamp) {
       const c = i % 9, x = colX(c), y = rowY((i / 9) | 0);
       wctx.clearRect(x - 1, y - 1, WW + 2, WH + 2);
       const e = a >= 1 ? 1 : ease.cubicInOut(a);
@@ -770,62 +774,9 @@ export default {
       const clipped = e < 1;
       if (clipped) { wctx.save(); wctx.beginPath(); wctx.rect(x, top, WW, y + WH - top); wctx.clip(); }
       const gx = x + FR, gy = y + FR, gw = WW - 2 * FR, gh = WH - 2 * FR;
-      if (lamp < 0.995) {
-        const k = blindK[i], cy = gy + gh * frontLv(k) - 3;
-        wctx.fillStyle = PAL.glass[c]; wctx.fillRect(gx, cy, gw, gy + gh - cy);
-        if (PAL.aW > 0.01) { wctx.globalAlpha = PAL.aW; wctx.fillStyle = patWw; wctx.fillRect(gx, cy, gw, gy + gh - cy); }
-        if (PAL.aD > 0.01) { wctx.globalAlpha = PAL.aD; wctx.fillStyle = patDw; wctx.fillRect(gx, cy, gw, gy + gh - cy); }
-        // the lower sash pushed up on a warm day: the room's shade behind it
-        if (isOpen[i] && env.openK > 0.02) { wctx.globalAlpha = 0.6 * env.openK; wctx.fillStyle = "#0e1218"; wctx.fillRect(gx, gy + gh * 0.5, gw, gh * 0.5); }
-        if (flash > 0.01) { wctx.globalAlpha = flash * 0.4; wctx.fillStyle = "#e1e6ff"; wctx.fillRect(gx, cy, gw, gy + gh - cy); }
-        wctx.globalAlpha = 1;
-        wctx.drawImage(fronts[k], x, y, WW, WH);
-      } else {
-        wctx.fillStyle = PAL.frame; wctx.fillRect(x, y, WW, WH);
-      }
-      if (lamp > 0.005) {
-        wctx.globalAlpha = lamp; wctx.drawImage(rooms[roomOf[i]], gx, gy, gw, gh); wctx.globalAlpha = 1;
-        const v = vig[i];
-        if (v && lamp > 0.4) {
-          const t = s.t;
-          if (v === 1) {
-            // a cat on the sill, tail flicking
-            const bx = gx + gw - 20, by = gy + gh;
-            wctx.fillStyle = "#1d0f08"; wctx.strokeStyle = "#1d0f08";
-            wctx.beginPath();
-            wctx.ellipse(bx, by - 8, 11, 10, 0, 0, TAU);
-            wctx.ellipse(bx + 3, by - 22, 6.5, 6, 0, 0, TAU);
-            wctx.moveTo(bx - 2.5, by - 26); wctx.lineTo(bx - 1.5, by - 33); wctx.lineTo(bx + 3, by - 27);
-            wctx.moveTo(bx + 4, by - 27); wctx.lineTo(bx + 8.5, by - 33); wctx.lineTo(bx + 9, by - 25);
-            wctx.fill();
-            const flick = Math.sin(t * 1.3) * 5 + Math.sin(t * 3.1) * 2.5 * smoothstep(0.3, 1, Math.sin(t * 0.37));
-            wctx.lineWidth = 3.4; wctx.lineCap = "round";
-            wctx.beginPath(); wctx.moveTo(bx - 9, by - 3); wctx.quadraticCurveTo(bx - 24, by - 1, bx - 30, by - 10 + flick);
-            wctx.stroke();
-          } else if (v === 2) {
-            // someone walks past the lamp now and then
-            const per = 31, u = (t % per) / 9;
-            if (u < 1) {
-              const dir = Math.floor(t / per) % 2 ? -1 : 1;
-              const px = dir > 0 ? gx - 22 + u * (gw + 44) : gx + gw + 22 - u * (gw + 44);
-              wctx.save(); wctx.beginPath(); wctx.rect(gx, gy, gw, gh); wctx.clip();
-              wctx.fillStyle = "rgba(46,20,8,0.8)";
-              wctx.beginPath();
-              wctx.ellipse(px, gy + gh * 0.36 + Math.sin(t * 4.2) * 1.2, 9, 10.5, 0, 0, TAU);
-              wctx.moveTo(px - 19, gy + gh); wctx.quadraticCurveTo(px - 19, gy + gh * 0.52, px, gy + gh * 0.5); wctx.quadraticCurveTo(px + 19, gy + gh * 0.52, px + 19, gy + gh);
-              wctx.fill();
-              wctx.restore();
-            }
-          } else {
-            // a television: slow blue light, never a flicker
-            const k = 0.3 + 0.2 * noise.n2(t * 0.55, 9.1) + 0.1 * noise.n2(t * 1.4, 2.2);
-            wctx.globalAlpha = k * lamp; wctx.fillStyle = "#78aaff"; wctx.fillRect(gx, gy, gw, gh);
-            wctx.globalAlpha = 0.85; wctx.fillStyle = "#1e0e08"; wctx.fillRect(gx + 8, gy + gh - 22, 30, 22);
-            wctx.globalAlpha = clamp(0.5 + k * 0.6); wctx.fillStyle = "#bedcff"; wctx.fillRect(gx + 11, gy + gh - 19, 24, 14);
-            wctx.globalAlpha = 1;
-          }
-        }
-      }
+      if (lamp < 0.995) wctx.drawImage(fronts[blindK[i]], x, y, WW, WH);
+      else { wctx.fillStyle = PAL.frame; wctx.fillRect(x, y, WW, WH); }
+      if (lamp > 0.005) { wctx.globalAlpha = lamp; wctx.drawImage(rooms[roomOf[i]], gx, gy, gw, gh); wctx.globalAlpha = 1; }
       if (frostK > 0.01) { wctx.globalAlpha = frostK * (1 - 0.4 * lamp); wctx.drawImage(frost, gx, gy, gw, gh); wctx.globalAlpha = 1; }
       if (lamp > 0.005) {
         wctx.fillStyle = PAL.frame; wctx.fillRect(gx, gy + gh * 0.5 - 1.5, gw, 3);
@@ -834,9 +785,88 @@ export default {
       if (clipped) { wctx.fillStyle = PAL.blind; wctx.fillRect(x, top, WW, 4); wctx.restore(); }
     }
 
+    // The sky in one pane, below its blind: measured color, drifting cloud.
+    // Redrawn every frame on a layer of its own, under the window fronts.
+    function drawGlass(i, a, flash) {
+      const c = i % 9, x = colX(c), y = rowY((i / 9) | 0);
+      const gx = x + FR, gy = y + FR, gw = WW - 2 * FR, gh = WH - 2 * FR;
+      const e = a >= 1 ? 1 : ease.cubicInOut(a);
+      const cy = Math.max(gy + gh * frontLv(blindK[i]) - 3, y + WH * (1 - e)), hh = gy + gh - cy;
+      if (hh < 0.5) return;
+      gctx2.fillStyle = PAL.glass[c]; gctx2.fillRect(gx, cy, gw, hh);
+      if (PAL.aW > 0.01) { gctx2.globalAlpha = PAL.aW; gctx2.fillStyle = patWg; gctx2.fillRect(gx, cy, gw, hh); }
+      if (PAL.aD > 0.01) { gctx2.globalAlpha = PAL.aD; gctx2.fillStyle = patDg; gctx2.fillRect(gx, cy, gw, hh); }
+      // the lower sash pushed up on a warm day: the room's shade behind it
+      if (isOpen[i] && env.openK > 0.02) { gctx2.globalAlpha = 0.6 * env.openK; gctx2.fillStyle = "#0e1218"; gctx2.fillRect(gx, Math.max(cy, gy + gh * 0.5), gw, gy + gh - Math.max(cy, gy + gh * 0.5)); }
+      if (flash > 0.01) { gctx2.globalAlpha = flash * 0.4; gctx2.fillStyle = "#e1e6ff"; gctx2.fillRect(gx, cy, gw, hh); }
+      gctx2.globalAlpha = 1;
+    }
+
+    // The three small lives, drawn over their rooms on the moving layer.
+    function drawVig(i, lamp, t) {
+      const v = vig[i], x = colX(i % 9), y = rowY((i / 9) | 0);
+      const gx = x + FR, gy = y + FR, gw = WW - 2 * FR, gh = WH - 2 * FR;
+      if (v === 1) {
+        // a cat on the sill, tail flicking
+        const bx = gx + gw - 20, by = gy + gh;
+        fctx.fillStyle = "#1d0f08"; fctx.strokeStyle = "#1d0f08";
+        fctx.beginPath();
+        fctx.ellipse(bx, by - 8, 11, 10, 0, 0, TAU);
+        fctx.ellipse(bx + 3, by - 22, 6.5, 6, 0, 0, TAU);
+        fctx.moveTo(bx - 2.5, by - 26); fctx.lineTo(bx - 1.5, by - 33); fctx.lineTo(bx + 3, by - 27);
+        fctx.moveTo(bx + 4, by - 27); fctx.lineTo(bx + 8.5, by - 33); fctx.lineTo(bx + 9, by - 25);
+        fctx.fill();
+        const flick = Math.sin(t * 1.3) * 5 + Math.sin(t * 3.1) * 2.5 * smoothstep(0.3, 1, Math.sin(t * 0.37));
+        fctx.lineWidth = 3.4; fctx.lineCap = "round";
+        fctx.beginPath(); fctx.moveTo(bx - 9, by - 3); fctx.quadraticCurveTo(bx - 24, by - 1, bx - 30, by - 10 + flick);
+        fctx.stroke();
+      } else if (v === 2) {
+        // someone walks past the lamp now and then
+        const per = 31, u = (t % per) / 9;
+        if (u < 1) {
+          const dir = Math.floor(t / per) % 2 ? -1 : 1;
+          const px = dir > 0 ? gx - 22 + u * (gw + 44) : gx + gw + 22 - u * (gw + 44);
+          fctx.save(); fctx.beginPath(); fctx.rect(gx, gy, gw, gh); fctx.clip();
+          fctx.fillStyle = "rgba(46,20,8,0.8)";
+          fctx.beginPath();
+          fctx.ellipse(px, gy + gh * 0.36 + Math.sin(t * 4.2) * 1.2, 9, 10.5, 0, 0, TAU);
+          fctx.moveTo(px - 19, gy + gh); fctx.quadraticCurveTo(px - 19, gy + gh * 0.52, px, gy + gh * 0.5); fctx.quadraticCurveTo(px + 19, gy + gh * 0.52, px + 19, gy + gh);
+          fctx.fill();
+          fctx.restore();
+        }
+      } else {
+        // a television: slow blue light, never a flicker
+        const k = 0.3 + 0.2 * noise.n2(t * 0.55, 9.1) + 0.1 * noise.n2(t * 1.4, 2.2);
+        fctx.globalAlpha = k * lamp; fctx.fillStyle = "#78aaff"; fctx.fillRect(gx, gy, gw, gh);
+        fctx.globalAlpha = 0.85; fctx.fillStyle = "#1e0e08"; fctx.fillRect(gx + 8, gy + gh - 22, 30, 22);
+        fctx.globalAlpha = clamp(0.5 + k * 0.6); fctx.fillStyle = "#bedcff"; fctx.fillRect(gx + 11, gy + gh - 19, 24, 14);
+        fctx.globalAlpha = 1;
+      }
+      fctx.fillStyle = PAL.frame; fctx.fillRect(gx, gy + gh * 0.5 - 1.5, gw, 3);
+    }
+
+    // The roof against the sky: water tower, vent, the billboard (or its bare
+    // frame when there is no fact). On the window layer, repainted with it.
+    function paintRoof() {
+          wctx.fillStyle = PAL.tower; wctx.fill(roofPath);
+          wctx.fillStyle = PAL.towerHi; wctx.fill(hoops);
+          if (hasFact) {
+            wctx.fillStyle = PAL.tower; wctx.fill(lampArms);
+            wctx.fillStyle = PAL.board; wctx.fillRect(BOARD_X, BOARD_Y, BOARD_W, BOARD_H);
+            wctx.strokeStyle = PAL.boardLine; wctx.lineWidth = 2; wctx.strokeRect(BOARD_X + 7, BOARD_Y + 7, BOARD_W - 14, BOARD_H - 14);
+            if (PAL.night > 0.02) {
+              wctx.save(); wctx.beginPath(); wctx.rect(BOARD_X, BOARD_Y, BOARD_W, BOARD_H); wctx.clip();
+              wctx.globalAlpha = PAL.night * 0.4;
+              for (let k = 0; k < 4; k++) wctx.drawImage(paleGlow, lampXs[k] - 150, BOARD_Y - 120, 300, 260);
+              wctx.restore(); wctx.globalAlpha = 1;
+            }
+          } else { wctx.fillStyle = PAL.lattice; wctx.fill(lattice); }
+    }
+
     // Light that lit rooms and shop windows throw on the wall and the street.
     function paintGlow(s, env) {
       glow.clear();
+      let any = false;
       const night = PAL.night;
       gctx.globalCompositeOperation = "lighter";
       const size = 250 * (1 + 0.7 * env.murk);
@@ -845,6 +875,7 @@ export default {
         if (a <= 0.02) continue;
         const lamp = a * (1 - smoothstep(lampAt[i] - 0.04, lampAt[i] + 0.04, env.light));
         if (lamp < 0.02) continue;
+        any = true;
         gctx.globalAlpha = lamp * (0.42 + 0.3 * env.murk);
         gctx.drawImage(warmGlow, colX(i % 9) + WW / 2 - size / 2, rowY((i / 9) | 0) + WH / 2 - size / 2, size, size);
       }
@@ -860,6 +891,7 @@ export default {
       }
       // the shops
       if (night > 0.02) {
+        any = true;
         gctx.globalAlpha = night;
         paintDeli(gctx, true);
         gctx.globalAlpha = night * 0.5;
@@ -875,11 +907,13 @@ export default {
       // wet pavement holds the light
       const wetK = clamp(wetness * 1.4) * (0.35 + 0.65 * night);
       if (wetK > 0.02) {
+        any = true;
         gctx.globalAlpha = wetK * 0.9; gctx.drawImage(pinkGlow, 40, WALK - 40, 284, 240);
         gctx.globalAlpha = wetK * 0.8 * (0.3 + 0.7 * night); gctx.drawImage(warmGlow, 330, WALK - 50, 420, 260);
         gctx.globalAlpha = wetK * 0.7; gctx.drawImage(redGlow, 770, WALK - 40, 256, 230);
       }
       gctx.globalAlpha = 1;
+      css("glowV", glow.canvas, "visibility", any ? "visible" : "hidden");
     }
 
     const mound = (x0, x1, y, h) => {
@@ -962,7 +996,7 @@ export default {
           const dx = clamp(Math.tan(rel), -2.2, 2.2), dy = clamp(Math.tan((sh.alt * Math.PI) / 180) / Math.max(0.2, Math.cos(rel)), 0.2, 3.4);
           const key = Math.round(dx * 16) * 1000 + Math.round(dy * 16);
           if (key !== shKey) {
-            shKey = key; paintShadows(dx, dy);
+            shKey = key; shDx = dx; shDy = dy;
             PAL.shTop = Math.min(26, 3.4 * dy); PAL.shSide = clamp(dx * 3.4, -20, 20);
             palChanged = true;
           }
@@ -983,38 +1017,59 @@ export default {
         scrollX += (windX >= 0 ? 1 : -1) * (3 + ws * 2.4) * dt;
         matW.e = scrollX; matW.f = 30;
         matD.e = scrollX * 0.8 + 140; matD.f = 210;
-        patWw.setTransform(matW); patWf.setTransform(matW); patDw.setTransform(matD); patDf.setTransform(matD);
+        patWg.setTransform(matW); patWf.setTransform(matW); patDg.setTransform(matD); patDf.setTransform(matD);
 
-        // ---- windows ----
-        const cloudsShow = PAL.aW + PAL.aD > 0.02;
+        // ---- windows: the window layer is repainted whole only when the light
+        // or the fact changes; awake windows that are moving are redrawn singly
+        if (palChanged || winDirty) {
+          winDirty = false;
+          win.clear();
+          paintRoof();
+          if (sunS > 0.01) paintShadows(shDx, shDy, sunS);
+          drawn.fill(0);
+          palChanged = true;
+        }
+        let anyGlass = false;
         for (let i = 0; i < NWIN; i++) {
           const a = awake[i];
           if (a <= 0) {
-            if (drawn[i]) { wctx.clearRect(colX(i % 9) - 1, rowY((i / 9) | 0) - 1, WW + 2, WH + 2); drawn[i] = 0; }
+            if (drawn[i]) { drawn[i] = 0; winDirty = true; } // repaint the wall it was on, next frame
             continue;
           }
           const lamp = 1 - smoothstep(lampAt[i] - 0.04, lampAt[i] + 0.04, light);
-          if (drawn[i] === 2 && a >= 1 && !palChanged && !(lamp < 0.995 && (cloudsShow || flash > 0 || env.lastFlash > 0)) && !(vig[i] && lamp > 0.4)) continue;
-          drawWin(i, a, lamp, s, flash);
+          if (lamp < 0.995) anyGlass = true;
+          if (drawn[i] === 2 && a >= 1 && !palChanged) continue;
+          drawWin(i, a, lamp);
           drawn[i] = a >= 1 ? 2 : 1;
         }
-        env.lastFlash = flash;
+        // the layer behind the fronts: sky above the roof, sky in the panes.
+        // Cloud drifts slowly, so it is redrawn on every other frame.
+        if (s.frame % 2 === 0 || palChanged || moving || jumped || flash > 0 || lastFlash > 0) {
+          glassL.clear();
+          const starA = (1 - smoothstep(0.02, 0.3, dl)) * (1 - cloudK) * (1 - murk);
+          if (starA > 0.02) {
+            gctx2.globalAlpha = starA * 0.9; gctx2.fillStyle = PAL.star; gctx2.beginPath();
+            for (let i = 0; i < 40; i++) gctx2.rect(stars[i * 3], stars[i * 3 + 1], stars[i * 3 + 2], stars[i * 3 + 2]);
+            gctx2.fill();
+          }
+          if (PAL.aW > 0.01) { gctx2.globalAlpha = PAL.aW; gctx2.fillStyle = patWg; gctx2.fillRect(0, 0, W, ROOF); }
+          if (PAL.aD > 0.01) { gctx2.globalAlpha = PAL.aD * 0.8; gctx2.fillStyle = patDg; gctx2.fillRect(0, 0, W, ROOF); }
+          gctx2.globalAlpha = 1;
+          if (anyGlass) {
+            for (let i = 0; i < NWIN; i++) {
+              const a = awake[i];
+              if (a <= 0 || 1 - smoothstep(lampAt[i] - 0.04, lampAt[i] + 0.04, light) >= 0.995) continue;
+              drawGlass(i, a, flash);
+            }
+          }
+        }
+        lastFlash = flash;
 
         const gk = digitVersion * 7 + (moving ? s.frame : 0);
         if (palChanged || gk !== glowKey) { glowKey = gk; paintGlow(s, env); }
 
         // ---- the fx layer: sky, roof, weather, street ----
         fx.clear();
-        // stars, and cloud crossing the strip of sky above the roof
-        const starA = (1 - smoothstep(0.02, 0.3, dl)) * (1 - cloudK) * (1 - murk);
-        if (starA > 0.02) {
-          fctx.globalAlpha = starA * 0.9; fctx.fillStyle = PAL.star; fctx.beginPath();
-          for (let i = 0; i < 40; i++) fctx.rect(stars[i * 3], stars[i * 3 + 1], stars[i * 3 + 2], stars[i * 3 + 2]);
-          fctx.fill();
-        }
-        if (PAL.aW > 0.01) { fctx.globalAlpha = PAL.aW; fctx.fillStyle = patWf; fctx.fillRect(0, 0, W, ROOF); }
-        if (PAL.aD > 0.01) { fctx.globalAlpha = PAL.aD * 0.8; fctx.fillStyle = patDf; fctx.fillRect(0, 0, W, ROOF); }
-        fctx.globalAlpha = 1;
         // steam off the roof when it is cold
         const steamK = smoothstep(46, 26, w.temp);
         if (steamK > 0.02) {
@@ -1028,22 +1083,15 @@ export default {
           }
           fctx.globalAlpha = 1;
         }
-        // water tower, vent, billboard
-        fctx.fillStyle = PAL.tower; fctx.fill(roofPath);
-        fctx.fillStyle = PAL.towerHi; fctx.fill(hoops);
-        if (hasFact) {
-          fctx.fillStyle = PAL.tower; fctx.fill(lampArms);
-          fctx.fillStyle = PAL.board; fctx.fillRect(BOARD_X, BOARD_Y, BOARD_W, BOARD_H);
-          fctx.strokeStyle = PAL.boardLine; fctx.lineWidth = 2; fctx.strokeRect(BOARD_X + 7, BOARD_Y + 7, BOARD_W - 14, BOARD_H - 14);
-          if (PAL.night > 0.02) {
-            fctx.save(); fctx.beginPath(); fctx.rect(BOARD_X, BOARD_Y, BOARD_W, BOARD_H); fctx.clip();
-            fctx.globalAlpha = PAL.night * 0.4;
-            for (let k = 0; k < 4; k++) fctx.drawImage(paleGlow, lampXs[k] - 150, BOARD_Y - 120, 300, 260);
-            fctx.restore(); fctx.globalAlpha = 1;
-          }
-        } else { fctx.fillStyle = PAL.lattice; fctx.fill(lattice); }
         // fog passing in front of the wall
         if (murk > 0.05 && PAL.fogA > 0.02) { fctx.globalAlpha = Math.min(0.2, PAL.fogA * 0.4); fctx.fillStyle = patWf; fctx.fillRect(0, 0, W, SHOP); fctx.globalAlpha = 1; }
+
+        // the small lives in three of the lit rooms
+        for (let i = 0; i < NWIN; i++) {
+          if (!vig[i] || awake[i] < 1) continue;
+          const lamp = 1 - smoothstep(lampAt[i] - 0.04, lampAt[i] + 0.04, light);
+          if (lamp > 0.4) drawVig(i, lamp, t);
+        }
 
         // the deli awning; its valance flaps with the wind
         fctx.fillStyle = PAL.awn;
@@ -1062,24 +1110,40 @@ export default {
         fctx.lineTo(AWN_X1, AWN_B); fctx.closePath(); fctx.fill();
         fctx.fillStyle = PAL.pipe; fctx.fillRect(AWN_X0, AWN_B - 1.5, AWN_X1 - AWN_X0, 3);
 
-        // curtains out of the open windows on a warm day
+        // Sheer curtains in the open windows on a warm day. The cloth fills the
+        // open lower sash (so the digit stays bright) and the real wind carries
+        // it out over the brick on the downwind side, rising as it strengthens.
         if (env.openK > 0.02) {
-          const dir = windX >= 0 ? 1 : -1, lift = clamp(ws / 24);
-          fctx.fillStyle = PAL.curtain; fctx.globalAlpha = 0.94; fctx.beginPath();
-          for (let i = 0; i < NWIN; i++) {
-            if (!isOpen[i] || awake[i] < 1) continue;
-            const x = colX(i % 9), y = rowY((i / 9) | 0);
-            const L = (16 + Math.min(72, ws * 3.4)) * env.openK * (0.75 + 0.5 * rank[i * 3]);
-            const xa = dir > 0 ? x + WW - 12 : x + 12, y0 = y + WH * 0.52, y1 = y + WH - 5;
-            const p = t * (1.5 + ws * 0.08) + i;
-            const tx0 = xa + dir * L, ty0 = y0 + (1 - lift) * 20 + Math.sin(p) * (2 + ws * 0.22), ty1 = y1 + (1 - lift) * 12 + Math.sin(p + 1.1) * (3 + ws * 0.28);
-            fctx.moveTo(xa, y0);
-            fctx.quadraticCurveTo(xa + dir * L * 0.5, y0 + Math.sin(p + 2) * 4 - 5 * lift, tx0, ty0);
-            fctx.lineTo(tx0 - dir * 5, ty1);
-            fctx.quadraticCurveTo(xa + dir * L * 0.45, y1 + Math.sin(p + 0.6) * 4 + 5, xa - dir * 14, y1);
-            fctx.closePath();
+          const dir = windX >= 0 ? 1 : -1, blow = clamp(ws / 22);
+          const gw = WW - 2 * FR, gh = WH - 2 * FR;
+          fctx.fillStyle = PAL.curtain; fctx.globalAlpha = 0.93; fctx.beginPath();
+          for (let pass = 0; pass < 2; pass++) {
+            for (let i = 0; i < NWIN; i++) {
+              if (!isOpen[i] || awake[i] < 1) continue;
+              const gx = colX(i % 9) + FR, gy = rowY((i / 9) | 0) + FR;
+              const y0 = gy + gh * 0.5 + 1.5, y1 = gy + gh, h = y1 - y0;
+              const xe = dir > 0 ? gx + gw : gx, xi = dir > 0 ? gx : gx + gw;
+              const L = (6 + 44 * blow) * env.openK * (0.8 + 0.4 * rank[i * 3]);
+              const p = t * (1.1 + ws * 0.07) + i * 1.7;
+              const lift = blow * (7 + 3 * Math.sin(p * 0.6));
+              const ax = xe + dir * L, ay = y0 - lift + Math.sin(p) * (1 + blow * 2);
+              const bx = xe + dir * L * 0.82, by = y0 - lift + h * (0.85 - 0.3 * blow) + Math.sin(p + 1.3) * (1.5 + blow * 3);
+              if (pass === 0) {
+                fctx.moveTo(xi, y0); fctx.lineTo(xe, y0);
+                fctx.quadraticCurveTo(xe + dir * L * 0.45, y0 - lift * 0.4 + Math.sin(p + 0.5) * 2, ax, ay);
+                fctx.quadraticCurveTo(ax + dir * 4, (ay + by) / 2, bx, by);
+                fctx.bezierCurveTo(xe + dir * L * 0.55, by + 4 * Math.sin(p + 2.1), xe + dir * L * 0.2, y1 + 1, xe, y1);
+                fctx.lineTo(xi, y1); fctx.closePath();
+              } else {
+                // one soft fold running out along the cloth
+                fctx.moveTo(xi + dir * gw * 0.35, y1);
+                fctx.quadraticCurveTo(xe, y0 + h * 0.45, (ax + bx) / 2, (ay + by) / 2 + 2);
+              }
+            }
+            if (pass === 0) { fctx.fill(); fctx.beginPath(); }
+            else { fctx.strokeStyle = PAL.curtainFold; fctx.lineWidth = 1.6; fctx.globalAlpha = 0.5; fctx.stroke(); }
           }
-          fctx.fill(); fctx.globalAlpha = 1;
+          fctx.globalAlpha = 1;
         }
 
         // snow lying on every ledge
@@ -1196,6 +1260,7 @@ export default {
           put("factL", factL, tx_.factLabel);
           put("factV", factV, tx_.factValue);
           hasFact = tx_.factValue !== "";
+          winDirty = true;
           factEl.style.display = hasFact ? "flex" : "none";
           if (hasFact) {
             // one line if it fits large, otherwise two lines

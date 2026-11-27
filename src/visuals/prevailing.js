@@ -18,7 +18,7 @@ import { W, clamp, lerp, smoothstep, mix, adjust, oklch, toOklch, rng, hash, el,
 const FIELD_H = 1340; // the lines cover the frame down to here; the block of type is below
 const TAB_H = 126; // the AM/PM tab stands this far up out of the block
 const PITCH = 21; // distance between lines
-const STEP = 8; // sampling along a line
+const STEP = 11; // sampling along a line
 const CELL = 4; // the digit mask is this coarse
 const MC = Math.ceil(W / CELL);
 const MR = Math.ceil(FIELD_H / CELL);
@@ -112,7 +112,35 @@ export default {
     }
     let cur = null; // the mask in force
     let old = null; // the one it is replacing, while the front crosses
-    let halo = null; // a wide blur of the same figures: where the lines go taut
+    // A wide blur of the same figures: where the lines go taut. Blurred here in
+    // plain arithmetic (two box passes each way) rather than by the canvas, so a
+    // fast-running clock that changes the minute every frame stays cheap.
+    const halo = { cols: MC, rows: MR, data: new Uint8Array(MC * MR) };
+    const blurA = new Float32Array(MC * MR);
+    const blurB = new Float32Array(MC * MR);
+    const boxPass = (src, dst, len, count, stride, step, r) => {
+      // a running-sum box blur of radius r along `count` rows of `len` cells
+      const inv = 1 / (2 * r + 1);
+      for (let row = 0; row < count; row++) {
+        const base = row * stride;
+        let acc = 0;
+        for (let k = -r; k <= r; k++) acc += src[base + clamp(k, 0, len - 1) * step];
+        for (let k = 0; k < len; k++) {
+          dst[base + k * step] = acc * inv;
+          acc += src[base + Math.min(len - 1, k + r + 1) * step] - src[base + Math.max(0, k - r) * step];
+        }
+      }
+    };
+    const makeHalo = (m) => {
+      const d = m.data;
+      for (let i = 0; i < d.length; i++) blurA[i] = d[i];
+      for (let pass = 0; pass < 2; pass++) {
+        boxPass(blurA, blurB, MC, MR, MC, 1, 6); // along rows
+        boxPass(blurB, blurA, MR, MC, 1, MC, 6); // down columns
+      }
+      const h = halo.data;
+      for (let i = 0; i < h.length; i++) h[i] = blurA[i] > 255 ? 255 : blurA[i];
+    };
     let maskKey = "";
     const coverage = (m, x, y) => {
       // bilinear lookup, 0..1
@@ -283,12 +311,12 @@ export default {
         if (key !== maskKey) {
           old = maskKey && !jumped ? cur : null;
           cur = digits(tx.hh, tx.mm, 1.5); // mask() returns fresh data each time, so both can be held
-          halo = digits(tx.hh, tx.mm, 9);
+          makeHalo(cur);
           frontAt = old ? s.t : -1e9;
           maskKey = key;
         }
         if (jumped) old = null;
-        frontS = -HALF - FRONT_W * 1.3 + (s.t - frontAt) * 400;
+        frontS = -HALF - FRONT_W * 1.3 + (s.t - frontAt) * 480;
         frontOn = old != null && frontS < HALF + FRONT_W * 1.3;
         if (!frontOn) old = null;
 
@@ -390,7 +418,7 @@ export default {
         }
 
         const { ctx } = field;
-        field.clear();
+        ctx.clearRect(0, 0, W, FIELD_H + 4); // nothing is ever drawn below the field
         ctx.save();
         ctx.beginPath();
         ctx.rect(0, 0, W, FIELD_H);

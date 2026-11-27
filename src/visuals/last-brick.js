@@ -116,7 +116,7 @@ function modelSky(ms, cloud, bearing) {
 }
 
 // How much of the reachable sky brick should still stand, p of the way through the quarter hour.
-const keepAt = (p) => 1 - 0.8 * Math.pow(clamp(p), 0.72);
+const keepAt = (p) => 0.86 - 0.68 * Math.pow(clamp(p), 0.72);
 
 const TRAIL_RAMP = ramp([[0, "#9fd4ff"], [0.42, "#f3ebd9"], [0.72, "#ffc56e"], [1, "#ff5f2e"]]);
 
@@ -128,17 +128,17 @@ const CSS = `
 .lb-date { position: absolute; z-index: 6; left: 76px; top: 46px; font-size: 50px; line-height: 1; white-space: nowrap; letter-spacing: 0.04em; }
 .lb-rule { position: absolute; z-index: 6; left: ${WX}px; width: ${WR - WX}px; height: 2px; background: currentColor; opacity: 0.22; }
 .lb-horizon { position: absolute; z-index: 6; left: 0; width: ${W}px; top: ${FLOOR}px; height: 4px; background: currentColor; opacity: 0.5; }
-.lb-bed { position: absolute; z-index: 0; left: ${WX}px; top: ${WY}px; width: ${COLS * BW}px; height: ${ROWS * BH}px; opacity: 0.16;
-  background-image: linear-gradient(to bottom, rgba(0,0,0,0.9) 3px, transparent 3px), linear-gradient(to right, rgba(0,0,0,0.9) 2px, transparent 2px);
-  background-size: ${BW}px ${BH}px; background-position: -1px -1px; }
 .lb-fog { position: absolute; z-index: 3; left: 0; top: 0; width: ${W}px; height: ${WB + 60}px; overflow: hidden; opacity: 0; display: none;
   background: linear-gradient(to bottom, var(--fog) 0%, var(--fog) 30%, transparent 92%); }
 .lb-fog i { position: absolute; display: block; background: radial-gradient(closest-side, var(--fog) 0%, var(--fog) 35%, transparent 100%); will-change: transform; }
 .lb-floor { position: absolute; z-index: 6; left: 76px; top: ${FLOOR + 40}px; width: 928px; font-family: "Jersey 10", "Silkscreen", monospace; text-transform: none; }
 .lb-a { display: flex; align-items: flex-end; height: 136px; }
 .lb-temp { font-size: 236px; line-height: 136px; height: 136px; white-space: nowrap; letter-spacing: 0.01em; }
-.lb-cw { margin-left: 44px; padding-bottom: 6px; min-width: 0; }
-.lb-cond { font-size: 88px; line-height: 64px; white-space: nowrap; }
+.lb-cw { margin-left: 44px; padding-bottom: 2px; min-width: 0; }
+.lb-temp.nd { font-family: "Silkscreen", monospace; font-size: 150px; line-height: 136px; }
+.lb-cond { font-size: 88px; line-height: 64px; height: 64px; white-space: nowrap; }
+.lb-au { display: flex; align-items: baseline; margin-top: 18px; height: 50px; white-space: nowrap; }
+.lb-au .lb-v { margin: 0 44px 0 14px; line-height: 50px; font-size: 72px; }
 .lb-b { position: relative; height: 104px; margin-top: 44px; }
 .lb-cell { position: absolute; top: 0; white-space: nowrap; }
 .lb-k { font-family: "Silkscreen", monospace; text-transform: uppercase; font-size: 28px; line-height: 22px; letter-spacing: 0.06em; color: var(--dim, #9a9484); }
@@ -174,7 +174,6 @@ export default {
       }
     }
     let starA = 0;
-    wrap.append(el("div", { class: "lb-bed" }));
     const air = canvas2d(wrap, { adaptive: true });
     const wall = canvas2d(wrap, { maxScale: 2 });
     const fogBlobs = [0, 1, 2, 3].map(() => el("i"));
@@ -202,15 +201,17 @@ export default {
       return { k, v, node: el("div", { class: "lb-cell", style: { left: `${(col - 1) * BW}px` } }, k, v) };
     };
     const sunC = cell(1, "");
-    const moonC = cell(6, "Moon");
-    const airC = cell(14, "Air");
-    const uvC = cell(16, "UV");
+    const moonC = cell(7, "Moon");
+    const airK = el("div", { class: "lb-k", text: "Air" });
+    const airV = el("div", { class: "lb-v" });
+    const uvK = el("div", { class: "lb-k", text: "UV" });
+    const uvV = el("div", { class: "lb-v" });
     const factK = el("div", { class: "lb-k" });
     const factV = el("div", { class: "lb-fv" });
     const factEl = el("div", { class: "lb-fact" }, factK, factV);
     const floorEl = el("div", { class: "lb-floor" },
-      el("div", { class: "lb-a" }, tempEl, el("div", { class: "lb-cw" }, condEl)),
-      el("div", { class: "lb-b" }, sunC.node, moonC.node, airC.node, uvC.node),
+      el("div", { class: "lb-a" }, tempEl, el("div", { class: "lb-cw" }, condEl, el("div", { class: "lb-au" }, airK, airV, uvK, uvV))),
+      el("div", { class: "lb-b" }, sunC.node, moonC.node),
       factEl);
     wrap.append(
       dateEl,
@@ -226,21 +227,22 @@ export default {
     litCanvas.width = COLS * BW;
     litCanvas.height = ROWS * BH;
     const lit = litCanvas.getContext("2d");
-    const POOL = 440;
+    const POOL = 480; // the lantern's reach, in stage units; it is cut at half resolution
+    const PH = POOL / 2;
     const poolCanvas = document.createElement("canvas");
-    poolCanvas.width = poolCanvas.height = POOL;
+    poolCanvas.width = poolCanvas.height = PH;
     const pool = poolCanvas.getContext("2d");
     const maskCanvas = document.createElement("canvas");
-    maskCanvas.width = maskCanvas.height = POOL;
+    maskCanvas.width = maskCanvas.height = PH;
     {
       const m = maskCanvas.getContext("2d");
-      const g = m.createRadialGradient(POOL / 2, POOL / 2, 0, POOL / 2, POOL / 2, POOL / 2);
+      const g = m.createRadialGradient(PH / 2, PH / 2, 0, PH / 2, PH / 2, PH / 2);
       g.addColorStop(0, "rgba(0,0,0,1)");
       g.addColorStop(0.25, "rgba(0,0,0,0.8)");
       g.addColorStop(0.6, "rgba(0,0,0,0.28)");
       g.addColorStop(1, "rgba(0,0,0,0)");
       m.fillStyle = g;
-      m.fillRect(0, 0, POOL, POOL);
+      m.fillRect(0, 0, PH, PH);
     }
     const haloCanvas = document.createElement("canvas");
     haloCanvas.width = haloCanvas.height = 128;
@@ -386,7 +388,7 @@ export default {
       kind[i] = k;
       cap[i] = 0;
       if (i + COLS < NB) cap[i + COLS] = 0;
-      if (live) fresh[i] = 0.55;
+      if (live && k) fresh[i] = 0.55;
       markCell(i);
     }
     function schedule(i, k, delay) {
@@ -398,10 +400,11 @@ export default {
         qn++;
       }
     }
-    function relayCells(c0, r0, w, h, rowGap, colGap) {
+    function relayCells(c0, r0, w, h, rowGap, colGap, withBreach) {
       for (let r = h - 1; r >= 0; r--) for (let c = 0; c < w; c++) {
         const i = (r0 + r) * COLS + c0 + c;
-        schedule(i, steel[i] ? 2 : 1, (h - 1 - r) * rowGap + c * colGap);
+        const k = steel[i] ? 2 : withBreach && breach[i] ? 0 : 1;
+        if (k || kind[i] !== 2) schedule(i, k, (h - 1 - r) * rowGap + c * colGap);
       }
     }
     // How long is the run of cells between steel that (r, c) sits in? The mason
@@ -761,38 +764,44 @@ export default {
     // the top course), along a seeded, uneven grain. Leaves `goal` of the
     // reachable sky brick standing.
     const pcCost = new Float32Array(NB);
-    const pcDone = new Uint8Array(NB);
-    function preCarve(goal, q) {
+    const breach = new Uint8Array(NB); // the cells such a cavern takes, from a whole wall
+    function planCarve(goal, q) {
       let n = Math.round(reachTotal * (1 - goal));
       pcCost.fill(1e9);
-      pcDone.fill(0);
-      const wgt = (i) => 0.25 + 2.2 * hash(i, seed + q * 13) ** 2;
+      breach.fill(0);
+      const sd = seed + q * 13;
       for (let c = 0; c < COLS; c++) {
         const i = (ROWS - 1) * COLS + c;
-        if (reach[i]) pcCost[i] = wgt(i);
+        if (reach[i]) pcCost[i] = 0.25 + 2.2 * hash(i, sd) ** 2;
       }
       let top = false;
       while (n > 0) {
         let best = -1;
         let bc = 1e8;
-        for (let i = 0; i < NB; i++) if (!pcDone[i] && pcCost[i] < bc) { bc = pcCost[i]; best = i; }
+        for (let i = 0; i < NB; i++) if (!breach[i] && pcCost[i] < bc) { bc = pcCost[i]; best = i; }
         if (best < 0) break;
-        pcDone[best] = 1;
-        if (kind[best] === 1) { kind[best] = 0; n--; }
+        breach[best] = 1;
+        n--;
         const c = best % COLS;
         const r = (best / COLS) | 0;
-        const relax = (j) => {
-          if (!pcDone[j] && reach[j] && !steel[j]) pcCost[j] = Math.min(pcCost[j], bc + wgt(j));
-        };
-        if (c > 0) relax(best - 1);
-        if (c < COLS - 1) relax(best + 1);
-        if (r > 0) relax(best - COLS);
-        else if (!top) {
-          top = true;
-          for (let k = 0; k < COLS; k++) relax(k);
+        for (let d = 0; d < 4; d++) {
+          let j = -1;
+          if (d === 0 && c > 0) j = best - 1;
+          else if (d === 1 && c < COLS - 1) j = best + 1;
+          else if (d === 2 && r < ROWS - 1) j = best + COLS;
+          else if (d === 3) j = r > 0 ? best - COLS : -1;
+          if (j >= 0 && !breach[j] && reach[j] && !steel[j]) pcCost[j] = Math.min(pcCost[j], bc + 0.25 + 2.2 * hash(j, sd) ** 2);
         }
-        if (r < ROWS - 1) relax(best + COLS);
+        if (r === 0 && !top) {
+          // through to the gap above the wall: the whole top course is open to it
+          top = true;
+          for (let k = 0; k < COLS; k++) if (!breach[k] && reach[k] && !steel[k]) pcCost[k] = Math.min(pcCost[k], bc + 0.25 + 2.2 * hash(k, sd) ** 2);
+        }
       }
+    }
+    function preCarve(goal, q) {
+      planCarve(goal, q);
+      for (let i = 0; i < NB; i++) if (breach[i] && kind[i] === 1) kind[i] = 0;
     }
 
     // Lay the whole wall for this instant and play the quarter hour so far.
@@ -802,6 +811,7 @@ export default {
       buildSteel(steel, shownH, shownM, shownA);
       computeReach();
       for (let i = 0; i < NB; i++) kind[i] = steel[i] ? 2 : 1;
+      preCarve(keepAt(0), Math.floor(s.ms / QUARTER));
       cap.fill(0);
       fresh.fill(0);
       glint.fill(0);
@@ -826,12 +836,12 @@ export default {
       const elapsed = (((s.ms % QUARTER) + QUARTER) % QUARTER) / 1000;
       const m0 = Math.floor(c.m / 15) * 15;
       // Most of the quarter hour so far is carved analytically (quick); only
-      // the last 45 seconds are actually played, so the ball's own marks,
+      // the last 30 seconds are actually played, so the ball's own marks,
       // the paddle and the shards are all where they would be.
-      const pre = Math.max(0, elapsed - 45);
+      const pre = Math.max(0, elapsed - 30);
       instant = true;
       if (pre > 0) {
-        preCarve(keepAt(pre / 900), q);
+        preCarve(keepAt(pre / 900), q); // a deeper cavern along the same grain
         relayCells(SLOT_B, MIN_ROW, 7, 15, 0, 0);
         if ((m0 + Math.floor(pre / 60)) % 10 === 0) relayCells(SLOT_A, MIN_ROW, 7, 15, 0, 0);
       }
@@ -865,7 +875,12 @@ export default {
       steel.set(steelNext);
       computeReach();
       instant = now;
-      if (whole) relayCells(0, 0, COLS, ROWS, 0.045, 0.004);
+      if (whole) {
+        // a new quarter hour: the mason lays the whole wall again, from the
+        // bottom up, leaving the breach the ball will start from
+        planCarve(keepAt(0), Math.floor(s.ms / QUARTER));
+        relayCells(0, 0, COLS, ROWS, 0.045, 0.004, true);
+      }
       else {
         if (tens) relayCells(SLOT_A, MIN_ROW, 7, 15, 0.08, 0.01);
         if (ones) relayCells(SLOT_B, MIN_ROW, 7, 15, 0.08, 0.01);
@@ -1131,7 +1146,8 @@ export default {
         const dk = Math.round(smoothstep(0.03, 0.55, dl) * 40) / 40;
         const cloud = clamp(s.weather.cloud / 100);
         const top = mix(NIGHT_SKY, adjust(s.sky.mean, { l: 0.3, c: (v) => Math.min(v * 0.9, 0.075) }), dk);
-        const bot = mix(mix("#121a30", "#2b1c18", cloud * 0.85), adjust(s.sky.mean, { l: 0.43, c: (v) => Math.min(v * 1.1, 0.09) }), dk);
+        // (low down it is the western sky: the studio looks across the river at Manhattan)
+        const bot = mix(mix("#121a30", "#2b1c18", cloud * 0.85), adjust(mix(s.sky.mean, s.sky.west, 0.7), { l: 0.43, c: (v) => Math.min(v * 1.15, 0.1) }), dk);
         ground = mix(NIGHT_GROUND, adjust(s.sky.mean, { l: 0.18, c: (v) => Math.min(v, 0.03) }), dk);
         skyEl.style.background = `linear-gradient(to bottom, ${top} 0%, ${mix(top, bot, 0.45)} 50%, ${bot} 100%)`;
         groundEl.style.background = `linear-gradient(to bottom, ${mix(ground, bot, 0.25)} 0px, ${ground} 160px, ${ground} 100%)`;
@@ -1147,7 +1163,7 @@ export default {
       }
 
       // ----- repaint what changed: single bricks at once, whole courses a few per frame -----
-      let budget = jumped || first ? ROWS : 5;
+      let budget = jumped ? ROWS : 8;
       for (let r = 0; r < ROWS && budget > 0; r++) {
         if (!rowDirty[r]) continue;
         rowDirty[r] = 0;
@@ -1163,67 +1179,73 @@ export default {
 
       // ----- weather, behind the wall -----
       const ac = air.ctx;
-      air.clear();
-      if (starA > 0.02) {
-        // two magnitudes, one fill each
-        ac.fillStyle = "#dfe6ff";
-        for (let m = 0; m < 2; m++) {
-          ac.globalAlpha = starA * (m ? 0.95 : 0.45);
-          ac.beginPath();
-          for (let i = m; i < STN; i += 2) ac.rect(stX[i], stY[i], stZ[i], stZ[i]);
-          ac.fill();
+      const airBusy = env.rain > 0.01 || env.snow > 0.01;
+      const airKey = Math.round(starA * 40) + air.canvas.width * 64;
+      if (airBusy || airKey !== shown.airKey) {
+        // (a still, dry sky is drawn once, not every frame)
+        shown.airKey = airBusy ? -1 : airKey;
+        air.clear();
+        if (starA > 0.02) {
+          // two magnitudes, one fill each
+          ac.fillStyle = "#dfe6ff";
+          for (let m = 0; m < 2; m++) {
+            ac.globalAlpha = starA * (m ? 0.95 : 0.45);
+            ac.beginPath();
+            for (let i = m; i < STN; i += 2) ac.rect(stX[i], stY[i], stZ[i], stZ[i]);
+            ac.fill();
+          }
+          ac.globalAlpha = 1;
         }
-        ac.globalAlpha = 1;
-      }
-      if (env.rain > 0.01) {
-        const n = Math.min(RN, Math.round(70 + 300 * env.rain));
-        const slant = env.wind * 9;
-        ac.strokeStyle = rainCol;
-        ac.lineCap = "butt";
-        for (let pass = 0; pass < 2; pass++) {
-          ac.lineWidth = pass ? 3 : 2;
+        if (env.rain > 0.01) {
+          const n = Math.min(RN, Math.round(70 + 300 * env.rain));
+          const slant = env.wind * 9;
+          ac.strokeStyle = rainCol;
+          ac.lineCap = "butt";
+          for (let pass = 0; pass < 2; pass++) {
+            ac.lineWidth = pass ? 3 : 2;
+            ac.beginPath();
+            for (let i = pass; i < n; i += 2) {
+              const v = rV[i];
+              if (!jumped) {
+                rX[i] += slant * dt;
+                rY[i] += v * dt;
+              }
+              if (rY[i] > FLOOR || (rY[i] > PAD_Y && rY[i] - v * dt <= PAD_Y && Math.abs(rX[i] - pad.x) < PAD_W / 2)) {
+                const onPad = rY[i] <= FLOOR;
+                spark(rX[i], onPad ? PAD_Y : FLOOR, vr.range(-70, 70) + slant * 0.2, vr.range(-170, -70), 0.28, 3, 2);
+                rX[i] = vr.range(-200, W + 200);
+                rY[i] = vr.range(-160, -20);
+                continue;
+              }
+              const k = rLen[i] / v;
+              ac.moveTo(rX[i], rY[i]);
+              ac.lineTo(rX[i] - slant * k, rY[i] - rLen[i]);
+            }
+            ac.stroke();
+          }
+        }
+        if (env.snow > 0.01) {
+          const n = Math.min(SN, Math.round(70 + 260 * env.snow));
+          ac.fillStyle = snowCol;
+          ac.globalAlpha = 0.85;
           ac.beginPath();
-          for (let i = pass; i < n; i += 2) {
-            const v = rV[i];
+          for (let i = 0; i < n; i++) {
             if (!jumped) {
-              rX[i] += slant * dt;
-              rY[i] += v * dt;
+              sX[i] += (env.wind * 7 + Math.sin(s.t * 1.3 + sP[i]) * 22) * dt;
+              sY[i] += sV[i] * dt;
             }
-            if (rY[i] > FLOOR || (rY[i] > PAD_Y && rY[i] - v * dt <= PAD_Y && Math.abs(rX[i] - pad.x) < PAD_W / 2)) {
-              const onPad = rY[i] <= FLOOR;
-              spark(rX[i], onPad ? PAD_Y : FLOOR, vr.range(-70, 70) + slant * 0.2, vr.range(-170, -70), 0.28, 3, 2);
-              rX[i] = vr.range(-200, W + 200);
-              rY[i] = vr.range(-160, -20);
-              continue;
+            if (sY[i] > FLOOR - 2) {
+              sY[i] = -10;
+              sX[i] = vr.range(-100, W + 100);
             }
-            const k = rLen[i] / v;
-            ac.moveTo(rX[i], rY[i]);
-            ac.lineTo(rX[i] - slant * k, rY[i] - rLen[i]);
+            if (sX[i] < -120) sX[i] += W + 240;
+            else if (sX[i] > W + 120) sX[i] -= W + 240;
+            const z = sS[i];
+            ac.rect(sX[i], sY[i], z, z);
           }
-          ac.stroke();
+          ac.fill();
+          ac.globalAlpha = 1;
         }
-      }
-      if (env.snow > 0.01) {
-        const n = Math.min(SN, Math.round(70 + 260 * env.snow));
-        ac.fillStyle = snowCol;
-        ac.globalAlpha = 0.85;
-        ac.beginPath();
-        for (let i = 0; i < n; i++) {
-          if (!jumped) {
-            sX[i] += (env.wind * 7 + Math.sin(s.t * 1.3 + sP[i]) * 22) * dt;
-            sY[i] += sV[i] * dt;
-          }
-          if (sY[i] > FLOOR - 2) {
-            sY[i] = -10;
-            sX[i] = vr.range(-100, W + 100);
-          }
-          if (sX[i] < -120) sX[i] += W + 240;
-          else if (sX[i] > W + 120) sX[i] -= W + 240;
-          const z = sS[i];
-          ac.rect(sX[i], sY[i], z, z);
-        }
-        ac.fill();
-        ac.globalAlpha = 1;
       }
 
       // ----- fog over the upper wall -----
@@ -1284,11 +1306,11 @@ export default {
           const sy = Math.round(b.y - WY - POOL / 2);
           if (sy > ROWS * BH || sy + POOL < 0) continue;
           pool.globalCompositeOperation = "copy";
-          pool.drawImage(litCanvas, -sx, -sy);
+          pool.drawImage(litCanvas, sx, sy, POOL, POOL, 0, 0, PH, PH);
           pool.globalCompositeOperation = "destination-in";
           pool.drawImage(maskCanvas, 0, 0);
-          fc.globalAlpha = dark * 0.9;
-          fc.drawImage(poolCanvas, sx + WX, sy + WY);
+          fc.globalAlpha = dark;
+          fc.drawImage(poolCanvas, sx + WX, sy + WY, POOL, POOL);
         }
         if (flash > 0.01) {
           fc.globalAlpha = dark * 0.34 * flash * (2 - flash);
@@ -1314,20 +1336,26 @@ export default {
         fc.fillStyle = snowCol;
         fc.fill();
       }
+      fc.fillStyle = "#fff8e6";
       for (let i = 0; i < NB; i++) {
+        let a = 0;
         if (fresh[i] > 0) {
-          fc.fillStyle = `rgba(255,248,230,${(0.5 * (fresh[i] / 0.55) ** 2).toFixed(3)})`;
-          fc.fillRect(WX + (i % COLS) * BW + 1, WY + ((i / COLS) | 0) * BH + 1, BW - 2, BH - 2);
+          const f = fresh[i] / 0.55;
+          a = 0.5 * f * f;
           fresh[i] -= dt;
         }
         if (glint[i] > 0) {
-          fc.fillStyle = `rgba(255,255,255,${(0.55 * (glint[i] / 0.3)).toFixed(3)})`;
-          fc.fillRect(WX + (i % COLS) * BW + 1, WY + ((i / COLS) | 0) * BH + 1, BW - 2, BH - 2);
+          a = Math.max(a, 0.55 * (glint[i] / 0.3));
           glint[i] -= dt;
         }
+        if (a > 0.01) {
+          fc.globalAlpha = a;
+          fc.fillRect(WX + (i % COLS) * BW + 1, WY + ((i / COLS) | 0) * BH + 1, BW - 2, BH - 2);
+        }
       }
+      fc.globalAlpha = 1;
 
-      // shards
+      // shards: lit by the ball they gleam in their full daylight glaze, even at night
       for (let j = 0; j < SH; j++) {
         if (shL[j] <= 0) continue;
         shL[j] -= dt;
@@ -1336,19 +1364,25 @@ export default {
         shX[j] += shVX[j] * dt;
         shY[j] += shVY[j] * dt;
         shA[j] += shVA[j] * dt;
-        if (shY[j] > FLOOR) {
-          shL[j] = 0;
-          continue;
+        if (shY[j] > FLOOR - 4) {
+          // lands on the horizon and lies there a moment
+          shY[j] = FLOOR - 4;
+          shVY[j] = 0;
+          shVX[j] *= 0.5;
+          shVA[j] = 0;
+          shA[j] = 0;
+          if (shL[j] > 0.6) shL[j] = 0.6;
         }
         const w = BW * shW[j];
-        fc.save();
-        fc.translate(shX[j], shY[j]);
-        fc.rotate(shA[j]);
+        const cs = Math.cos(shA[j]);
+        const sn = Math.sin(shA[j]);
+        fc.setTransform(cs, sn, -sn, cs, shX[j], shY[j]);
         fc.globalAlpha = Math.min(1, shL[j] * 2.2);
-        fc.fillStyle = colDim[shI[j]];
+        fc.fillStyle = colLit[shI[j]];
         fc.fillRect(-w / 2, -BH * 0.22, w, BH * 0.44);
-        fc.restore();
       }
+      fc.setTransform(1, 0, 0, 1, 0, 0);
+      fc.globalAlpha = 1;
       // small particles
       for (let kd = 0; kd < 3; kd++) {
         let any = false;
@@ -1376,6 +1410,18 @@ export default {
         }
       }
       fc.globalAlpha = 1;
+
+      // snow lying along the horizon, deeper the harder it comes down
+      if (env.snow > 0.01) {
+        const d = 3 + 9 * env.snow;
+        fc.fillStyle = snowCol;
+        fc.beginPath();
+        for (let k = 0; k < 90; k++) {
+          const h = Math.round(d * (0.55 + 0.45 * hash(k, 77)));
+          fc.rect(k * 12, FLOOR - h, 12, h + 1);
+        }
+        fc.fill();
+      }
 
       // the paddle
       {
@@ -1427,13 +1473,14 @@ export default {
       // ----- the readouts -----
       const tx = s.text;
       if (put("date", dateEl, tx.date)) fitText(dateEl, 928);
-      put("temp", tempEl, tx.temp);
-      put("cond", condEl, tx.condition);
+      const tch = put("temp", tempEl, tx.temp);
+      if (tch) tempEl.classList.toggle("nd", !/\d/.test(tx.temp)); // the no-data dash sits better in the title face
+      if (put("cond", condEl, tx.condition) || tch) fitText(condEl, 928 - 44 - tempEl.offsetWidth);
       put("sunK", sunC.k, tx.sunLabel);
       put("sunV", sunC.v, tx.sunValue);
       put("moon", moonC.v, tx.moon);
-      put("aqi", airC.v, tx.aqi);
-      put("uv", uvC.v, tx.uv);
+      put("aqi", airV, tx.aqi);
+      put("uv", uvV, tx.uv);
       if (shown.factOn !== (tx.factValue !== "")) {
         shown.factOn = tx.factValue !== "";
         factEl.style.display = shown.factOn ? "block" : "none";
@@ -1450,9 +1497,12 @@ export default {
       }
     }
 
-    // Finished from the first frame: lay the wall and play the quarter hour so far now.
+    // Lay the wall and play the quarter hour so far now; the glaze is fired
+    // and painted over the first few (unseen) frames, to keep mount() short.
     readEnv(state);
-    frame(state);
+    rebuild(state);
+    lastMs = state.ms;
+    lastQ = Math.floor(state.ms / QUARTER);
     return { frame };
   },
 };

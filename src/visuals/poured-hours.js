@@ -37,7 +37,7 @@ import { sunPosition } from "../lib/astro.js";
 
 const CELL = 6;
 const COLS = 180;
-const FLOOR = 282; // first row of the base; the simulation is rows 0..FLOOR-1
+const FLOOR = 280; // first row of the base; the simulation is rows 0..FLOOR-1
 const LEFT = 11; // 66 px
 const RIGHT = 169; // last column text may use (1014 px)
 const DATE_Y = 11;
@@ -49,6 +49,7 @@ const GH = 15;
 const DW = GW * U;
 const DH = GH * U;
 const SLOT_X = [11, 88];
+const CENTER_X = 49; // a lone hour digit, centred over the minutes and under the thread
 const THREAD_X = 81; // the thread is THREAD_X and THREAD_X + 1, the middle of the gap
 const TEMP_Y = 195;
 const CD_Y = 219;
@@ -76,6 +77,7 @@ const P_INK = P_LOOSE + 2;
 const P_WATER = P_INK + 2;
 const P_SNOW = P_WATER + 4;
 const P_SSPK = P_SNOW + 4; // dark and light grains in the sky sand
+const P_THREAD = P_SSPK + 2; // the seconds thread: the sky's colour, pushed to a glint
 const JIT = [-0.04, -0.013, 0.013, 0.04];
 
 // ----- the numerals: 13 x 15, each pixel 5 x 5 grains, corners cut at 45 degrees -----
@@ -208,10 +210,10 @@ const STYLE = `
 .ph-base { position: absolute; left: 0; right: 0; top: ${FLOOR * CELL}px; bottom: 0; box-sizing: border-box;
   border-top: ${CELL}px solid #555; background: #191715; color: #e9e1d2; font-family: "Pixelify Sans", monospace; z-index: 3; }
 .ph-slot { position: absolute; top: -${CELL}px; width: ${CELL * 3}px; height: ${CELL}px; background: #0c0b0a; }
-.ph-fact { position: absolute; left: ${LEFT * CELL}px; right: 66px; top: 30px; }
+.ph-fact { position: absolute; left: ${LEFT * CELL}px; right: 66px; top: 26px; }
 .ph-fl { font-weight: 600; font-size: 28px; line-height: 32px; letter-spacing: 0.1em; text-transform: uppercase; color: #b5ab9b; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; }
-.ph-fv { margin-top: 10px; font-weight: 400; font-size: 42px; line-height: 1.12; text-wrap: balance;
+.ph-fv { margin-top: 8px; font-weight: 500; font-size: 48px; line-height: 1.1; text-wrap: balance;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .ph-base.nofact .ph-fact { display: none; }
 `;
@@ -219,7 +221,7 @@ const STYLE = `
 export default {
   title: "Poured Hours",
   description: "A wall-sized falling-sand toy: the time is poured in sand, and the weather is poured on top of it.",
-  fonts: ["Pixelify Sans:wght@400;600"],
+  fonts: ["Pixelify Sans:wght@500;600"],
   fps: 30,
 
   mount(root, { state, seed }) {
@@ -280,7 +282,7 @@ export default {
       if (Math.abs(ew) > 0.12 || E.ws === 0) E.wdir = ew >= 0 ? 1 : -1;
       const gust = 0.5 + 0.5 * Math.sin(s.t * 0.37 + 1.3 * Math.sin(s.t * 0.11));
       const speed = w.wind + Math.max(0, w.gust - w.wind) * gust * gust * 0.8;
-      E.ws = clamp(speed / 30, 0, 1.4) * (0.5 + 0.5 * Math.abs(ew));
+      E.ws = clamp(speed / 30, 0, 1.4) * (0.7 + 0.3 * Math.abs(ew));
       E.temp = w.temp;
       E.cloud = clamp(w.cloud / 100);
       E.fog = w.fog || w.kind === "fog" ? 1 : clamp((2.5 - w.visibility) / 2.5) * 0.8;
@@ -288,7 +290,7 @@ export default {
       E.sun = s.daylight * (1 - 0.88 * Math.pow(E.cloud, 1.5)) * (f ? 0.25 : 1) * (1 - E.fog);
       const heat = clamp((w.temp - 84) / 16);
       E.lagP = 20 + Math.round(heat * 70); // of 256: how often a falling grain hesitates
-      E.driftP = Math.round(clamp(E.ws * 0.16) * 256);
+      E.driftP = Math.round(clamp(E.ws * 0.5, 0, 0.75) * 256);
       E.rainDrift = Math.round(clamp(E.ws * 0.42) * 256);
       E.snowDrift = Math.round(clamp(E.ws * 0.85, 0, 0.9) * 256);
       E.melt = clamp((w.temp - 34) / 14);
@@ -385,14 +387,20 @@ export default {
           lut[P_SKY + sl * NJ + j] = pack(L, lerp(ai * cs, ground[1], fogMix), lerp(bi * cs, ground[2], fogMix));
         }
       }
+      // the thread: the mean sky, but always well apart from the ground
+      const thL = fl ? Math.min(skyMean[0] - 0.25, Lg - 0.42) : Math.max(skyMean[0] + 0.2, Lg + 0.34);
+      const thC = Math.hypot(skyMean[1], skyMean[2]);
+      const thK = thC > 0.11 ? 0.11 / thC : thC < 0.04 ? 0.04 / Math.max(0.005, thC) : 1;
+      lut[P_THREAD] = pack(thL, skyMean[1] * thK, skyMean[2] * thK - (thC < 0.005 ? 0.04 : 0));
+      lut[P_THREAD + 1] = pack(thL + (fl ? 0.05 : -0.05), skyMean[1] * thK, skyMean[2] * thK - (thC < 0.005 ? 0.04 : 0));
       const sMid = lerp(Lg + 0.16, Lg - 0.25, fs);
       lut[P_SSPK] = pack(sMid - lerp(0.1, 0.2, fs), 0.004, 0.01);
       lut[P_SSPK + 1] = pack(sMid + 0.12, 0.002, 0.012);
 
       // the numerals' pigment, in four strata tones
       pigmentAt(E.temp, pig);
-      const baseL = fl ? Math.min(pig[0], Lg - 0.43) : Math.max(0.67, Lg + 0.47);
-      const baseC = fl ? pig[1] : Math.max(0.08, pig[1] * 0.7);
+      const baseL = fl ? Math.min(pig[0], Lg - 0.43) : Math.max(0.6, Lg + 0.42);
+      const baseC = fl ? pig[1] : Math.max(0.07, pig[1] * 0.58);
       for (let b = 0; b < 4; b++) {
         const T = TONES[b];
         const L = baseL + T[0] * (fl ? 1 : 0.8);
@@ -423,7 +431,7 @@ export default {
       const wC = fl ? 0.11 : 0.08;
       const wOff = [0, -0.03, 0.03, fl ? 0.12 : 0.16];
       for (let j = 0; j < 4; j++) lut[P_WATER + j] = pack(wL + wOff[j], wC * Math.cos(wHue), wC * Math.sin(wHue));
-      const sL = fl ? Math.max(0.99, Lg) : 0.82;
+      const sL = fl ? Math.max(0.99, Lg) : 0.76;
       for (let j = 0; j < 4; j++) lut[P_SNOW + j] = pack(sL - j * 0.016, -0.002, -0.01 - 0.004 * (1 - g));
 
       shadowPx = E.sun * fl > 0.02 ? pack(0.22, 0.012, 0.025, Math.round(52 * E.sun * fl)) : 0;
@@ -511,22 +519,26 @@ export default {
 
     // ----- the numerals -----
     const shown = [["", ""], ["", ""]];
+    const slotX = [[SLOT_X[0], SLOT_X[1]], [SLOT_X[0], SLOT_X[1]]];
     const rowY = (r) => (r ? MIN_Y : HOUR_Y);
 
     // Each pour lays down wavy strata, peaked like heaps, in the pigment's four tones.
-    const NB = 14;
-    const strata = [0, 1].map(() => ({ cum: new Float32Array(NB), amp: new Float32Array(NB), fr: new Float32Array(NB), ph: new Float32Array(NB), tone: new Uint8Array(NB + 1), wph: 0 }));
+    const NB = 16;
+    const strata = [0, 1].map(() => ({ off: new Float32Array(COLS * NB), tone: new Uint8Array(NB + 1), wph: 0 }));
     function newStrata(r) {
       const S = strata[r];
       let acc = -3 - (rnd() % 4);
       let prev = rnd() & 3;
       S.tone[0] = prev;
       for (let k = 0; k < NB; k++) {
-        acc += 4 + (rnd() % 10);
-        S.cum[k] = acc;
-        S.amp[k] = 1.5 + (rnd() % 100) / 22;
-        S.fr[k] = 1 / (12 + (rnd() % 26));
-        S.ph[k] = (rnd() % 1000) / 1000;
+        acc += rnd() % 4 === 0 ? 2 + (rnd() % 2) : 5 + (rnd() % 8); // now and then a thin seam
+        const amp = 1 + (rnd() % 100) / 30;
+        const fr = 1 / (18 + (rnd() % 40));
+        const ph = (rnd() % 1000) / 1000;
+        const fr2 = 1 / (9 + (rnd() % 14));
+        const ph2 = (rnd() % 628) / 100;
+        const a2 = 0.25 + (rnd() % 100) / 140;
+        for (let x = 0; x < COLS; x++) S.off[x * NB + k] = acc + amp * (tri(x * fr + ph) * 2 - 1) + a2 * Math.sin(x * fr2 + ph2);
         prev = (prev + 1 + (rnd() % 3)) & 3;
         S.tone[k + 1] = prev;
       }
@@ -535,8 +547,9 @@ export default {
     function toneAt(r, x, y) {
       const S = strata[r];
       const h = rowY(r) + DH - 1 - y;
+      const o = x * NB;
       let b = 0;
-      for (let k = 0; k < NB; k++) if (h > S.cum[k] + S.amp[k] * (tri(x * S.fr[k] + S.ph[k]) * 2 - 1)) b = k + 1;
+      for (let k = 0; k < NB; k++) if (h > S.off[o + k]) b = k + 1;
       return S.tone[b];
     }
     const pigCol = (r, x, y) => {
@@ -551,7 +564,7 @@ export default {
       const y0 = rowY(r);
       for (let sl = 0; sl < 2; sl++) {
         if (!shown[r][sl]) continue;
-        const x0 = SLOT_X[sl];
+        const x0 = slotX[r][sl];
         for (let cx = 0; cx < DW; cx++) {
           topY[cx] = -1;
           for (let cy = 0; cy < DH; cy++) {
@@ -567,11 +580,11 @@ export default {
           if (topY[cx] === topY[a]) continue;
           const len = cx - a;
           const ty = topY[a];
-          if (ty > 3 && len >= 4 && rnd() % 100 < 80) {
+          if (ty > 3 && len >= 4 && rnd() % 100 < 90) {
             const c1 = a + (rnd() % len);
-            const h1 = 2 + (rnd() % 4);
-            const c2 = len > 24 ? a + (rnd() % len) : -99;
-            const h2 = 2 + (rnd() % 3);
+            const h1 = 3 + (rnd() % 5);
+            const c2 = len > 20 ? a + (rnd() % len) : -99;
+            const h2 = 2 + (rnd() % 5);
             for (let x = a; x < cx; x++) {
               const edge = Math.min(x - a + 1, cx - x);
               const h = Math.min(edge, Math.max(h1 - Math.abs(x - c1), h2 - Math.abs(x - c2)));
@@ -590,14 +603,15 @@ export default {
     }
 
     function glueSlot(r, slot, ch) {
-      const x0 = SLOT_X[slot];
+      if (!ch) return;
+      const x0 = slotX[r][slot];
       const y0 = rowY(r);
-      const m = ch ? GLYPH[ch] : null;
+      const m = GLYPH[ch];
       for (let cy = 0; cy < DH; cy++) {
         for (let cx = 0; cx < DW; cx++) {
           const i = (y0 + cy) * COLS + x0 + cx;
           ghost[i] = 0;
-          const v = m ? m[cy * DW + cx] : 0;
+          const v = m[cy * DW + cx];
           if (v && !(v === 2 && rnd() % 13 === 0)) {
             type[i] = T_GLUE;
             col[i] = pigCol(r, x0 + cx, y0 + cy);
@@ -609,10 +623,26 @@ export default {
 
     const LT = 10; // rows printed per pass of the spout
     const PASSES = Math.ceil(DH / LT) + 1;
-    const mkJob = (r) => ({ r, chg: [true, true], active: false, step0: 0, pr0: 0, n: 0, ptr: 0, keys: new Float64Array(2 * DW * DH), cr: [false, false], crumbling: false, x0: 0, x1: 0, dir0: 1, S: 40, hx: -20, stream: -1, leaving: false });
+    const mkJob = (r) => ({ r, ox0: SLOT_X[0], chg: [true, true], active: false, step0: 0, pr0: 0, n: 0, ptr: 0, keys: new Float64Array(2 * DW * DH), cr: [false, false], crumbling: false, x0: 0, x1: 0, dir0: 1, S: 40, hx: -20, stream: -1, leaving: false });
     const jobs = [mkJob(0), mkJob(1)];
 
+    // Clears whatever is left glued in a slot's box.
+    function clearBox(r, x0) {
+      const y0 = rowY(r);
+      for (let cy = 0; cy < DH; cy++) {
+        for (let cx = 0; cx < DW; cx++) {
+          const i = (y0 + cy) * COLS + x0 + cx;
+          if (type[i] === T_GLUE) type[i] = 0;
+        }
+      }
+      wake(y0 - 2, y0 + DH + 1);
+    }
     function finishJob(job) {
+      if (job.active && job.crumbling) {
+        if (job.cr[0]) clearBox(job.r, job.ox0);
+        if (job.cr[1]) clearBox(job.r, SLOT_X[1]);
+      }
+      job.crumbling = false;
       if (job.chg[0]) glueSlot(job.r, 0, shown[job.r][0]);
       if (job.chg[1]) glueSlot(job.r, 1, shown[job.r][1]);
       heapTops(job.r);
@@ -628,17 +658,21 @@ export default {
       job.leaving = false;
       let x0 = COLS;
       let x1 = 0;
+      const nx0 = want[1] === "" ? CENTER_X : SLOT_X[0];
+      const relayout = nx0 !== slotX[r][0];
+      job.ox0 = slotX[r][0];
+      slotX[r][0] = nx0;
       for (let sl = 0; sl < 2; sl++) {
         job.cr[sl] = false;
-        job.chg[sl] = want[sl] !== shown[r][sl];
-        if (want[sl] === shown[r][sl]) continue;
+        job.chg[sl] = relayout || want[sl] !== shown[r][sl];
+        if (!job.chg[sl]) continue;
         if (shown[r][sl]) {
           job.cr[sl] = true;
           job.crumbling = true;
         }
         if (want[sl]) {
-          x0 = Math.min(x0, SLOT_X[sl]);
-          x1 = Math.max(x1, SLOT_X[sl] + DW - 1);
+          x0 = Math.min(x0, slotX[r][sl]);
+          x1 = Math.max(x1, slotX[r][sl] + DW - 1);
         }
       }
       job.x0 = x0;
@@ -649,9 +683,9 @@ export default {
       newStrata(r);
       const wph = strata[r].wph;
       for (let sl = 0; sl < 2; sl++) {
-        if (want[sl] === shown[r][sl] || !want[sl]) continue;
+        if (!job.chg[sl] || !want[sl]) continue;
         const m = GLYPH[want[sl]];
-        const sx = SLOT_X[sl];
+        const sx = slotX[r][sl];
         for (let cy = 0; cy < DH; cy++) {
           for (let cx = 0; cx < DW; cx++) {
             const v = m[cy * DW + cx];
@@ -691,7 +725,7 @@ export default {
         const force = e > 50;
         for (let sl = 0; sl < 2; sl++) {
           if (!job.cr[sl]) continue;
-          const sx = SLOT_X[sl];
+          const sx = sl ? SLOT_X[1] : job.ox0;
           for (let y = y1; y > y1 - front; y--) {
             const row = y * COLS;
             for (let x = sx; x < sx + DW; x++) {
@@ -765,7 +799,14 @@ export default {
           shown[r][1] = want[1];
           newStrata(r);
           job.chg[0] = job.chg[1] = true;
-          for (let cy = 0; cy < DH; cy++) for (let x = 0; x < COLS; x++) ghost[(rowY(r) + cy) * COLS + x] = 0;
+          slotX[r][0] = want[1] === "" ? CENTER_X : SLOT_X[0];
+          for (let cy = 0; cy < DH; cy++) {
+            for (let x = 0; x < COLS; x++) {
+              const i = (rowY(r) + cy) * COLS + x;
+              ghost[i] = 0;
+              if (type[i] === T_GLUE) type[i] = 0;
+            }
+          }
           finishJob(job);
           continue;
         }
@@ -915,22 +956,41 @@ export default {
     let beadLeft = 0;
     let lastSec = -1;
     let hopAcc = 0;
+    let sprayAcc = 0;
+    function spindrift() {
+      const r = rnd();
+      const x = r % COLS;
+      let i = x;
+      let y = 0;
+      while (y < SCAN_Y && type[i] === 0) {
+        y++;
+        i += COLS;
+      }
+      const t = type[i];
+      if (y < 2 || y >= FLOOR - 1 || (t !== T_SAND && t !== T_SNOW) || inBand[i]) return;
+      const nx = x + E.wdir;
+      if (nx < 0 || nx >= COLS) return;
+      const j = i - COLS + E.wdir;
+      if (type[j] !== 0) return;
+      type[j] = t === T_SNOW ? T_SNOW : T_FRESH;
+      col[j] = col[i];
+      if (((r >>> 12) & 3) === 0) type[i] = 0;
+      wake(y - 2, y + 1);
+    }
     let rainAcc = 0;
     let snowAcc = 0;
     function feed() {
-      // the seconds thread: a steady trickle, and a bead at every second
-      const bead = beadLeft > 0;
-      if (bead || stepN % 3 === 0) {
+      // the seconds thread: a steady stream with a short gap at every second, so the tick runs down it
+      if (beadLeft > 0) beadLeft--;
+      else {
         for (let q = 0; q < 2; q++) {
-          if (!bead && (stepN / 3) % 2 !== q) continue;
           const x = THREAD_X + q;
-          if (type[x] === 0) {
+          if (type[x] === 0 && ((stepN + q) & 1) === 0) {
             type[x] = T_FRESH;
-            col[x] = skyCol(x);
+            col[x] = P_THREAD + (rnd() & 1);
           }
         }
         live[1] = live[2] = 2;
-        if (bead) beadLeft--;
       }
       if (E.rain > 0 && waterCount < 900 + 1600 * E.rain) {
         rainAcc += E.rain * 3.4;
@@ -956,6 +1016,13 @@ export default {
           }
         }
         live[1] = live[2] = 2;
+      }
+      // strong wind blows sand and snow off every crest in streams
+      const spray = Math.max(0, E.ws - 0.3);
+      sprayAcc += spray * spray * 14;
+      while (sprayAcc >= 1) {
+        sprayAcc--;
+        spindrift();
       }
       hopAcc += E.ws * E.ws * 5.5;
       while (hopAcc >= 1) {
@@ -1090,7 +1157,8 @@ export default {
             const pr = (r >>> 8) & 255;
             if (t === T_FRESH) {
               if (y >= SCAN_Y && tb !== T_GLUE && tb !== T_INK) {
-                type[i] = T_SAND; // the thread joins the dune
+                type[i] = T_SAND; // the thread joins the dune, in the sky's own colour
+                if (col[i] >= P_THREAD) col[i] = skyCol(x);
                 continue;
               }
               // resting up on a numeral or a ledge: it lingers, then slips away
@@ -1229,15 +1297,16 @@ export default {
     }
 
     // ----- motes: fog and bad air hanging in the frame -----
-    const MOTES = 4200;
+    const MOTES = 7000;
     const mx = new Float32Array(MOTES);
     const my = new Float32Array(MOTES);
     const mp = new Float32Array(MOTES);
     {
       const r = rng(seed + 5);
+      const banks = [r.range(20, 70), r.range(110, 160), r.range(190, 250)];
       for (let k = 0; k < MOTES; k++) {
         mx[k] = r() * COLS;
-        my[k] = r() * FLOOR;
+        my[k] = k % 3 === 0 ? r() * FLOOR : (((banks[k % 3 === 1 ? 0 : (k >> 1) % 3] + r.gauss() * 22) % FLOOR) + FLOOR) % FLOOR;
         mp[k] = r() * 6.283;
       }
     }
@@ -1315,9 +1384,9 @@ export default {
       for (let y = 0; y < SCAN_Y + 10; y++) {
         for (let q = 0; q < 2; q++) {
           const i = y * COLS + THREAD_X + q;
-          if (type[i] === 0 && r() < 0.42) {
+          if (type[i] === 0 && r() < 0.55 && (y + 3) % 45 > 5) {
             type[i] = T_FRESH;
-            col[i] = skyCol(THREAD_X + q);
+            col[i] = P_THREAD + (q & 1);
           }
         }
       }
@@ -1364,10 +1433,6 @@ export default {
       }
     }
     for (let y = 0; y < FLOOR; y++) live[y + 1] = 2;
-    for (let k = 0; k < 40; k++) {
-      feed();
-      step();
-    }
 
     let lastMs = state.ms;
     let acc = 0;
@@ -1382,7 +1447,7 @@ export default {
         syncTime(s, jumped);
         if (s.clock.s !== lastSec) {
           lastSec = s.clock.s;
-          beadLeft = 5;
+          beadLeft = 6;
         }
 
         // a thunderstorm now and then lifts the light, slowly
@@ -1415,8 +1480,8 @@ export default {
         put("fl", nFactLab, tx.factLabel);
         if (put("fv", nFact, tx.factValue)) {
           base.classList.toggle("nofact", tx.factValue === "");
-          nFact.style.fontSize = "42px";
-          if (nFact.scrollHeight > 2 * 42 * 1.12 + 4) nFact.style.fontSize = "36px";
+          nFact.style.fontSize = "48px";
+          if (nFact.scrollHeight > 2 * 48 * 1.1 + 4) nFact.style.fontSize = "40px";
         }
       },
     };

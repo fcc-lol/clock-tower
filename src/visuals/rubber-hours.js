@@ -272,7 +272,7 @@ export default {
       comp: f32(NN), compA: f32(NN), compB: f32(NN), px: f32(NP), py: f32(NP),
       morph: 1, twist: 1, cx: 0, cy: 0, wax: 0, way: 0,
       tie: 0, low: 0, ice: new Int16Array(3), iceLen: f32(3), iceN: 0, iceGrow: 1,
-      glint: R.range(0, 30), frostF: f32(72), frostL: f32(72), frostS: f32(72),
+      dripJ: 0, tieAX: 0, tieAY: 0, glint: R.range(0, 30), frostF: f32(72), frostL: f32(72), frostS: f32(72),
     });
     const slots = [makeSlot(0, 0), makeSlot(0, 1), makeSlot(1, 2), makeSlot(1, 3)];
     for (const sl of slots) {
@@ -302,6 +302,8 @@ export default {
         sl.compB[st[1]] *= 1.7; sl.compB[st[1] - 1] *= 1.28;
       }
       const fresh = snap || !sl.vis;
+      // where the tag was tied, so it can slide across to its new knot during the twist
+      if (sl.vis) { sl.tieAX = sl.px[sl.tie]; sl.tieAY = sl.py[sl.tie]; }
       for (let i = 0; i < NN; i++) {
         if (fresh && snap) { sl.hx[i] = sl.bx[i]; sl.hy[i] = sl.by[i]; sl.comp[i] = sl.compB[i]; }
         else if (fresh) { sl.hx[i] = sl.bx[2]; sl.hy[i] = sl.by[2]; sl.ux[i] = sl.uy[i] = sl.vx[i] = sl.vy[i] = 0; }
@@ -347,6 +349,15 @@ export default {
         }
       }
       sl.tie = sl.low;
+      // where the heat makes it drip: low on the numeral, toward the gap between the tags
+      let bd = -1e9;
+      for (const st of def.strokes) {
+        for (let j = st[0] * SUB + 1; j < st[1] * SUB; j++) {
+          if (tmpY[j] < maxY - 70) continue;
+          const sc = tmpY[j] + 0.9 * tmpX[j];
+          if (sc > bd) { bd = sc; sl.dripJ = j; }
+        }
+      }
       sl.iceN = 0;
       const pick = rng(seed + d * 31 + sl.index * 7);
       const order = pick.shuffle(cand);
@@ -471,7 +482,8 @@ export default {
     const fogBank = [0, 1, 2, 3].map((i) => ({ x: R.range(0, 1), y: 160 + i * 420 + R.range(-60, 60), sp: R.range(9, 20) * (i % 2 ? 1 : -1), w: R.range(1300, 1700), h: R.range(520, 760) }));
 
     // drip (one at a time, off the last hour numeral)
-    const drip = { phase: R.range(0.25, 0.7), state: 0, y: 0, vy: 0, x: 0, wait: 0, len: 0 };
+    const drip = { phase: R.range(0.25, 0.7), state: 0, y: 0, vy: 0, x: 0, wait: 0, len: 0, pool: 0 };
+    let lawTop = 1580;
 
     // ----- per-frame values -----
     const P = { w2: 81, zeta: 0.2, kc: 60, sag: 0, soft: 1, frost: 0, heat: 0, wx: 1, wy: 0, wind: 0, gust: 0, rainy: 0, snowy: 0, fog: 0, direct: 0, night: 0 };
@@ -546,8 +558,9 @@ export default {
       const bodyDay = oklch(lerp(toy.l, 0.9, frost * 0.22), toy.c * (1 - 0.25 * frost), toy.h);
       // at night the toy keeps its colour (warm hues lean redder so they stay candy, not mud)
       // and is lit from behind by the city across the river: a bright rim on the far edge
-      const hN = toy.h > 40 && toy.h < 120 ? toy.h - 16 * (1 - Math.abs(toy.h - 75) / 45) : toy.h;
-      const bodyNight = oklch(0.52, clamp(toy.c * 0.8, 0.075, 0.13), hN);
+      const warm = toy.h > 30 && toy.h < 120;
+      const hN = warm ? toy.h - (toy.h < 72 ? 17 : 14) : toy.h;
+      const bodyNight = oklch(0.53, clamp(toy.c * 0.8, warm ? 0.12 : 0.08, 0.14), hN);
       const body = mix(bodyNight, bodyDay, day);
       const b = toOklch(body);
       const flat = Math.max(P.fog * 0.6, 1 - clamp(P.direct * 1.6 + 0.35));
@@ -716,6 +729,10 @@ export default {
         else {
           const sl = slots[1 + k];
           tx = sl.px[sl.tie]; ty = sl.py[sl.tie] + TUBE / 2 - 5;
+          if (sl.morph < 1) {
+            const e = smoothstep(0.35, 1, sl.morph);
+            tx = lerp(sl.tieAX, tx, e); ty = lerp(sl.tieAY + TUBE / 2 - 5, ty, e);
+          }
           pvx = sl.vx[Math.round(sl.tie / SUB)];
         }
         if (snap) { tg.x = tx; tg.y = ty; }
@@ -911,8 +928,8 @@ export default {
       ctx.lineCap = "round";
       ctx.beginPath();
       for (let k = 2; k < 4; k++) {
-        const sl = slots[k];
-        const x = sl.px[sl.tie], y = sl.py[sl.tie];
+        const tg = tags[k - 1];
+        const x = tg.x, y = tg.y - TUBE / 2 + 5;
         ctx.moveTo(x - 2, y - TUBE / 2 + 2);
         ctx.quadraticCurveTo(x + 13, y, x, y + TUBE / 2 - 3);
       }
@@ -1057,72 +1074,82 @@ export default {
       ctx.globalAlpha = 1;
     }
 
-    // One slow drip in the heat: a bead swells under the hour, stretches,
-    // lets go, and lands on whatever is below.
+    // One slow drip in the heat: a bead swells under the left minute numeral,
+    // stretches into a long string of taffy, lets go, and lands on whatever is
+    // below: a tag (which it knocks swinging) or the label (where it puddles).
     function stepDrip(s, dt) {
-      if (P.heat < 0.05) { drip.state = 0; drip.len = 0; return; }
-      const sl = slots[1];
-      const ax = sl.px[sl.low], ay = sl.py[sl.low];
-      if (drip.state === 0) {
-        drip.phase += dt / lerp(16, 9, P.heat);
-        drip.len = Math.pow(clamp(drip.phase), 2.2) * 118;
-        drip.x = ax; drip.y = ay + TUBE / 2 - 22 + drip.len;
-        if (drip.phase >= 1.12) { drip.state = 1; drip.vy = 40; hitNode(sl, sl.low, 0, -60); }
+      if (P.heat < 0.05) { drip.state = 0; drip.len = 0; drip.pool = 0; return; }
+      const sl = slots[2];
+      const ax = sl.px[sl.dripJ], ay = sl.py[sl.dripJ];
+      drip.pool = Math.max(0, drip.pool - dt / 2.6);
+      if (drip.state === 0 && sl.morph < 1) {
+        // the twist takes the bead back in
+        drip.phase = approach(drip.phase, 0, dt, 0.12);
+        drip.len = Math.pow(clamp(drip.phase), 2.4) * lerp(120, 190, P.heat);
+      }
+      else if (drip.state === 0) {
+        drip.phase += dt / lerp(15, 9, P.heat);
+        drip.len = Math.pow(clamp(drip.phase), 2.4) * lerp(120, 190, P.heat);
+        drip.x = ax; drip.y = ay + TUBE / 2 - 8 + drip.len;
+        if (drip.phase >= 1.1) { drip.state = 1; drip.vy = 60; hitNode(sl, sl.dripJ, 0, -90); }
       } else if (drip.state === 1) {
-        drip.len = approach(drip.len, 0, dt, 0.12);
-        drip.vy += 1500 * dt;
+        drip.len = approach(drip.len, 0, dt, 0.08);
+        drip.vy += 1700 * dt;
         drip.y += drip.vy * dt;
-        // lands on a minute numeral, if one is in the way
-        for (let k = 2; k < 4 && drip.state === 1; k++) {
-          const m = slots[k];
-          for (const st of m.def.strokes) {
-            for (let j = st[0] * SUB + 1; j < st[1] * SUB; j++) {
-              if (Math.abs(m.px[j] - drip.x) < 40 && drip.y > m.py[j] - TUBE * 0.36 && drip.y < m.py[j] + 20) {
-                hitNode(m, j, 0, 150); dimple(k, j, clamp((drip.x - m.px[j]) / TUBE, -0.3, 0.3));
-                drip.state = 2; drip.wait = R.range(3, 6);
-                break;
-              }
-            }
-            if (drip.state !== 1) break;
+        for (let k = 1; k < 3 && drip.state === 1; k++) {
+          const tg = tags[k];
+          const top = tg.y + tg.len + 4;
+          if (Math.abs(drip.x - tg.x) < tg.w / 2 - 6 && drip.y > top && drip.y < top + 60) {
+            tg.om += clamp((tg.x - drip.x) / tg.w, -0.5, 0.5) * 1.4;
+            tg.pom += clamp((drip.x - tg.x) / tg.w, -0.5, 0.5) * 3;
+            drip.state = 2; drip.wait = R.range(3, 6);
           }
         }
-        if (drip.y > H + 60) { drip.state = 2; drip.wait = R.range(3, 6); }
+        if (drip.state === 1 && drip.y > lawTop - 16) {
+          drip.state = 2; drip.wait = R.range(3, 6); drip.pool = 1; drip.y = lawTop;
+        }
       } else {
         drip.len = 0;
         drip.wait -= dt;
         if (drip.wait <= 0) { drip.state = 0; drip.phase = 0; }
       }
     }
+    function bead(x, y, r, stretch) {
+      ctx.fillStyle = pal.shade;
+      ctx.beginPath(); ctx.ellipse(x, y, r, r * stretch, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = pal.body;
+      ctx.beginPath(); ctx.ellipse(x + LX * r * 0.13, y + LY * r * 0.13, r * 0.86, r * 0.86 * stretch, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = pal.spec;
+      ctx.beginPath(); ctx.arc(x + LX * r * 0.42, y + LY * r * 0.42 * stretch, r * 0.18, 0, TAU); ctx.fill();
+    }
     function drawDrip() {
-      if (P.heat < 0.05 || drip.state === 2) return;
-      const sl = slots[1];
-      const ax = sl.px[sl.low], ay = sl.py[sl.low] + TUBE / 2 - 30;
-      const bead = (x, y, r) => {
-        ctx.fillStyle = pal.shade;
-        ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
-        ctx.fillStyle = pal.body;
-        ctx.beginPath(); ctx.arc(x + LX * r * 0.13, y + LY * r * 0.13, r * 0.86, 0, TAU); ctx.fill();
-        ctx.fillStyle = pal.spec;
-        ctx.beginPath(); ctx.arc(x + LX * r * 0.42, y + LY * r * 0.42, r * 0.17, 0, TAU); ctx.fill();
-      };
-      if (drip.len > 1) {
+      if (P.heat < 0.05) return;
+      const sl = slots[2];
+      const ax = sl.px[sl.dripJ], ay = sl.py[sl.dripJ] + TUBE / 2 - 30;
+      if (drip.len > 1 && drip.state !== 2) {
         const tipY = ay + 22 + drip.len;
-        const r = drip.state === 0 ? lerp(13, 23, clamp(drip.len / 90)) : 8;
-        const neck = drip.state === 0 ? lerp(30, 7, clamp(drip.len / 118)) : 6;
+        const k = clamp(drip.len / 150);
+        const r = drip.state === 0 ? lerp(14, 27, k) : 9;
+        const neck = drip.state === 0 ? lerp(30, 8, k) : 5;
         for (let pass = 0; pass < 2; pass++) {
           const o = pass ? 3 : 0;
           const nk = neck - (pass ? 2.4 : 0);
           ctx.fillStyle = pass ? pal.body : pal.shade;
           ctx.beginPath();
-          ctx.moveTo(ax - 30 - nk + o * LX, ay);
-          ctx.quadraticCurveTo(ax - nk + o * LX, ay + 14, ax - nk + o * LX, tipY - 4);
+          ctx.moveTo(ax - 34 - nk + o * LX, ay);
+          ctx.quadraticCurveTo(ax - nk + o * LX, ay + 18, ax - nk + o * LX, tipY - 4);
           ctx.lineTo(ax + nk + o * LX, tipY - 4);
-          ctx.quadraticCurveTo(ax + nk + o * LX, ay + 14, ax + 30 + nk + o * LX, ay);
+          ctx.quadraticCurveTo(ax + nk + o * LX, ay + 18, ax + 34 + nk + o * LX, ay);
           ctx.fill();
         }
-        if (drip.state === 0) bead(ax, tipY, r);
+        if (drip.state === 0) bead(ax, tipY, r, 1.12);
       }
-      if (drip.state === 1) bead(drip.x, drip.y, 22);
+      if (drip.state === 1) bead(drip.x, drip.y, 24, clamp(1 + drip.vy / 2400, 1, 1.45));
+      if (drip.pool > 0.01) {
+        // a puddle on the label's top edge, sinking back in
+        const q = drip.pool;
+        bead(drip.x, lawTop - 9 * q, 26 + 34 * (1 - q), 0.36 * q + 0.05);
+      }
     }
 
     function draw(s) {
@@ -1188,8 +1215,10 @@ export default {
           while (fs > 36 && T.factValue.offsetHeight > fs * 1.16 * 2 + 2) { fs -= 2; T.factValue.style.fontSize = `${fs}px`; }
         }
       }
-      if (measure || shown.measured === undefined) {
+      if (measure || shown.measured === undefined || shown.lawFact !== x.factValue) {
         shown.measured = 1;
+        shown.lawFact = x.factValue;
+        lawTop = law.offsetTop || lawTop;
         for (let k = 1; k < 3; k++) tags[k].h = tags[k].card.offsetHeight || tags[k].h;
       }
     }

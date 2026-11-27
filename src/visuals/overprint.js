@@ -43,7 +43,7 @@ const SIN = Math.sin((TILT * Math.PI) / 180), COS = Math.cos((TILT * Math.PI) / 
 const MAXREG = 6;             // px: the most a plate may sit out of register
 
 const PAPER_DAY = "#f1ecdf", PAPER_NIGHT = "#0b0a0d";
-const INK_DAY = "#131114", INK_NIGHT = "#b7ad98";
+const INK_DAY = "#131114", INK_NIGHT = "#a09784"; // the night cream stays just below "light" so the room stays dark
 
 // Ink B by temperature: [lightness, chroma, hue, which way to turn if the sky sits on the same hue]
 const LADDER = [
@@ -73,6 +73,7 @@ uniform vec4 u_old;   // the last pull's registration, relative to the new one (
 uniform vec4 u_fx;    // x clear-sky bars, y heat shimmer, z haze (air quality), w shimmer phase
 uniform vec4 u_stamp; // xy centre, zw half size of the stamped box (z = 0: none)
 uniform vec2 u_srot;  // its angle: sin, cos
+uniform vec4 u_c;     // ink C (rgb) and how much of the night it is: on black stock snow is printed in it
 
 const vec2 PIV = vec2(${glf(PX)}, ${glf(PY)});
 const vec2 RS = vec2(${SIN.toFixed(6)}, ${COS.toFixed(6)});
@@ -226,6 +227,8 @@ void main() {
   col *= 1.0 - 0.12 * wet;
   col += 0.07 * wet * smoothstep(0.5, 0.9, vn(vec2(p.x * 0.004 + p.y * 0.002, p.y * 0.05)));
   // paper tooth, and a dither so dark flats never band
+  // on black stock a dropout would read as a dark speck: there the snow is printed in ink C
+  col = mix(col, u_c.rgb, drop * u_c.w * 0.85 * max(inA, inB * cropB));
   col *= 0.985 + 0.03 * vn(p * 1.3 + 5.0);
   col += (h21(p + fract(u_time)) - 0.5) / 255.0;
   gl_FragColor = vec4(col, 1.0);
@@ -253,7 +256,7 @@ const CSS = `
 .op .cr span { display: inline-block; }
 .op .cr i { font-style: normal; font-weight: 500; font-size: 25px; letter-spacing: 0.13em; margin-right: 16px; }
 .op .cr b { font-size: 42px; letter-spacing: 0.01em; }
-.op .stamp { position: relative; margin: 46px 12px 14px; padding: 30px 38px 32px; transform-origin: 50% 50%; }
+.op .stamp { position: relative; margin: 36px 12px 12px; padding: 24px 38px 27px; transform-origin: 50% 50%; }
 .op .fl { font-weight: 500; font-size: 25px; letter-spacing: 0.13em; line-height: 30px; }
 .op .fv { margin-top: 10px; text-transform: none; font-size: 40px; line-height: 1.16em; letter-spacing: -0.005em; }
 .op .bar { position: absolute; left: 0; top: 0; width: ${W}px; height: 64px; will-change: transform; pointer-events: none;
@@ -281,11 +284,11 @@ export default {
     const uP = new Float32Array(3), uA = new Float32Array(3), uB = new Float32Array(3), uAB = new Float32Array(3);
     const uReg = new Float32Array(4), uSky = new Float32Array(4), uWx = new Float32Array(4), uMo = new Float32Array(4);
     const uRoll = new Float32Array(4), uOld = new Float32Array(4), uFx = new Float32Array(4);
-    const uStamp = new Float32Array(4), uSrot = new Float32Array(2);
+    const uStamp = new Float32Array(4), uSrot = new Float32Array(2), uC = new Float32Array(4);
     gl.set("u_p", uP); gl.set("u_a", uA); gl.set("u_b", uB); gl.set("u_ab", uAB);
     gl.set("u_reg", uReg); gl.set("u_sky", uSky); gl.set("u_wx", uWx); gl.set("u_mo", uMo);
     gl.set("u_roll", uRoll); gl.set("u_old", uOld); gl.set("u_fx", uFx);
-    gl.set("u_stamp", uStamp); gl.set("u_srot", uSrot);
+    gl.set("u_stamp", uStamp); gl.set("u_srot", uSrot); gl.set("u_c", uC);
     uMo[3] = (seed % 977) * 0.137 + 1.3;
     uRoll[0] = uRoll[1] = 1e5; // at rest the whole sheet is the current pull
 
@@ -351,10 +354,13 @@ export default {
     const FACT_W = W - 144 - 24 - 76; // the stamp's inner width
     // the largest size (76 px down to 36) at which the fact fits on two lines
     const factSize = (text) => {
-      for (const size of [76, 64, 54, 46, 40, 36]) {
+      // one line may be as large as 76 px; two lines at most 50, so the billing
+      // above never climbs into the printed block
+      for (const size of [76, 64, 56, 50, 46, 42, 38, 36]) {
         measure.font = `700 ${size}px "Space Grotesk"`;
         const lines = wrapText(measure, text, FACT_W - 8);
-        if (lines.length <= 2 && lines.every((l) => measure.measureText(l).width <= FACT_W - 8)) return size;
+        if (lines.length > (size > 50 ? 1 : 2)) continue;
+        if (lines.every((l) => measure.measureText(l).width <= FACT_W - 8)) return size;
       }
       return 36;
     };
@@ -384,6 +390,8 @@ export default {
         const size = fact ? factSize(fact) : 40;
         for (const L of layers) {
           L.stamp.style.display = fact ? "" : "none";
+          // without a fact the billing sits midway between the block and the foot
+          L.ft.style.bottom = fact ? "72px" : "214px";
           L.fv.style.fontSize = `${size}px`;
         }
         if (fact) {
@@ -430,7 +438,7 @@ export default {
       const hA = lerpAngle(255, sky.h, smoothstep(0.004, 0.02, sky.c));
       const Ad = oklch(clamp(sky.l, 0.66, 0.8), clamp(sky.c * 1.15, 0.045, 0.15), hA);
       // at night the sky ink is a deep, saturated version of itself on black stock
-      const An = oklch(0.27, clamp(sky.c * 1.6, 0.075, 0.12), hA);
+      const An = oklch(0.265, clamp(sky.c * 1.6, 0.075, 0.12), hA);
       // ink B from the temperature ladder
       let f = 0;
       for (const th of STEPS) f += smoothstep(th - 2.5, th + 2.5, s.weather.temp);
@@ -444,14 +452,21 @@ export default {
       const Bd = oklch(lerp(lo[0], hi[0], k), cB, hueB);
       // yellow cannot glow at night (dark yellow is olive): it turns to amber
       const hBn = hueB > 70 && hueB < 125 ? lerpAngle(hueB, 64, smoothstep(125, 95, hueB) * smoothstep(70, 85, hueB)) : hueB;
-      const Bn = oklch(0.31, Math.min(0.125, cB * 0.8), hBn);
+      const Bn = oklch(0.285, Math.min(0.125, cB * 0.8), hBn);
 
-      const PAd = mul(PAPER_DAY, Ad), PBd = mul(PAPER_DAY, Bd), PABd = mul(PAd, Bd);
+      const PAd = mul(PAPER_DAY, Ad), PBd = mul(PAPER_DAY, Bd);
+      // the overprint: the two inks multiplied, as on the press, with the little
+      // extra saturation real ink trapping gives (so blue over orange is a rich
+      // rust, not mud)
+      const ab = toOklch(mul(PAd, Bd));
+      const PABd = oklch(ab.l + 0.035, Math.min(0.17, ab.c * 1.6 + 0.04), ab.h);
       const PAn = scr(PAPER_NIGHT, An), PBn = scr(PAPER_NIGHT, Bn), PABn = scr(PAn, Bn);
       const p = cross(PAPER_NIGHT, PAPER_DAY, g);
       if (p !== pal.p || g !== pal.g) dirty = true;
       pal = { p, a: cross(PAn, PAd, g), b: cross(PBn, PBd, g), ab: cross(PABn, PABd, g), g };
       fill(uP, pal.p); fill(uA, pal.a); fill(uB, pal.b); fill(uAB, pal.ab);
+      fill(uC, INK_NIGHT);
+      uC[3] = 1 - smoothstep(0.35, 0.65, g);
       if (shown.fr !== pal.ab) { shown.fr = pal.ab; wrap.style.setProperty("--fr", pal.ab); dirty = true; }
       if (shown.bg !== pal.p) { shown.bg = pal.p; root.style.background = pal.p; }
       if (fallback) {
@@ -640,7 +655,7 @@ export default {
         uMo[0] = rainTravel;
         uMo[1] = snowFall;
         uMo[2] = wx.kind === "storm" ? 1 : 0;
-        uFx[0] = wx.falling || wx.fog ? 0 : smoothstep(45, 15, wx.cloud);
+        uFx[0] = wx.falling || wx.fog ? 0 : smoothstep(34, 22, wx.cloud);
         uFx[1] = smoothstep(84, 96, wx.temp) * 3.2;
         uFx[2] = smoothstep(90, 170, wx.aqi) * 0.42;
         uFx[3] += dt * 0.55;

@@ -45,7 +45,7 @@ const WALL = 50; // width of each brick sliver
 const GRAV = 900; // px/s^2: a little slower than life, so it is calm to live with
 const LINE_Y = [84, 716, 1344, 1630];
 const SHEET_H = 570;
-const PERSP = 2600;
+const PERSP = 4200;
 const HORIZON = 860;
 
 // key, line, rest x, size, mesh, which columns are pegged, tethered at the bottom corners
@@ -55,12 +55,12 @@ const SPEC = [
   { key: "ap", line: 0, x: 548, w: 150, h: 216, cols: 6, rows: 8, pegs: [0, 5] },
   { key: "m1", line: 1, x: 84, w: 448, h: SHEET_H, cols: 16, rows: 20, pegs: [0, 5, 10, 15], tether: true },
   { key: "m2", line: 1, x: 548, w: 448, h: SHEET_H, cols: 16, rows: 20, pegs: [0, 5, 10, 15], tether: true },
-  { key: "temp", line: 2, x: 84, w: 300, h: 250, cols: 11, rows: 9, pegs: [0, 10] },
-  { key: "sun", line: 2, x: 396, w: 240, h: 206, cols: 9, rows: 8, pegs: [0, 8] },
-  { key: "aqi", line: 2, x: 648, w: 168, h: 178, cols: 7, rows: 7, pegs: [0, 6] },
-  { key: "uv", line: 2, x: 828, w: 168, h: 178, cols: 7, rows: 7, pegs: [0, 6] },
-  { key: "fact", line: 3, x: 84, w: 630, h: 226, cols: 22, rows: 9, pegs: [0, 7, 14, 21] },
-  { key: "moon", line: 3, x: 726, w: 270, h: 196, cols: 10, rows: 8, pegs: [0, 9] },
+  { key: "temp", line: 2, x: 84, w: 284, h: 244, cols: 11, rows: 9, pegs: [0, 10] },
+  { key: "sun", line: 2, x: 380, w: 236, h: 206, cols: 9, rows: 8, pegs: [0, 8] },
+  { key: "aqi", line: 2, x: 628, w: 178, h: 182, cols: 7, rows: 7, pegs: [0, 6] },
+  { key: "uv", line: 2, x: 818, w: 178, h: 182, cols: 7, rows: 7, pegs: [0, 6] },
+  { key: "fact", line: 3, x: 84, w: 640, h: 222, cols: 22, rows: 9, pegs: [0, 7, 14, 21] },
+  { key: "moon", line: 3, x: 736, w: 260, h: 196, cols: 10, rows: 8, pegs: [0, 9] },
 ];
 
 // One ink at a time, chosen by the temperature. All dark enough for small type on cotton.
@@ -175,12 +175,12 @@ void main() {
   vec3 col = mix(day, night, f);
 
   if (u_frost > 0.003) {
-    float band = smoothstep(0.36, 0.0, 1.0 - v_uv.y);
+    float band = smoothstep(0.17, 0.0, 1.0 - v_uv.y);
     float edge = 1.0 - smoothstep(0.0, 0.07, min(v_uv.x, 1.0 - v_uv.x));
     vec4 cr = texture2D(u_noise, q / 64.0 + u_seed * 3.0);
     float fr = u_frost * smoothstep(0.42, 0.78, max(band, edge * 0.8) * (0.5 + cr.b * 0.95 + (nz.g - 0.5) * 0.5));
     vec3 frostC = mix(vec3(0.95, 0.98, 1.0) * min(lum + 0.12, 1.0), u_night * 2.6 + vec3(0.05, 0.06, 0.08), f);
-    col = mix(col, frostC, fr * (0.85 - 0.45 * ink));
+    col = mix(col, frostC, fr * (0.85 - 0.72 * ink));
     col += fr * step(0.93, cr.a) * mix(0.1, 0.07, f);
   }
   col += u_flash * vec3(0.09, 0.1, 0.14) * (1.0 - ink);
@@ -340,7 +340,7 @@ export default {
       for (const col of c.pegs) pegs.push({ c, node: c.off + col, bottom: false, tilt: r.range(-0.12, 0.12) });
       if (c.tether) for (const col of [0, c.cols - 1]) pegs.push({ c, node: c.off + (c.rows - 1) * c.cols + col, bottom: true, tilt: r.range(-0.2, 0.2) });
     }
-    const spare = [{ x: 772, tilt: 0.1 }, { x: 800, tilt: -0.14 }, { x: 938, tilt: 0.05 }]; // waiting on the hours line when it is half empty
+    const spare = [{ x: 118, tilt: 0.1 }, { x: 146, tilt: -0.14 }, { x: 912, tilt: 0.05 }, { x: 962, tilt: -0.08 }]; // waiting on the hours line when it is half empty
 
     // ------------------------------------------------------------------
     // What is printed where
@@ -378,12 +378,13 @@ export default {
       return size;
     }
     function bigDigit(x, d, cx, top, bottom, maxW) {
+      // measured with left alignment, so the ink box is centred exactly on the sheet
+      x.textAlign = "left";
       x.font = font(900, 100);
       const m0 = x.measureText("0");
       const size = ((bottom - top) * 100) / (m0.actualBoundingBoxAscent + m0.actualBoundingBoxDescent);
       x.font = font(900, size);
       const m = x.measureText(d);
-      x.textAlign = "left";
       const bw = m.actualBoundingBoxRight + m.actualBoundingBoxLeft;
       const sx = Math.min(1, maxW / bw);
       x.save();
@@ -396,17 +397,17 @@ export default {
     function printSheet(c, digit, word) {
       const x = begin(c);
       const { w, h } = c;
-      x.fillRect(0, 24, w, 9);
-      x.fillRect(0, 39, w, 3);
-      x.fillRect(0, 47, w, 3);
-      x.fillRect(0, h - 33, w, 9);
-      x.fillRect(0, h - 113, w, 3);
-      x.fillRect(0, h - 121, w, 3);
+      x.fillRect(0, 20, w, 8);
+      x.fillRect(0, 33, w, 2.5);
+      x.fillRect(0, 40, w, 2.5);
+      x.fillRect(0, h - 30, w, 8);
+      x.fillRect(0, h - 104, w, 2.5);
+      x.fillRect(0, h - 111, w, 2.5);
       if (word) {
-        fit(x, word, 800, 50, w - 44, false, 40);
-        x.fillText(word, w / 2, h - 55);
+        fit(x, word, 800, 50, w - 56, false, 44);
+        x.fillText(word, w / 2, h - 48);
       }
-      bigDigit(x, digit, w / 2, 76, h - 146, w - 52);
+      bigDigit(x, digit, w / 2, 66, h - 132, w - 70);
     }
     function printPillow(c, text) {
       const x = begin(c);
@@ -443,11 +444,11 @@ export default {
     function printFlannel(c, label, value) {
       const x = begin(c);
       const { w, h } = c;
-      x.fillRect(15, 0, 6, h);
-      x.fillRect(26, 0, 2.5, h);
-      x.fillRect(w - 21, 0, 6, h);
-      x.fillRect(w - 28.5, 0, 2.5, h);
-      fit(x, label, 500, 25, w - 66, true, 24);
+      x.fillRect(10, 0, 6, h);
+      x.fillRect(20, 0, 2.5, h);
+      x.fillRect(w - 16, 0, 6, h);
+      x.fillRect(w - 22.5, 0, 2.5, h);
+      fit(x, label, 500, 26, w - 52, true, 24);
       x.fillText(label, w / 2, 56);
       fit(x, value, 900, 76, w - 70, false, 40);
       x.fillText(value, w / 2, 128);
@@ -551,9 +552,10 @@ export default {
       }
     }
     function layoutHours() {
+      // two digits fill the line; one digit and the pillowcase hang as a centred pair
       const two = disp.hh.length > 1;
-      shiftCloth(byKey.h2, two ? 386 : 84);
-      shiftCloth(byKey.ap, two ? 846 : 548);
+      shiftCloth(byKey.h2, two ? 386 : 235);
+      shiftCloth(byKey.ap, two ? 846 : 695);
     }
     layoutHours();
     byKey.h1.visible = disp.hh.length > 1;
@@ -1072,6 +1074,19 @@ export default {
           }
         }
       }
+      // the courtyard walls: cloth on the line never swings out of sight behind them
+      if (L.haul === 0) {
+        for (let k = off + cols, e = off + c.n; k < e; k++) {
+          const k3 = k * 3;
+          let z = P[k3 + 2];
+          if (z > 150) z = P[k3 + 2] = 150;
+          else if (z < -260) z = P[k3 + 2] = -260;
+          const lim = 478 / (1 + z / PERSP);
+          const x = P[k3] - 540;
+          if (x > lim) P[k3] = 540 + lim;
+          else if (x < -lim) P[k3] = 540 - lim;
+        }
+      }
       if (env.frz > 0 && c.frozenSet && !env.warm) poseFrozen(c, env.frz);
     }
     function captureFrozen(c) {
@@ -1271,7 +1286,7 @@ export default {
       const S = 0.62 * env.sunVis;
       const A = 0.93 - S * col.L[2];
       const mx = Math.max(col.mean[0], col.mean[1], col.mean[2], 0.02);
-      const tintAmt = 0.3 + 0.25 * env.sunVis + 0.3 * (1 - dl);
+      const tintAmt = 0.16 + 0.06 * env.sunVis + 0.36 * (1 - dl);
       const sunC = [1, lerp(0.98, 0.76, warm), lerp(0.94, 0.5, warm)];
       for (let k = 0; k < 3; k++) {
         const tint = lerp(1, col.mean[k] / mx, tintAmt);
@@ -1282,7 +1297,7 @@ export default {
       }
       // the night side
       const moon = s.moon.up ? s.moon.illumination * (1 - 0.8 * env.cover) * smoothstep(0, 12, s.moon.alt) : 0;
-      const nb = [0.05, 0.063, 0.103];
+      const nb = [0.062, 0.076, 0.122];
       const nm = [0.03, 0.038, 0.052];
       for (let k = 0; k < 3; k++) {
         col.night[k] = (nb[k] + nm[k] * moon) * (1 - 0.12 * env.storm);
@@ -1296,8 +1311,9 @@ export default {
         col.cord[k] = [0.44, 0.4, 0.34][k] * env.level;
         col.cordN[k] = [0.12, 0.12, 0.13][k];
       }
-      env.front = lerp(-0.13, 1.13, clamp((0.36 - d) / 0.2));
-      env.night = clamp((0.36 - d) / 0.2);
+      // a short passage: every part of the wash is either sunlit or lamp-lit, never mid-grey for long
+      env.front = lerp(-0.13, 1.13, clamp((0.31 - d) / 0.07));
+      env.night = clamp((0.31 - d) / 0.07);
       env.lampOn = 1 - smoothstep(0.24, 0.44, d);
       col.stars = (1 - smoothstep(0.02, 0.22, d)) * (1 - env.cover) ** 2 * (1 - env.fog);
       // lightning: a soft swell every half minute or so, never a flash

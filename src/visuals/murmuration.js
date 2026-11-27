@@ -28,7 +28,7 @@
 //            the air; it settles again over a few seconds
 import {
   W, H, TAU, clamp, lerp, smoothstep, rng, hash, createNoise,
-  mix, rgba, toOklab, el, svg, svgLayer, addStyle, canvas2d, mask, grain,
+  mix, rgba, toOklab, el, svg, addStyle, canvas2d, mask, grain,
 } from "../lib/kit.js";
 
 const DISPLAY = '"Big Shoulders Display", "Anton", "Arial Narrow", sans-serif';
@@ -42,22 +42,22 @@ const NDG = 4200; // far birds, drawn as specks: these stay in the numerals
 const NDF = 1100; // far birds that fly with the ribbon by day and come down at night
 const ND = NDG + NDF;
 
-const FONT_PX = 720; // the numerals' size
+const FONT_PX = 700; // the numerals' size
 const CELL = 6; // glyph field resolution, stage px
 const PAD = 42; // empty margin around a glyph in its field
 const LEFT = 104; // left edge of both lines of numerals
 const TRACK = 12;
-const HOUR_BASE = 728;
-const MIN_BASE = 1378;
+const HOUR_BASE = 690;
+const MIN_BASE = 1318;
 const MAX_SHEAR = 0.2;
 
 const MARGIN = 64;
 const WX0 = -40; // wires run past both edges
 const WSPAN = 1160;
 const WIRES = [
-  { y0: 1522, yc: 1594, y1: 1538 },
-  { y0: 1634, yc: 1672, y1: 1616 },
-  { y0: 1698, yc: 1760, y1: 1718 },
+  { y0: 1470, yc: 1548, y1: 1490, top: 1330, bot: 1560 }, // top/bot: the band each wire and its captions live in
+  { y0: 1578, yc: 1636, y1: 1562, top: 1500, bot: 1650 },
+  { y0: 1656, yc: 1716, y1: 1670, top: 1590, bot: 1730 },
 ];
 const wireY = (w, x) => {
   const k = (x - WX0) / WSPAN;
@@ -88,19 +88,20 @@ export default {
       .mu .cloud { position: absolute; left: 0; top: 0; width: ${Math.ceil(3240 / 24) * 24}px; height: ${Math.ceil(1440 / 24) * 24}px; will-change: transform; }
       .mu .glow { position: absolute; left: 0; top: 0; width: 1500px; height: 1300px; opacity: 0; will-change: opacity;
         background: radial-gradient(closest-side, rgba(226,224,255,0.9), rgba(200,205,255,0.35) 45%, rgba(190,200,255,0) 100%); }
-      .mu svg { z-index: 6; }
-      .mu svg text { font-family: ${SANS}; fill: currentColor; font-kerning: normal; }
-      .mu .wire { fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; opacity: 0.72; }
+      .mu .band { position: absolute; left: 0; overflow: visible; z-index: 6; will-change: transform; }
+      .mu .band text { font-family: ${SANS}; fill: currentColor; font-kerning: normal; }
+      .mu .wire { fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; opacity: 0.7; }
       .mu .rime { fill: none; stroke: #f4f6f8; stroke-width: 3; stroke-linecap: round; }
-      .mu .date { font-size: 46px; font-weight: 600; letter-spacing: -0.005em; }
-      .mu .cond { font-size: 46px; font-weight: 500; }
-      .mu .temp { font-family: ${DISPLAY}; font-size: 112px; font-weight: 900; }
-      .mu .row2 { font-size: 38px; font-weight: 600; }
-      .mu .row2 .soft { font-weight: 400; }
-      .mu .lab { font-size: 25px; font-weight: 600; letter-spacing: 0.1em; }
-      .mu .ampm { font-family: ${DISPLAY}; font-size: 104px; font-weight: 900; letter-spacing: 0.01em; }
-      .mu .fact { position: absolute; left: ${MARGIN}px; top: 1751px; width: ${W - 2 * MARGIN}px; z-index: 6;
-        font-family: ${SERIF}; font-style: italic; font-size: 44px; line-height: 50px; max-height: 100px; overflow: hidden;
+      .mu .temp { font-family: ${DISPLAY}; font-size: 134px; font-weight: 900; letter-spacing: 0.005em; }
+      .mu .cond { font-size: 50px; font-weight: 500; }
+      .mu .date { font-size: 48px; font-weight: 600; }
+      .mu .val { font-size: 46px; font-weight: 600; }
+      .mu .lab { font-size: 28px; font-weight: 600; letter-spacing: 0.12em; }
+      .mu .soft { font-size: 34px; font-weight: 400; }
+      .mu .ampmBox { position: absolute; overflow: visible; z-index: 6; will-change: transform; }
+      .mu .ampm { font-family: ${DISPLAY}; font-size: 108px; font-weight: 900; fill: currentColor; letter-spacing: 0.01em; }
+      .mu .fact { position: absolute; left: ${MARGIN}px; top: 1716px; width: ${W - 2 * MARGIN}px; z-index: 6; will-change: transform;
+        font-family: ${SERIF}; font-style: italic; font-size: 46px; line-height: 52px; max-height: 104px; overflow: hidden;
         text-wrap: balance; letter-spacing: 0.003em; }
     `);
     const __T=[performance.now()];const __m=(n)=>__T.push(n,performance.now());
@@ -224,25 +225,34 @@ export default {
     const CS = 24; // stage px per texel: the bands are soft, so this can be coarse
     const CW = Math.ceil(3240 / CS);
     const CH = Math.ceil(1440 / CS);
+    // Its noise is computed a few rows per frame after mount (the piece gets
+    // many unseen frames before it is cut to), which keeps mount quick.
     const cloudMask = document.createElement("canvas");
     cloudMask.width = CW;
     cloudMask.height = CH;
-    {
-      const c = cloudMask.getContext("2d");
-      const img = c.createImageData(CW, CH);
-      for (let j = 0; j < CH; j++) {
+    const cloudMaskCtx = cloudMask.getContext("2d");
+    const cloudImg = cloudMaskCtx.createImageData(CW, CH);
+    let cloudRow = 0;
+    function buildCloudRows(rows) {
+      const data = cloudImg.data;
+      const end = Math.min(CH, cloudRow + rows);
+      for (let j = cloudRow; j < end; j++) {
         const y = j * CS;
         const env = smoothstep(1440, 1000, y) * (0.75 + 0.25 * smoothstep(0, 200, y));
         for (let i = 0; i < CW; i++) {
           const a = ((i * CS) / 2160) * TAU;
           const n = 0.7 * noise.fbm3(Math.cos(a) * 0.6, Math.sin(a) * 0.6, y * 0.0052, 3) + 0.5 * noise.n3(Math.cos(a) * 0.3 + 5, Math.sin(a) * 0.3, y * 0.0026);
           const o = (j * CW + i) * 4;
-          img.data[o] = img.data[o + 1] = img.data[o + 2] = 255;
+          data[o] = data[o + 1] = data[o + 2] = 255;
           const k = smoothstep(-0.45, 0.6, n);
-          img.data[o + 3] = 255 * k * k * env;
+          data[o + 3] = 255 * k * k * env;
         }
       }
-      c.putImageData(img, 0, 0);
+      cloudRow = end;
+      if (cloudRow >= CH) {
+        cloudMaskCtx.putImageData(cloudImg, 0, 0);
+        cloudKey = "";
+      }
     }
     __m("cloudmask");
     const cloud = el("canvas", { class: "cloud", width: CW, height: CH });
@@ -510,41 +520,59 @@ export default {
 
     __m("birds-init");
     // ----------------------------------------------- wires and captions
-    const art = svgLayer(wrap);
-    const wireGroups = [];
+    // Each wire is its own small SVG band, so its sway is a cheap transform.
+    const bands = [];
     const rimes = [];
-    let wireLen = WSPAN;
+    const arc = []; // per wire: arc length at every 8 px of x, for placing text by x
     WIRES.forEach((q, w) => {
       const d = `M ${WX0} ${q.y0} Q ${WX0 + WSPAN / 2} ${q.yc} ${WX0 + WSPAN} ${q.y1}`;
-      const path = svg("path", { id: `mu-w${w}`, d, class: "wire" });
+      const band = svg("svg", { class: "band", width: W, height: q.bot - q.top, viewBox: `0 ${q.top} ${W} ${q.bot - q.top}` });
+      band.style.top = `${q.top}px`;
       const rime = svg("path", { d, class: "rime", transform: "translate(0 -2.2)", opacity: 0 });
-      const g = svg("g", {}, path, rime);
-      art.append(g);
-      wireGroups.push(g);
+      band.append(svg("path", { id: `mu-w${w}`, d, class: "wire" }), rime);
+      wrap.append(band);
+      bands.push(band);
       rimes.push(rime);
-      if (w === 0) wireLen = path.getTotalLength() || WSPAN;
+      const tab = new Float32Array(Math.ceil(WSPAN / 8) + 2);
+      let L = 0;
+      for (let k = 1; k < tab.length; k++) {
+        const x0 = WX0 + (k - 1) * 8;
+        L += Math.hypot(8, wireY(w, x0 + 8) - wireY(w, x0));
+        tab[k] = L;
+      }
+      arc.push(tab);
     });
     const onWire = (w, cls, anchor, ...kids) => {
       const tp = svg("textPath", { href: `#mu-w${w}` }, kids);
-      const text = svg("text", { class: cls, "text-anchor": anchor, dy: -9 }, tp);
-      wireGroups[w].append(text);
-      return { text, tp, node: kids.length ? null : tp };
+      const text = svg("text", { class: cls, "text-anchor": anchor, dy: -10 }, tp);
+      bands[w].append(text);
+      return { text, tp, w };
     };
-    const place = (item, x) => item.tp.setAttribute("startOffset", (((x - WX0) * wireLen) / WSPAN).toFixed(1));
-    const tDate = onWire(0, "date", "start");
-    const tTemp = onWire(0, "temp", "end");
-    const tCond = onWire(0, "cond", "end");
-    const sunLab = svg("tspan", { class: "soft" });
-    const sunVal = svg("tspan", { dx: 10 });
-    const tSun = onWire(1, "row2", "start", sunLab, sunVal);
-    const tMoon = onWire(1, "row2", "middle");
-    const aqiVal = svg("tspan", { dx: 10 });
-    const tAqi = onWire(1, "row2", "end", svg("tspan", { class: "lab", text: "AQI" }), aqiVal);
-    const uvVal = svg("tspan", { dx: 10 });
-    const tUv = onWire(1, "row2", "end", svg("tspan", { class: "lab", text: "UV" }), uvVal);
+    const place = (item, x) => {
+      const f = (x - WX0) / 8;
+      const k = Math.floor(f);
+      const tab = arc[item.w];
+      item.tp.setAttribute("startOffset", (tab[k] + (tab[k + 1] - tab[k]) * (f - k)).toFixed(1));
+    };
+    // wire 1: the air now (temperature and condition at the left, air quality and UV at the right)
+    const tTemp = onWire(0, "temp", "start");
+    const tCond = onWire(0, "cond", "start");
+    const aqiVal = svg("tspan", { class: "val", dx: 10 });
+    const uvVal = svg("tspan", { class: "val", dx: 10 });
+    const tAir = onWire(0, "lab", "end", svg("tspan", { text: "AQI" }), aqiVal, svg("tspan", { text: "UV", dx: 34 }), uvVal);
+    // wire 2: the calendar (date at the left, the moon at the right)
+    const tDate = onWire(1, "date", "start");
+    const tMoon = onWire(1, "val", "end");
+    // wire 3: the fact's label at the left, the sun's countdown at the right; the fact hangs below
     const tFactLab = onWire(2, "lab", "start");
+    const sunLab = svg("tspan", { class: "soft" });
+    const sunVal = svg("tspan", { class: "val", dx: 12 });
+    const tSun = onWire(2, "val", "end", sunLab, sunVal);
+    const ampmBox = svg("svg", { class: "ampmBox", width: 320, height: 160, viewBox: `${W - MARGIN - 320} ${MIN_BASE - 130} 320 160` });
+    Object.assign(ampmBox.style, { left: `${W - MARGIN - 320}px`, top: `${MIN_BASE - 130}px`, transformOrigin: "320px 130px" });
     const ampm = svg("text", { class: "ampm", "text-anchor": "end", x: W - MARGIN, y: MIN_BASE });
-    art.append(ampm);
+    ampmBox.append(ampm);
+    wrap.append(ampmBox);
     const fact = el("div", { class: "fact" });
     wrap.append(fact);
 
@@ -600,58 +628,54 @@ export default {
     }
 
     const GAP = 16;
+    const len = (t) => t.text.getComputedTextLength();
+    // Narrow the sans captions on one wire (Instrument Sans has a width axis) if they would not fit.
+    const fit = (items, room) => {
+      for (const t of items) t.text.style.fontStretch = "";
+      let total = 0;
+      for (const t of items) total += len(t);
+      if (total <= room) return;
+      const st = `${Math.max(75, Math.floor((100 * room) / total) - 1)}%`;
+      for (const t of items) t.text.style.fontStretch = st;
+    };
     function layoutCaptions(hasFact) {
       const full = W - 2 * MARGIN;
-      const len = (t) => t.text.getComputedTextLength();
-      // wire 1: date at the left; temperature and condition at the right
-      for (const t of [tDate, tCond]) t.text.style.fontStretch = "100%";
-      let wd = len(tDate), wc = len(tCond);
+      // wire 1
       const wt = len(tTemp);
-      const spare = full - wt - 20 - 46;
-      if (wd + wc > spare) {
-        const st = `${Math.max(75, Math.floor((100 * spare) / (wd + wc)) - 1)}%`;
-        for (const t of [tDate, tCond]) t.text.style.fontStretch = st;
-        wd = len(tDate);
-        wc = len(tCond);
-      }
+      fit([tCond, tAir], full - wt - 22 - 40);
+      const wc = len(tCond), wa = len(tAir);
+      place(tTemp, MARGIN - 4);
+      place(tCond, MARGIN + wt + 18);
+      place(tAir, W - MARGIN);
+      busy[0] = [[MARGIN - GAP, MARGIN + wt + 18 + wc + GAP], [W - MARGIN - wa - GAP, W - MARGIN + GAP]];
+      // wire 2
+      fit([tDate, tMoon], full - 48);
+      const wd = len(tDate), wm = len(tMoon);
       place(tDate, MARGIN);
-      place(tCond, W - MARGIN);
-      place(tTemp, W - MARGIN - wc - 20);
-      busy[0] = [[MARGIN - GAP, MARGIN + wd + GAP], [W - MARGIN - wc - 20 - wt - GAP, W - MARGIN + GAP]];
-      // wire 2: countdown, moon, air, UV
-      const row = [tSun, tMoon, tAqi, tUv];
-      for (const t of row) t.text.style.fontStretch = "100%";
-      let ws = len(tSun) + 10, wm = len(tMoon), wa = len(tAqi) + 10, wu = len(tUv) + 10;
-      if (ws + wm + wa + wu + 3 * 34 > full) {
-        const st = `${Math.max(75, Math.floor((100 * (full - 3 * 34)) / (ws + wm + wa + wu)) - 1)}%`;
-        for (const t of row) t.text.style.fontStretch = st;
-        ws = len(tSun) + 10; wm = len(tMoon); wa = len(tAqi) + 10; wu = len(tUv) + 10;
-      }
-      const aqiEnd = W - MARGIN - wu - 40;
-      const mid = (MARGIN + ws + aqiEnd - wa) / 2;
-      place(tSun, MARGIN);
-      place(tUv, W - MARGIN);
-      place(tAqi, aqiEnd);
-      place(tMoon, mid);
-      busy[1] = [[MARGIN - GAP, MARGIN + ws + GAP], [mid - wm / 2 - GAP, mid + wm / 2 + GAP], [aqiEnd - wa - GAP, W - MARGIN + GAP]];
-      // wire 3: the fact's label; the fact itself hangs below
-      busy[2] = [];
+      place(tMoon, W - MARGIN);
+      busy[1] = [[MARGIN - GAP, MARGIN + wd + GAP], [W - MARGIN - wm - GAP, W - MARGIN + GAP]];
+      // wire 3
       tFactLab.text.style.display = hasFact ? "" : "none";
       fact.style.display = hasFact ? "" : "none";
+      fit(hasFact ? [tFactLab, tSun] : [tSun], full - 48);
+      const ws = len(tSun);
+      place(tSun, W - MARGIN);
+      busy[2] = [[W - MARGIN - ws - GAP, W - MARGIN + GAP]];
       if (hasFact) {
         place(tFactLab, MARGIN);
-        busy[2] = [[MARGIN - GAP, MARGIN + len(tFactLab) + GAP]];
-        let fs = 44;
-        fact.style.fontSize = `${fs}px`;
-        while (fact.scrollHeight > 104 && fs > 36) {
-          fs -= 1;
+        busy[2].push([MARGIN - GAP, MARGIN + len(tFactLab) + GAP]);
+        // up to two lines; a long fact steps down in size rather than overflow
+        for (const fs of [46, 41, 37]) {
+          const lh = Math.round(fs * 1.13);
           fact.style.fontSize = `${fs}px`;
+          fact.style.lineHeight = `${lh}px`;
+          fact.style.maxHeight = `${2 * lh}px`;
+          if (fact.scrollHeight <= 2 * lh + 2) break;
         }
       }
       seatBirds();
     }
 
-    __m("captions");
     // -------------------------------------------------------------- inks
     const INK_DAY = "#0b0d12";
     const INK_NIGHT = "#a9a293"; // birds lit from below by the city
@@ -670,6 +694,7 @@ export default {
     let typeInk = "";
     let ampmInk = "";
     let cloudKey = "";
+    let cloudTint = "#888888";
     let rainInk = "";
     let snowInk = "";
     let perchDark = true;
@@ -680,18 +705,18 @@ export default {
       if (key !== skyKey) {
         skyKey = key;
         paintSky(s);
-        const low = lumRegion(MARGIN, W - MARGIN, 1500, 1850);
+        const low = lumRegion(MARGIN, W - MARGIN, 1380, 1820);
         const ink = low > FLIP ? TYPE_DAY : TYPE_NIGHT;
         if (ink !== typeInk) {
           typeInk = ink;
-          art.style.color = ink;
+          for (const b of bands) b.style.color = ink;
           fact.style.color = ink;
         }
         perchDark = low > FLIP;
         const side = lumRegion(880, 1020, MIN_BASE - 110, MIN_BASE) > FLIP ? TYPE_DAY : TYPE_NIGHT;
         if (side !== ampmInk) {
           ampmInk = side;
-          ampm.style.color = side;
+          ampmBox.style.color = side;
         }
         const mean = lumRegion(60, 1020, 100, 1400);
         birdFlip = lerp(0.155, 0.085, s.daylight);
@@ -702,14 +727,7 @@ export default {
         // cloud tint: lit from above by day, from the city below at night; heavy weather is darker than its sky
         const heavy = s.weather.kind === "storm" || s.weather.kind === "rain";
         const tint = heavy ? mix(sk.mean, "#05060a", 0.35) : mix(sk.mean, s.daylight > 0.5 ? "#ffffff" : "#8a7d74", 0.2 + 0.4 * s.daylight);
-        if (tint !== cloudKey) {
-          cloudKey = tint;
-          cloudCtx.globalCompositeOperation = "copy";
-          cloudCtx.drawImage(cloudMask, 0, 0);
-          cloudCtx.globalCompositeOperation = "source-in";
-          cloudCtx.fillStyle = tint;
-          cloudCtx.fillRect(0, 0, CW, CH);
-        }
+        cloudTint = tint;
         // ghosts take the ink that reads on their own patch of sky
         for (let k = 0; k < 4; k++) drawGhost(k);
       }
@@ -745,7 +763,7 @@ export default {
     // ------------------------------------------------------ the simulation
     const birds = canvas2d(wrap, { maxScale: 2, adaptive: true });
     birds.canvas.style.zIndex = "4";
-    grain(wrap, { opacity: 0.05 });
+    grain(wrap, { opacity: 0.05, size: 128 });
 
     const P = [R.range(0, TAU), R.range(0, TAU), R.range(0, TAU), R.range(0, TAU), R.range(0, TAU), R.range(0, TAU)];
     const sway = [0, 0, 0];
@@ -1030,11 +1048,12 @@ export default {
     }
 
     // ------------------------------------------------------------- drawing
+    let dbgS = 1, dbgB = 1, dbgR = 1;
     function draw(s, t) {
       const ctx = birds.ctx;
       birds.clear();
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
+      ctx.lineCap = dbgR ? "round" : "butt";
+      ctx.lineJoin = dbgR ? "round" : "miter";
       const key = `${fog.toFixed(2)}`;
       if (key !== styleKey) {
         styleKey = key;
@@ -1063,7 +1082,7 @@ export default {
         if (cj < 0) cj = 0; else if (cj >= SR) cj = SR - 1;
         dbk[i] = (skyLum[cj * SC + ci] < birdFlip ? 1 : 0) + 2;
       }
-      for (let b = 0; b < 4; b++) {
+      for (let b = 0; b < (dbgS ? 4 : 0); b++) {
         ctx.fillStyle = dotStyles[b];
         ctx.beginPath();
         for (let i = b < 2 ? 0 : NDG; i < ND; i++) {
@@ -1087,7 +1106,7 @@ export default {
         }
         bk[i] = (i >= NG ? (perched[i - NG] ? 100 : 6) : 0) + size[i] * 2 + light;
       }
-      for (let b = 0; b < 12; b++) {
+      for (let b = 0; b < (dbgB ? 12 : 0); b++) {
         const from = b >= 6 ? NG : 0;
         const to = b >= 6 ? N : NG;
         ctx.strokeStyle = styles[b];
@@ -1242,14 +1261,22 @@ export default {
       const sk = `skewX(${((-Math.atan(shear) * 180) / Math.PI).toFixed(2)}deg)`;
       if (shown.ampmTf !== sk) {
         shown.ampmTf = sk;
-        ampm.style.transformOrigin = `${W - MARGIN}px ${MIN_BASE}px`;
-        ampm.style.transform = sk;
+        ampmBox.style.transform = sk;
       }
       // clouds drift with the wind
       const ux = -Math.sin((wx.windDir * Math.PI) / 180);
       cloudX = (((cloudX - ux * (3 + wx.wind * 1.1) * dt) % 2160) + 2160) % 2160;
       cloud.style.transform = `translate(${(-cloudX).toFixed(1)}px, 0)`;
-      const cop = +(clamp(wx.cloud / 100) * (0.5 - 0.2 * night) + 0.25 * fog).toFixed(3);
+      if (cloudRow < CH) buildCloudRows(8);
+      if (cloudRow >= CH && cloudKey !== cloudTint) {
+        cloudKey = cloudTint;
+        cloudCtx.globalCompositeOperation = "copy";
+        cloudCtx.drawImage(cloudMask, 0, 0);
+        cloudCtx.globalCompositeOperation = "source-in";
+        cloudCtx.fillStyle = cloudTint;
+        cloudCtx.fillRect(0, 0, CW, CH);
+      }
+      const cop = cloudRow < CH ? 0 : +(clamp(wx.cloud / 100) * (0.5 - 0.2 * night) + 0.25 * fog).toFixed(3);
       if (shown.cop !== cop) {
         shown.cop = cop;
         cloud.style.opacity = cop;
@@ -1263,7 +1290,7 @@ export default {
         const y = sway[w].toFixed(1);
         if (shown[`sw${w}`] !== y) {
           shown[`sw${w}`] = y;
-          wireGroups[w].setAttribute("transform", `translate(0 ${y})`);
+          bands[w].style.transform = `translate3d(0, ${y}px, 0)`;
         }
       }
       const rime = wx.falling === "snow" ? +(0.35 + 0.5 * wx.intensity).toFixed(2) : 0;
@@ -1271,7 +1298,11 @@ export default {
         shown.rime = rime;
         for (const r of rimes) r.setAttribute("opacity", rime);
       }
-      fact.style.transform = `translate(0, ${(sway[2] * 0.5).toFixed(1)}px)`;
+      const fy = (sway[2] * 0.6).toFixed(1);
+      if (shown.fy !== fy) {
+        shown.fy = fy;
+        fact.style.transform = `translate3d(0, ${fy}px, 0)`;
+      }
     }
 
     // Start already in full flight: place every bird, then let the flock run for a few seconds.
@@ -1280,9 +1311,11 @@ export default {
     syncLook(state);
     __m("synclook");
     step(state, 1 / 30, -3);
-    for (let f = 0; f < 8; f++) step(state, 1 / 10, -3 + (f + 1) / 10);
+    step(state, 1 / 10, -2.9);
 
     __m("warm");
+    {const bench=(a,b,r)=>{dbgS=a;dbgB=b;dbgR=r;birds.ctx.lineCap=r?"round":"butt";birds.ctx.lineJoin=r?"round":"miter";const t0=performance.now();for(let k=0;k<6;k++){draw(state,k*0.1);birds.ctx.getImageData(0,0,1,1);}return ((performance.now()-t0)/6).toFixed(1);};
+     const res=[];for(let rep=0;rep<2;rep++)res.push("all:"+bench(1,1,1),"specks:"+bench(1,0,1),"birds:"+bench(0,1,1),"birdsButt:"+bench(0,1,0),"none:"+bench(0,0,1));console.warn("BENCH "+res.join(" "));dbgS=1;dbgB=1;}
     {let o=[];for(let i=1;i<__T.length;i+=2)o.push(__T[i]+":"+(__T[i+1]-(i>1?__T[i-1]:__T[0])).toFixed(1));console.warn("MOUNT "+o.join(" "));}
     return {
       frame(s) {
