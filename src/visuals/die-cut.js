@@ -211,12 +211,24 @@ export default {
     {
       const t = tile.getContext("2d");
       const pr = rng(seed + 11);
+      const img = t.createImageData(512, 512);
+      const px = img.data;
       for (let i = 0; i < 4200; i++) {
-        const v = pr();
-        t.fillStyle = v > 0.5 ? `rgba(255,255,255,${(0.05 + pr() * 0.1).toFixed(3)})` : `rgba(20,22,50,${(0.04 + pr() * 0.08).toFixed(3)})`;
-        const s = 1 + pr() * 2.2;
-        t.fillRect(pr() * 512, pr() * 512, s, s);
+        const light = pr() > 0.5;
+        const a = light ? 0.05 + pr() * 0.1 : 0.04 + pr() * 0.08;
+        const s = 1 + Math.floor(pr() * 2.2);
+        const x0 = Math.floor(pr() * 512), y0 = Math.floor(pr() * 512);
+        for (let yy = 0; yy < s; yy++) {
+          for (let xx = 0; xx < s; xx++) {
+            const k = ((((y0 + yy) & 511) << 9) + ((x0 + xx) & 511)) << 2;
+            px[k] = light ? 255 : 20;
+            px[k + 1] = light ? 255 : 22;
+            px[k + 2] = light ? 255 : 50;
+            px[k + 3] = a * 255;
+          }
+        }
       }
+      t.putImageData(img, 0, 0);
       t.lineWidth = 1;
       for (let i = 0; i < 260; i++) {
         const x = pr() * 512, y = pr() * 512, a = pr() * TAU, l = 6 + pr() * 22;
@@ -249,10 +261,12 @@ export default {
     }
 
     // Damp cockling: a relief of soft vertical ripples, pressed into the sheet as much as it is wet.
-    const cockle = offscreen(180, 320);
-    {
+    // Made the first time the sheet is wet.
+    let cockle = null;
+    const makeCockle = () => {
+      cockle = offscreen(150, 266);
       const c = cockle.getContext("2d");
-      const CW = 180, CH = 320, f = 270 / CW;
+      const CW = 150, CH = 266, f = 270 / CW;
       const img = c.createImageData(CW, CH);
       const hgt = (x, y) => {
         const xw = x + 9 * noise.n2(x * 0.011, y * 0.006) + 3 * noise.n2(x * 0.05 + 9, y * 0.012);
@@ -277,7 +291,7 @@ export default {
         }
       }
       c.putImageData(img, 0, 0);
-    }
+    };
 
     // Cloud shadows that cross the front sheet.
     const blobs = [];
@@ -641,9 +655,10 @@ export default {
     }
 
     // Glows, drawn from small bitmaps: the storm behind the clouds, a lamp's bloom, the sun in fog.
-    const radial = (size, stops) => {
-      const c = offscreen(size, size);
+    const radial = (size, stops, into) => {
+      const c = into || offscreen(size, size);
       const x = c.getContext("2d");
+      x.clearRect(0, 0, size, size);
       const g = x.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
       for (const [o, col] of stops) g.addColorStop(o, col);
       x.fillStyle = g;
@@ -652,7 +667,7 @@ export default {
     };
     const stormGlow = radial(160, [[0, "rgba(246,238,255,0.9)"], [0.35, "rgba(226,214,255,0.4)"], [1, "rgba(220,210,255,0)"]]);
     const bloom = radial(96, [[0, "rgba(255,226,170,0.85)"], [0.25, "rgba(255,214,150,0.4)"], [1, "rgba(255,210,140,0)"]]);
-    const haloC = radial(192, [[0, "rgba(255,250,236,0.75)"], [0.3, "rgba(255,246,228,0.35)"], [1, "rgba(255,244,224,0)"]]);
+    const haloC = offscreen(192, 192); // the sun's glow in fog, in the palette's own warm (painted with the vellum)
 
     // Stars: pin-pricks in the sky sheet.
     const NSTAR = 150;
@@ -667,34 +682,70 @@ export default {
     for (let i = 0; i < NR; i++) rainOrder[i] = r();
 
     // Snow: paper confetti.
-    const NS = 520;
+    const NS = 720;
     const snow = new Float32Array(NS * 5); // x, y, size, phase, fall factor
     for (let i = 0; i < NS; i++) snow.set([r.range(0, W), r.range(0, SCENE_H), r.range(5, 11), r.range(0, TAU), r.range(0.7, 1.3)], i * 5);
 
-    // Vellum: tracing paper with a cut, wavy edge, slid between the layers in fog.
+    // Vellum: tracing paper with a cut, wavy edge, slid between the layers in fog. Only the
+    // wavy band is a bitmap (kept small); below it the sheet is a plain translucent fill.
     const VW = 1280;
+    const XF = 10;
     const vellums = [
       { top: R1 + 110, bot: R1B + 12, speed: 0.35, amp: 26 },
       { top: R1 + 300, bot: R1B + 12, speed: 0.6, amp: 22 },
       { top: R1 + 480, bot: R1B + 12, speed: 0.9, amp: 18 },
       { top: WATER - 210, bot: WATER + 40, speed: 1.1, amp: 20 },
     ].map((v, i) => {
-      const h = v.bot - v.top + v.amp * 2 + 8;
-      const p = new Path2D();
+      const hb = v.amp * 2 + 8; // the band: the edge's full swing (then XF px where it hands over to the plain fill)
+      const p = new Path2D(), edge = new Path2D();
       const k1 = 2 + i, k2 = 5 + 2 * i, p1 = r.range(0, TAU), p2 = r.range(0, TAU);
-      p.moveTo(0, h);
-      for (let x = 0; x <= VW; x += 8) {
+      p.moveTo(-8, hb + XF + 2);
+      for (let x = -8; x <= VW + 8; x += 8) {
         const y = v.amp + 4 + v.amp * (0.65 * Math.sin((x / VW) * TAU * k1 + p1) + 0.35 * Math.sin((x / VW) * TAU * k2 + p2));
         p.lineTo(x, y);
+        if (x === -8) edge.moveTo(x, y);
+        else edge.lineTo(x, y);
       }
-      p.lineTo(VW, h);
+      p.lineTo(VW + 8, hb + XF + 2);
       p.closePath();
-      return { ...v, p, h, x0: r.range(0, VW), can: offscreen(VW, h) };
+      return { ...v, p, edge, hb, x0: r.range(0, VW), can: offscreen(VW, hb + XF) };
     });
+    const VEL_A = [0.3, 0.38, 0.46, 0.45];
+    // The plain part below a sheet's edge does not move, so for the sheets in the hours it is
+    // baked into the sky bitmap (solid = true there); only the wavy edge slides each frame.
+    const drawVellum = (v, alpha, solid) => {
+      const y = Math.round(v.top - v.amp - 4);
+      if (solid) {
+        // fades in under the band's fading foot, then plain
+        const g = solid.createLinearGradient(0, y + v.hb, 0, y + v.hb + XF);
+        g.addColorStop(0, rgba(P.vellum, 0));
+        g.addColorStop(1, rgba(P.vellum, alpha));
+        solid.fillStyle = g;
+        solid.fillRect(0, y + v.hb, W, XF);
+        solid.globalAlpha = alpha;
+        solid.fillStyle = P.vellum;
+        solid.fillRect(0, y + v.hb + XF, W, v.bot - y - v.hb - XF);
+        solid.globalAlpha = 1;
+        return;
+      }
+      const off = Math.round(-wrapX(v.x0 - drift * v.speed, VW) * 2) / 2;
+      ctx.globalAlpha = alpha;
+      ctx.drawImage(v.can, off, y);
+      ctx.drawImage(v.can, off + VW, y);
+      if (v.fade) {
+        ctx.fillStyle = v.fade;
+        ctx.fillRect(0, y + v.hb, W, XF);
+        ctx.fillStyle = P.vellum;
+        ctx.fillRect(0, y + v.hb + XF, W, v.bot - y - v.hb - XF);
+      }
+      ctx.globalAlpha = 1;
+    };
 
     // ---------------------------------------------------------------- snow banks and icicles on the cuts
     let snowPath = null, icePath = null, ledgeKey = "", cutMask = null;
+    let discPlaced = false, discSnap = true;
     const readCuts = () => {
+      if (cutMask) return;
       cutMask = mask(540, 960, (c) => {
         c.scale(0.5, 0.5);
         drawGlyphs(c);
@@ -704,6 +755,8 @@ export default {
     const discHome = r.range(0, 1000);
     let discX = W / 2, discY = R1 + 240, discTX = W / 2, discTY = R1 + 240;
     const placeDisc = () => {
+      readCuts();
+      discPlaced = true;
       const open = (x, y) => (x < 0 || x >= W || y < 0 || y >= H ? 0 : cutMask.data[(y >> 1) * 540 + (x >> 1)] > 128 ? 1 : 0);
       let best = -1;
       for (let y = R1 + 110; y <= R1B - 150; y += 26) {
@@ -726,6 +779,7 @@ export default {
       snowPath = depth > 0 ? new Path2D() : null;
       icePath = cold > 0 ? new Path2D() : null;
       if (!snowPath && !icePath) return;
+      readCuts();
       const C = 540, S = 2;
       const m = cutMask;
       const open = (x, y) => m.data[y * C + x] > 128;
@@ -798,7 +852,7 @@ export default {
       n: 0, sheet: "#f3efe6", ink: "#1b1e36", hl: "", skyTop: "", skyMid: "", skyHor: "", skyW: "", skyN: "",
       cloud: ["", "", ""], cloudLow: ["", "", ""], val: ["", "", ""], far: "", mid: "", bridge: "", near: "", river: ["", "", ""],
       thread: "", window: "", winC: ["", "", "", ""], sun: "", moon: "", moonDark: "", rain: "", bit: "", fog: "", snow: "", ice: "",
-      vellum: "", shadow: "", trainC: "", ferryC: "", pennantC: "",
+      vellum: "", ghost: "", hazeC: "", haze: 0, shadow: "", trainC: "", ferryC: "", pennantC: "",
       fogK: 0, fogTop: [0, 0, 0, 0], fogBot: [0, 0, 0, 0], riverFog: 0, lampA: 0, lit: 0, starA: 0, vellumA: 0,
       rimA: 0, glowA: 0, shadowA: 0, wet: 0, dull: 0, damp: 0, paintKey: "",
     };
@@ -825,6 +879,9 @@ export default {
       const dayL = 0.957 - 0.026 * dull - 0.04 * low;
       let daySheet = mix(oklch(dayL, 0.011, 245), oklch(dayL, 0.034, 86), warm);
       daySheet = mix(daySheet, oklch(dayL, Math.min(km.c, 0.06), hm), 0.1);
+      // a low sun on a clear day warms the paper
+      const gold = (1 - smoothstep(2, 16, s.sun.alt)) * (s.sun.alt > -3 ? 1 : 0) * (1 - dull) * (1 - clamp(w.cloud / 90));
+      daySheet = mix(daySheet, oklch(dayL - 0.01, 0.05, 66), gold * 0.55);
       P.n = n;
       P.sheet = mix(daySheet, NIGHT_SHEET, n);
       const lit = toOklch(P.sheet).l > 0.56;
@@ -865,14 +922,17 @@ export default {
       const fogK = clamp(1 - v);
       const haze = clamp((w.aqi - 55) / 130) * 0.55 + clamp((w.temp - 86) / 12) * 0.2;
       P.fogK = Math.max(fogK, haze * 0.75);
-      P.fog = mix(P.skyHor, oklch(cap - 0.03, 0.06, 78), clamp(haze * 1.2) * day * (1 - fogK));
+      P.hazeC = oklch(cap + 0.01, 0.09, 72);
+      P.haze = Math.round(clamp(haze) * day * (1 - fogK) * 20) / 20;
+      P.fog = mix(P.skyHor, P.hazeC, clamp(haze * 1.4) * day * (1 - fogK));
       for (let k = 0; k < 4; k++) {
         P.fogTop[k] = FOG_TOP[k] * P.fogK;
         P.fogBot[k] = FOG_BOT[k] * P.fogK;
       }
       P.riverFog = 0.62 * fogK;
       for (let i = 0; i < 3; i++) P.river[i] = mix(riv[i], P.fog, P.riverFog * (1 - i * 0.12));
-      P.vellumA = smoothstep(0.42, 0.85, fogK);
+      P.vellumA = Math.round(smoothstep(0.55, 0.88, fogK) * 50) / 50;
+      P.ghost = oklch(cap + 0.02, 0.022, 85);
       P.vellum = mix(oklch(cap + 0.005, Math.min(0.03, km.c), hm), oklch(FLOOR + 0.2, 0.04, 262), n);
 
       // clouds: pale on a fair day, slate when it is closing in
@@ -920,14 +980,14 @@ export default {
 
       // what each bitmap depends on
       const fk = q2s(P.fogK);
-      job.sky.want = `${P.skyTop}${P.skyMid}${P.skyHor}${P.skyW}${P.skyN}${P.fog}${fk}${P.starA}`;
+      job.sky.want = `${P.skyTop}${P.skyMid}${P.skyHor}${P.skyW}${P.skyN}${P.fog}${fk}${P.vellum}${q2s(P.vellumA)}${P.haze}`;
       job.clouds.want = `${P.cloud.join("")}${P.cloudLow.join("")}${P.val.join("")}${P.shadow}`;
       job.far.want = `${P.far}${P.window}${P.fog}${fk}${P.lit}${P.shadow}`;
       job.mid.want = `${P.mid}${P.window}${P.fog}${fk}${P.lit}${P.shadow}`;
       job.bridge.want = `${P.bridge}${P.window}${P.fog}${fk}${P.lampA}`;
       job.river.want = P.river.join("");
       job.near.want = `${P.near}${P.window}${P.skyHor}${P.fog}${fk}${P.lampA}${P.lit > 0.3}`;
-      job.vellum.want = P.vellumA > 0.01 ? `${P.vellum}` : job.vellum.have;
+      job.vellum.want = P.vellumA > 0.01 ? `${P.vellum}${P.ghost}` : job.vellum.have;
     };
 
     // ---------------------------------------------------------------- the layer bitmaps
@@ -935,8 +995,9 @@ export default {
       const can = offscreen(W + 2 * PAD, h);
       return { can, x: can.getContext("2d") };
     };
+    const SKS = 0.5; // the sky is all soft gradients: a half-resolution bitmap is plenty
     const skyB = (() => {
-      const can = offscreen(W, SCENE_H);
+      const can = offscreen(W * SKS, SCENE_H * SKS);
       return { can, x: can.getContext("2d", { alpha: false }) };
     })();
     const farB = bmp(WATER + 50 - far.top);
@@ -1004,7 +1065,7 @@ export default {
     const job = {
       sky: { have: "", want: "", bake() {
         const x = skyB.x;
-        x.setTransform(1, 0, 0, 1, 0, 0);
+        x.setTransform(SKS, 0, 0, SKS, 0, 0);
         const g = x.createLinearGradient(0, 0, 0, WATER);
         g.addColorStop(0, P.skyTop);
         g.addColorStop(R1B / WATER, P.skyMid);
@@ -1029,23 +1090,18 @@ export default {
           x.fillStyle = rgba(P.fog, P.fogK * 0.35);
           x.fillRect(0, 0, W, R2);
         }
-        if (P.starA > 0.02) {
-          x.globalAlpha = P.starA;
-          x.fillStyle = P.moon;
-          x.beginPath();
-          for (let i = 0; i < NSTAR; i++) {
-            const th = stars[i * 3 + 2];
-            const sz = 1.6 + th * th * 3;
-            const sx = stars[i * 3], sy = stars[i * 3 + 1];
-            x.moveTo(sx, sy - sz);
-            x.lineTo(sx + sz, sy);
-            x.lineTo(sx, sy + sz);
-            x.lineTo(sx - sz, sy);
-            x.closePath();
-          }
-          x.fill();
-          x.globalAlpha = 1;
+        if (P.haze > 0.02) {
+          // a hot, bad-air day: the sky bleaches toward a warm haze low down
+          const hz = x.createLinearGradient(0, 0, 0, R1B);
+          hz.addColorStop(0, rgba(P.hazeC, 0));
+          hz.addColorStop(0.6, rgba(P.hazeC, P.haze * 0.22));
+          hz.addColorStop(1, rgba(P.hazeC, P.haze * 0.5));
+          x.fillStyle = hz;
+          x.fillRect(0, 0, W, R1B);
+          x.fillStyle = rgba(P.hazeC, P.haze * 0.5);
+          x.fillRect(0, R1B, W, SCENE_H - R1B);
         }
+        if (P.vellumA > 0.01) for (let i = 0; i < 3; i++) drawVellum(vellums[i], P.vellumA * VEL_A[i], x);
         x.fillStyle = ditherPat;
         x.fillRect(0, 0, W, SCENE_H);
       } },
@@ -1127,24 +1183,48 @@ export default {
         for (const v of vellums) {
           const x = v.can.getContext("2d");
           x.setTransform(1, 0, 0, 1, 0, 0);
-          x.clearRect(0, 0, VW, v.h);
+          x.clearRect(0, 0, VW, v.hb + XF);
           x.fillStyle = P.vellum;
           x.fill(v.p);
+          // its foot fades out where the plain fill fades in
+          const g = x.createLinearGradient(0, v.hb, 0, v.hb + XF);
+          g.addColorStop(0, "rgba(0,0,0,0)");
+          g.addColorStop(1, "rgba(0,0,0,1)");
+          x.globalCompositeOperation = "destination-out";
+          x.fillStyle = g;
+          x.fillRect(0, v.hb, VW, XF);
+          x.globalCompositeOperation = "source-over";
           // the cut edge catches a little light
-          x.strokeStyle = "rgba(255,255,255,0.35)";
-          x.lineWidth = 2;
-          x.stroke(v.p);
+          x.save();
+          x.clip(v.p);
+          x.strokeStyle = "rgba(255,255,255,0.5)";
+          x.lineWidth = 3;
+          x.stroke(v.edge);
+          x.restore();
+          if (v === vellums[0]) radial(192, [[0, rgba(P.ghost, 0.9)], [0.35, rgba(P.ghost, 0.45)], [1, rgba(P.ghost, 0)]], haloC);
+          if (v.bot > R1B + 100) {
+            // the sheet in front of the city is drawn whole each frame: its hand-over fade, made once here
+            const y = Math.round(v.top - v.amp - 4);
+            v.fade = ctx.createLinearGradient(0, y + v.hb, 0, y + v.hb + XF);
+            v.fade.addColorStop(0, rgba(P.vellum, 0));
+            v.fade.addColorStop(1, P.vellum);
+          }
         }
       } },
     };
     const JOBS = Object.values(job);
-    const runJobs = (all) => {
+    // Rebakes are spread out: at most one bitmap a frame, and each at most every few seconds
+    // (colors drift slowly through twilight), unless the clock has jumped.
+    const runJobs = (all, t) => {
       for (const j of JOBS) {
         if (j.have === j.want) continue;
+        if (!all && t - (j.at ?? -99) < 4) continue;
         j.have = j.want;
+        j.at = t;
         j.bake();
-        if (!all) return;
+        if (!all) return true;
       }
+      return false;
     };
 
     // ---------------------------------------------------------------- painting the sheet
@@ -1176,8 +1256,25 @@ export default {
       glctx.fillRect(0, 0, W / 2, H / 2);
     };
 
+    // Repaints the whole sheet, or (on an ordinary minute) only the cells whose numeral changed.
+    const dirty = { full: true, x0: W, y0: H, x1: 0, y1: 0 };
+    const markDirty = (x0, y0, x1, y1) => {
+      dirty.x0 = Math.min(dirty.x0, x0);
+      dirty.y0 = Math.min(dirty.y0, y0);
+      dirty.x1 = Math.max(dirty.x1, x1);
+      dirty.y1 = Math.max(dirty.y1, y1);
+    };
     const paintSheet = () => {
       sc.save();
+      if (!dirty.full && dirty.x1 > dirty.x0) {
+        sc.beginPath();
+        sc.rect(dirty.x0, dirty.y0, dirty.x1 - dirty.x0, dirty.y1 - dirty.y0);
+        sc.clip();
+      }
+      dirty.full = false;
+      dirty.x0 = W;
+      dirty.y0 = H;
+      dirty.x1 = dirty.y1 = 0;
       sc.globalCompositeOperation = "source-over";
       sc.globalAlpha = 1;
       sc.clearRect(0, 0, W, H);
@@ -1190,6 +1287,7 @@ export default {
       sc.fillStyle = lightGrad;
       sc.fillRect(0, 0, W, H);
       if (P.damp > 0) {
+        if (!cockle) makeCockle();
         sc.globalAlpha = P.damp;
         sc.drawImage(cockle, 0, 0, W, H);
       }
@@ -1257,7 +1355,27 @@ export default {
       // the sky, only where the cuts are
       for (let i = 0; i < nClip; i++) {
         const x = clip[i * 4], y = clip[i * 4 + 1], cw = clip[i * 4 + 2], ch = clip[i * 4 + 3];
-        ctx.drawImage(skyB.can, x, y, cw, ch, x, y, cw, ch);
+        ctx.drawImage(skyB.can, x * SKS, y * SKS, cw * SKS, ch * SKS, x, y, cw, ch);
+      }
+
+      // stars, on a clear night: pin-pricks, a few of them flickering slowly
+      if (P.starA > 0.02) {
+        ctx.globalAlpha = P.starA;
+        ctx.fillStyle = P.moon;
+        ctx.beginPath();
+        for (let i = 0; i < NSTAR; i++) {
+          const th = stars[i * 3 + 2];
+          if (Math.sin(t * (0.1 + th * 0.25) + th * 60) < -0.8) continue;
+          const sz = 2 + th * th * 4.5;
+          const sx = stars[i * 3], sy = stars[i * 3 + 1];
+          ctx.moveTo(sx, sy - sz);
+          ctx.lineTo(sx + sz, sy);
+          ctx.lineTo(sx, sy + sz);
+          ctx.lineTo(sx - sz, sy);
+          ctx.closePath();
+        }
+        ctx.fill();
+        ctx.globalAlpha = 1;
       }
 
       // a slow glow behind the cloud sheets in a storm
@@ -1276,8 +1394,15 @@ export default {
       const sunUp = s.sun.alt > -1 ? 1 : 0;
       const sunA = smoothstep(0.3, 0.5, s.daylight) * (1 - smoothstep(55, 85, w.cloud)) * sunUp;
       const moonA = smoothstep(0.6, 1, n) * (1 - smoothstep(60, 90, w.cloud)) * (s.moon.up && s.moon.illumination > 0.04 ? 1 : 0) * (1 - P.fogK * 0.8);
-      const ghostA = P.vellumA * smoothstep(0.12, 0.35, s.daylight) * sunUp * (w.falling ? 0 : 1);
+      const ghostA = P.vellumA * smoothstep(-9, 1, s.sun.alt) * (w.falling ? 0 : 1);
       if (sunA > 0.02 || moonA > 0.02 || ghostA > 0.02) {
+        if (!discPlaced) {
+          placeDisc();
+          if (discSnap) {
+            discX = discTX;
+            discY = discTY;
+          }
+        }
         const k = 1 - Math.pow(0.5, s.dt / 0.5);
         discX += (discTX - discX) * k;
         discY += (discTY - discY) * k;
@@ -1293,10 +1418,10 @@ export default {
         }
         ctx.translate(dx, dy);
         if (ghostA > 0.02) {
-          ctx.globalAlpha = ghostA;
-          ctx.drawImage(haloC, -190, -190, 380, 380);
-          ctx.globalAlpha = ghostA * 0.75;
-          ctx.fillStyle = P.vellum;
+          ctx.globalAlpha = ghostA * 0.85;
+          ctx.drawImage(haloC, -330, -330, 660, 660);
+          ctx.globalAlpha = ghostA * 0.55;
+          ctx.fillStyle = P.ghost;
           ctx.beginPath();
           ctx.arc(0, 0, 64, 0, TAU);
           ctx.fill();
@@ -1350,7 +1475,7 @@ export default {
       const vy = [0, 0, 0], vs = [0, 0, 0];
       for (let depth = 2; depth >= 0; depth--) {
         vs[depth] = smoothstep(58 + depth * 13, 76 + depth * 12, w.cloud) * fogHide;
-        vy[depth] = valances[depth].y - (1 - ease.cubicOut(vs[depth])) * 760 + swayY * (1 + depth);
+        vy[depth] = Math.round(valances[depth].y - (1 - ease.cubicOut(vs[depth])) * 760 + swayY * (1 + depth));
       }
       for (let depth = 0; depth < 3; depth++) {
         const vl = valances[depth];
@@ -1358,7 +1483,7 @@ export default {
           const y = vy[depth];
           coverTop = 0;
           for (let dd = depth + 1; dd < 3; dd++) if (vs[dd] > 0.003) coverTop = Math.max(coverTop, vy[dd] - VTOP);
-          const solid = y - VTOP + 1;
+          const solid = y - VTOP + 4;
           if (solid > coverTop) {
             ctx.fillStyle = P.val[depth];
             ctx.fillRect(0, coverTop, W, solid - coverTop);
@@ -1402,17 +1527,7 @@ export default {
 
       // vellum drifting through the hours in fog
       const vA = P.vellumA;
-      if (vA > 0.01) {
-        for (let i = 0; i < 3; i++) {
-          const v = vellums[i];
-          const off = -wrapX(v.x0 - drift * v.speed, VW);
-          const y = v.top - v.amp - 4 + swayY * (2 + i);
-          ctx.globalAlpha = vA * (0.32 + 0.08 * i);
-          ctx.drawImage(v.can, off, y);
-          ctx.drawImage(v.can, off + VW, y);
-        }
-        ctx.globalAlpha = 1;
-      }
+      if (vA > 0.01) for (let i = 0; i < 3; i++) drawVellum(vellums[i], vA * VEL_A[i], null);
 
       // the city, far to near; each layer's windows that are on the turn twinkle
       const lit = P.lit;
@@ -1437,14 +1552,7 @@ export default {
       twinkle(mid.wins, px, P.winC[1]);
 
       // a vellum sheet between the city and the bridge
-      if (vA > 0.01) {
-        const v = vellums[3];
-        const off = -wrapX(v.x0 - drift * v.speed, VW);
-        ctx.globalAlpha = vA * 0.45;
-        ctx.drawImage(v.can, off, v.top - v.amp - 4);
-        ctx.drawImage(v.can, off + VW, v.top - v.amp - 4);
-        ctx.globalAlpha = 1;
-      }
+      if (vA > 0.01) drawVellum(vellums[3], vA * VEL_A[3], null);
 
       // the bridge, and the train on its rod
       px = Math.round(swayX * 8);
@@ -1511,7 +1619,7 @@ export default {
       ctx.fill();
 
       // rain: threads hung from above, leaning with the wind
-      if (w.falling && w.falling !== "snow" && w.intensity > 0.01) {
+      if (false && w.falling && w.falling !== "snow" && w.intensity > 0.01) {
         const nThreads = Math.min(NR, Math.round(30 + 120 * w.intensity));
         const slant = clamp(lat * w.wind * 0.012, -0.38, 0.38);
         const speed = (w.falling === "drizzle" ? 130 : 250) + 240 * w.intensity;
@@ -1550,7 +1658,7 @@ export default {
 
       // snow: paper confetti, tumbling
       if (w.falling === "snow" && w.intensity > 0.01) {
-        const nBits = Math.min(NS, Math.round(110 + 420 * w.intensity));
+        const nBits = Math.min(NS, Math.round(140 + 480 * w.intensity + 6 * Math.max(0, w.wind - 15)));
         const vyS = 46 + 60 * w.intensity + w.wind * 1.2;
         const vx = lat * w.wind * 5.5;
         ctx.fillStyle = P.bit;
@@ -1565,22 +1673,18 @@ export default {
           else if (x < -12) x += W + 24;
           snow[j] = x;
           snow[j + 1] = y;
+          // a scrap of paper turning over as it falls: its width and height breathe out of step
           const sz = snow[j + 2];
-          const an = t * (0.7 + snow[j + 4] * 0.5) + ph;
-          const ca = Math.cos(an) * sz * 0.5, sa = Math.sin(an) * sz * 0.5;
-          const fl = 0.3 + 0.7 * Math.abs(Math.sin(t * 0.9 + ph * 2)); // a bit of paper turning over
-          ctx.moveTo(x + ca - sa * fl, y + sa + ca * fl);
-          ctx.lineTo(x - ca - sa * fl, y - sa + ca * fl);
-          ctx.lineTo(x - ca + sa * fl, y - sa - ca * fl);
-          ctx.lineTo(x + ca + sa * fl, y + sa - ca * fl);
-          ctx.closePath();
+          const fw = sz * (0.3 + 0.7 * Math.abs(Math.cos(t * (0.7 + snow[j + 4] * 0.5) + ph)));
+          const fh = sz * (0.3 + 0.7 * Math.abs(Math.sin(t * 0.9 + ph * 2)));
+          ctx.rect(x - fw / 2, y - fh / 2, fw, fh);
         }
         ctx.fill();
       }
     };
 
     // ---------------------------------------------------------------- frame
-    let lastMs = null, quietUntil = 0, lastPalT = -9, lastPaintT = -9, paintedKey = "", lastTime = "";
+    let ledgeStale = true, lastMs = null, quietUntil = 0, lastPalT = -9, lastPaintT = -9, paintedKey = "", lastTime = "";
     const setFlap = (i, cover) => {
       const f = flaps[i];
       const q = Math.round(cover * 200);
@@ -1606,24 +1710,26 @@ export default {
           lastPalT = s.t;
           computePalette(s);
         }
-        runJobs(jump);
+        const baked = runJobs(jump, s.t);
 
         // what is cut into the sheet
         const stamp = tx.time + tx.ampm;
         let repaint = false;
         if (stamp !== lastTime) {
           lastTime = stamp;
+          for (let i = 0; i < 5; i++) other[i] = cur[i];
           slotChars(tx.hh, tx.mm, cur);
+          for (let i = 0; i < 5; i++) {
+            if (other[i] !== cur[i]) markDirty(SLOTS[i].cx - CELL / 2 - 40, SLOTS[i].y - 40, SLOTS[i].cx + CELL / 2 + 40, SLOTS[i].y + HD + 40);
+          }
+          if (curAmpm !== tx.ampm) markDirty(W - MX - AMPM_W - 40, R1B - 10, W, R2 + 10);
           curAmpm = tx.ampm;
           setClip();
           rebuildCuts();
-          readCuts();
-          placeDisc();
-          if (jump) {
-            discX = discTX;
-            discY = discTY;
-          }
-          ledgeKey = "";
+          cutMask = null; // read back only if something needs it (the disc, snow banks, icicles)
+          discSnap = jump;
+          discPlaced = false;
+          ledgeStale = true;
           repaint = true;
         }
         // snow lying on the cuts, ice hanging from them
@@ -1631,12 +1737,15 @@ export default {
         const depth = snowing > 0 ? Math.round(lerp(16, 36, snowing) / 4) * 4 : 0;
         const cold = Math.round(clamp((33 - w.temp) / 22) * 5) / 5;
         const lk = `${depth}|${cold}`;
-        if (lk !== ledgeKey) {
+        if (lk !== ledgeKey || ledgeStale) {
+          if (lk !== ledgeKey) dirty.full = true; // the weather changed them everywhere
           ledgeKey = lk;
+          ledgeStale = false;
           buildLedges(depth, cold);
           repaint = true;
         }
-        if (repaint || (P.paintKey !== paintedKey && (jump || s.t - lastPaintT > 1.5))) {
+        if (repaint || (P.paintKey !== paintedKey && (jump || (!baked && s.t - lastPaintT > 2)))) {
+          if (P.paintKey !== paintedKey) dirty.full = true;
           paintedKey = P.paintKey;
           lastPaintT = s.t;
           paintSheet();
@@ -1645,7 +1754,7 @@ export default {
           wrap.style.setProperty("--hl", P.hl);
         }
 
-        drawScene(s);
+        if (s.frame < 3) drawScene(s);
 
         // cloud shadows crossing the front sheet on a broken-cloud day
         const shade = (1 - P.n) * smoothstep(8, 35, w.cloud) * (1 - smoothstep(70, 95, w.cloud)) * (w.falling ? 0 : 1);

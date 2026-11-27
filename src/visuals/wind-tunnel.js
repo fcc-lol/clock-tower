@@ -1,17 +1,19 @@
 // Wind Tunnel
 //
 // The hour stands in a smoke tunnel, seen from above with north at the top.
-// The numerals are solid bodies; ninety smoke filaments are blown past them
+// The numerals are solid bodies; 58 smoke filaments are blown past them
 // from wherever the real wind is coming from, at the real wind's speed. The
 // smoke parts around the digits, speeds up over their shoulders and rolls up
 // into vortices behind them. Every other readout is in the tunnel too: each
 // line of type is a small streamlined body, so the smoke divides around the
-// words and closes again behind them.
+// words and closes again behind them. The small readouts sit in two columns
+// under the time, flush left and flush right like the hours and the minutes.
 //
 // How the conditions drive it:
 //   wind direction  where the smoke enters (a west wind enters at the left)
 //   wind speed      how fast the smoke travels (8 + 5 px/s per mph, capped),
-//                   and how hard and how often the digits shed vortices
+//                   how hard and how often the digits shed vortices, and how
+//                   rough the open stream is: a gale wrinkles every filament
 //   gusts           how strong and irregular the shed vortices are, plus
 //                   slow surges in speed: steady air gives tidy, nearly
 //                   stationary wakes, gusty air ragged vortex streets
@@ -32,7 +34,9 @@
 // digit sheds point vortices from alternate flanks (Strouhal-like timing,
 // strength from wind and gusts), which are carried by the flow and splatted
 // into a velocity grid. Each filament is a chain of particles emitted upwind
-// and carried by the sum, plus a little advected noise in the wakes.
+// and carried by the sum, plus a little advected noise in the wakes. Smoke
+// that the wakes stir up turns to haze, drawn on a tiny canvas so that
+// scaling it up blurs it; a soft glow layer and a crisp core sit above it.
 
 import {
   W, H, clamp, lerp, smoothstep, approach, rng, createNoise,
@@ -40,40 +44,42 @@ import {
 } from "../lib/kit.js";
 
 // filaments
-const NL = 80; // filaments in the rake
+const NL = 58; // filaments in the rake
 const NN = 88; // particles per filament
-const LINE_GAP = 32; // px between filaments
+const LINE_GAP = 44; // px between filaments
 // flow grid (the stage plus a margin, so the flow can spread)
-const CELL = 12;
-const GX0 = -240;
-const GY0 = -240;
-const GC = 130;
-const GR = 200;
+const CELL = 16;
+const GX0 = -228;
+const GY0 = -224;
+const GC = 96;
+const GR = 148;
 const GN = GC * GR;
 const INVH = 1 / CELL;
 const CX = W / 2;
 const CY = H / 2;
 const WAKE_LEN = 420; // px over which a digit's dead zone fades
-const KAPPA = 0.012; // how solid that dead zone is
+const KAPPA = 0.016; // how solid that dead zone is in a gale (it all but vanishes in light air)
 const MAXL = 120; // bodies at most
 // turbulence tile (periodic, sampled twice at different drifts)
-const TS = 128;
+const TS = 64;
 const TM = TS - 1;
-const TINV = 1 / 6;
+const TINV = 1 / 12;
 // drawing buckets: alpha levels of the crisp core and of the soft halo
 const NA = 8;
 const NB = NA + 1;
 const NH = 6;
 const NBH = NH + 1;
+const NZ = 5; // and the broad haze of smoke stirred up in a wake
+const NBZ = NZ + 1;
 // rain beads / snow flecks, rime, vortices, text bodies
 const NP = 560;
 const NRIME = 1400;
-const NV = 72;
+const NV = 44;
 const NCAP = 48;
-const PAD = 18; // clear air kept around every line of type
+const PAD = 22; // clear air kept around every line of type
 
 const NIGHT = "#060607";
-const PAPER = "#e6e2d9";
+const PAPER = "#ece9e1";
 const INK = "#111113";
 
 const fontStr = (px) => `800 expanded ${px}px "Archivo", "Arial Black", sans-serif`;
@@ -85,29 +91,30 @@ export default {
   fps: 30,
 
   mount(root, { state, seed }) {
-    const __T = [performance.now()]; // DIAG
     addStyle(root, `
       .wt { position: absolute; inset: 0; overflow: hidden; background: var(--bg); color: var(--ink);
             font-family: "Archivo", "Arial Black", sans-serif; font-kerning: normal; }
       .wt .nums text { font-family: "Archivo", "Arial Black", sans-serif; font-weight: 800; font-stretch: 125%; fill: var(--num); }
-      .wt .cap { font-family: "IBM Plex Mono", ui-monospace, monospace; font-weight: 500; font-size: 26px; line-height: 30px;
+      .wt .cap { font-family: "IBM Plex Mono", ui-monospace, monospace; font-weight: 500; font-size: 28px; line-height: 34px;
                  letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; color: var(--cap); }
       .wt .date { position: absolute; left: 64px; top: 60px; font-size: 48px; line-height: 56px; font-weight: 700;
                   font-stretch: 112%; white-space: nowrap; letter-spacing: -0.005em; }
-      .wt .hdr { position: absolute; left: 64px; right: 64px; top: 134px; display: flex; align-items: center; gap: 34px; }
+      .wt .hdr { position: absolute; left: 64px; right: 64px; top: 150px; display: flex; align-items: center; gap: 44px; }
       .wt .temp { flex: none; margin-left: -6px; font-size: 156px; line-height: 150px; font-weight: 800; font-stretch: 125%;
                   letter-spacing: -0.03em; white-space: nowrap; }
-      .wt .cw { min-width: 0; display: flex; flex-direction: column; gap: 10px; padding-top: 6px; }
+      .wt .cw { min-width: 0; display: flex; flex-direction: column; gap: 18px; padding-top: 6px; }
       .wt .cond { font-size: 48px; line-height: 56px; font-weight: 500; font-stretch: 100%; white-space: nowrap; }
       .wt .bot { position: absolute; left: 64px; right: 64px; bottom: 64px; display: flex; flex-direction: column; }
-      .wt .row { display: grid; grid-template-columns: 476px 1fr; row-gap: 34px; }
-      .wt .it .val { margin-top: 8px; font-size: 46px; line-height: 52px; font-weight: 700; font-stretch: 110%; white-space: nowrap; }
-      .wt .fact { margin-top: 46px; }
+      .wt .row { display: grid; grid-template-columns: 1fr auto; column-gap: 48px; row-gap: 36px; }
+      .wt .it:nth-child(even) { text-align: right; }
+      .wt .it .val { margin-top: 8px; font-size: 50px; line-height: 56px; font-weight: 700; font-stretch: 110%; white-space: nowrap; }
+      .wt .fact { margin-top: 58px; }
       .wt .fact .fv { margin-top: 10px; font-size: 40px; line-height: 48px; font-weight: 500; font-stretch: 100%; text-wrap: balance; }
     `);
 
     const wrap = el("div", { class: "wt" });
-    const glow = canvas2d(wrap, { adaptive: true, maxScale: 0.5 }); // soft smoke, drawn small and scaled up
+    const mist = canvas2d(wrap, { adaptive: true, maxScale: 0.125 }); // diffuse smoke: drawn tiny, so scaling it up blurs it
+    const glow = canvas2d(wrap, { adaptive: true, maxScale: 0.5 }); // the glow round each filament
     const layer = canvas2d(wrap, { adaptive: true });
     const ctx = layer.ctx;
     const nums = svgLayer(wrap, { class: "nums" });
@@ -169,7 +176,7 @@ export default {
     const FS = Math.floor(ROW_W / (2 * digitMax + GAPK));
     const CAP = FS * capK;
     const FS2 = Math.round(FS * 0.19);
-    const Y_HOURS = 352 + CAP; // baselines
+    const Y_HOURS = 368 + CAP; // baselines
     const Y_MINS = Y_HOURS + CAP * 0.25 + CAP;
     const Y_AMPM = Y_MINS + CAP * 0.17 + FS2 * capK;
 
@@ -287,9 +294,9 @@ export default {
 
     function buildBodies() {
       const mg = mask(GC, GR, drawGlyphs).data;
-      const mc = mask(GC, GR, drawCaps).data;
+      const mc = nCap ? mask(GC, GR, drawCaps).data : null;
       const solid = scratch; // reused as a flag here, as a distance below
-      for (let c = 0; c < GN; c++) solid[c] = !edge[c] && (mg[c] >= 100 || mc[c] >= 128) ? 1 : 0;
+      for (let c = 0; c < GN; c++) solid[c] = !edge[c] && (mg[c] >= 100 || (mc && mc[c] >= 128)) ? 1 : 0;
       // carry the old field across, so the new one starts close
       for (let c = 0; c < GN; c++) if (lab[c] && !solid[c]) psi[c] = psib[lab[c]];
       lab.fill(0);
@@ -379,6 +386,7 @@ export default {
 
     // The lee of every digit, swept downwind: where the wake noise acts and
     // where the dead zone holds the smoke apart. Lines of type block it.
+    let wakeWindy = -1;
     function buildWake() {
       S.fill(0);
       wlab.fill(0);
@@ -410,15 +418,18 @@ export default {
           wlab[c] = va >= vb ? wlab[a] : wlab[b];
         }
       }
+      wakeWindy = q.windy;
+      const kap = KAPPA * (0.1 + 0.9 * q.windy);
       for (let c = 0; c < GN; c++) {
         const s = S[c];
-        P[c] = lab[c] || s < 0.04 || !wlab[c] ? 0 : KAPPA * s * s;
+        P[c] = lab[c] || s < 0.04 || !wlab[c] ? 0 : kap * s * s;
       }
     }
 
     // Successive over-relaxation of Laplace's equation for the stream function.
     // Each body floats at its own constant (no circulation), and the dead zone
     // pulls the air behind a digit toward that digit's constant.
+    let relaxDelta = 0; // how much the last sweep changed the bodies' constants
     function relax(sweeps, om) {
       for (let it = 0; it < sweeps; it++) {
         for (let k = 0; k < nBody; k++) { const c = bodyIdx[k]; psi[c] = psib[lab[c]]; }
@@ -437,7 +448,12 @@ export default {
           }
         }
         for (let k = 0; k < nBnd; k++) { const l = bndL[k]; acc[l] += psi[bnd[k]]; accw[l] += 1; }
-        for (let l = 1; l <= nLab; l++) if (accw[l] > 0) psib[l] = acc[l] / accw[l];
+        relaxDelta = 0;
+        for (let l = 1; l <= nLab; l++) if (accw[l] > 0) {
+          const v = acc[l] / accw[l];
+          relaxDelta = Math.max(relaxDelta, Math.abs(v - psib[l]));
+          psib[l] = v;
+        }
       }
       for (let k = 0; k < nBody; k++) { const c = bodyIdx[k]; psi[c] = psib[lab[c]]; }
       const k2 = 1 / (2 * CELL);
@@ -506,7 +522,7 @@ export default {
     // ------------------------------------------------------------------
     const noise = createNoise(seed);
     const q = {
-      ux: 1, uy: 0, U: 40, vmax2: 1e4,
+      ux: 1, uy: 0, U: 40, vmax2: 1e4, windy: 0,
       wake: 10, amb0: 0, amb1: 0, nsc: 1, shed: 0, gusty: 0, surge: 0,
       calm: 0, fog: 0, cold: 0, heat: 0, storm: 0, cloud: 0,
       rain: 0, snow: 0, flash: 0,
@@ -520,7 +536,7 @@ export default {
       const gust = live ? Math.max(w.gust, mph) : 0;
       const surge = Math.pow(0.5 + 0.5 * noise.n2(s.t * 0.045, 9.1), 2); // slow gust surges, 0..1
       const gf = mph > 0.5 ? clamp(gust / mph, 1, 2.6) : 1;
-      const gusty = clamp((gf - 1) / 1.3);
+      const gusty = clamp((gf - 1.2) / 1.0);
       const eff = mph + (gust - mph) * surge * 0.6;
       const hl = snap ? 1e-4 : 2;
       ez.fog = approach(ez.fog, w.fog || w.kind === "fog" ? 1 : 0, s.dt, hl);
@@ -545,10 +561,13 @@ export default {
       q.uy = vy / vl;
       q.vmax2 = (3 * q.U + 24) * (3 * q.U + 24);
       // how hard the digits shed: the wind itself, then the gusts, then a storm
-      const windy = smoothstep(2, 9, mph);
-      q.shed = clamp((0.22 + 0.8 * gusty + 0.25 * surge * gusty) * windy * (1 - 0.55 * q.cold * (1 - gusty)) + 0.3 * q.storm, 0, 1.25) * (1 - q.calm);
-      q.wake = q.U * (0.06 + 0.2 * gusty * windy + 0.2 * q.storm);
-      q.amb0 = q.U * (0.012 * gusty + 0.08 * q.heat) + 1.2 * q.calm;
+      // light air flows round the digits and closes behind them; a rising wind
+      // separates, and sheds vortices that the gusts make strong and irregular
+      const windy = smoothstep(3, 24, mph);
+      q.windy = windy;
+      q.shed = clamp((0.12 + 0.88 * windy) * (0.6 + 0.5 * gusty + 0.3 * surge * gusty) * (1 - 0.4 * q.cold * (1 - windy)) + 0.3 * q.storm, 0, 1.25) * (1 - q.calm);
+      q.wake = q.U * (0.03 + 0.2 * windy * (0.5 + gusty) + 0.18 * q.storm);
+      q.amb0 = q.U * (0.15 * windy * windy * (0.45 + gusty) + 0.06 * q.storm + 0.08 * q.heat) + 1.2 * q.calm; // a gale is rough everywhere
       q.amb1 = 15 * q.calm + q.U * 0.1 * q.heat;
       q.nsc = lerp(1, 0.62, q.storm);
       q.rup = Math.abs(q.ux) * CX + Math.abs(q.uy) * CY + 150;
@@ -564,10 +583,10 @@ export default {
     // ------------------------------------------------------------------
     // Sampling the flow at a point. Results in f*.
     // ------------------------------------------------------------------
-    let fvx = 0, fvy = 0, fsd = 400, fc = -1, famp = 0;
+    let fvx = 0, fvy = 0, fsd = 400, fc = -1, famp = 0, fmix = 0, fs = 0;
     function flowAt(x, y, amb) {
       const gx = (x - GX0) * INVH - 0.5, gy = (y - GY0) * INVH - 0.5;
-      let vx, vy, s;
+      let vx, vy, s, ws = 0;
       if (gx >= 0 && gy >= 0 && gx < GC - 1 && gy < GR - 1) {
         const i = gx | 0, j = gy | 0, fx = gx - i, fy = gy - j, c = j * GC + i;
         const w00 = (1 - fx) * (1 - fy), w10 = fx * (1 - fy), w01 = (1 - fx) * fy, w11 = fx * fy;
@@ -577,13 +596,15 @@ export default {
            + WY[c] * w00 + WY[c + 1] * w10 + WY[c + GC] * w01 + WY[c + GC + 1] * w11;
         s = S[c] * w00 + S[c + 1] * w10 + S[c + GC] * w01 + S[c + GC + 1] * w11;
         fc = c + (fx >= 0.5 ? 1 : 0) + (fy >= 0.5 ? GC : 0);
-        fsd = sd[fc];
+        fsd = sd[c] * w00 + sd[c + 1] * w10 + sd[c + GC] * w01 + sd[c + GC + 1] * w11;
+        ws = Math.abs(WX[fc]) + Math.abs(WY[fc]);
       } else {
         vx = sux * q.U; vy = suy * q.U; s = 0; fc = -1; fsd = 400;
       }
-      let amp = q.wake * s + amb;
+      let amp = q.wake * s + amb, wf = 0;
       if (amp > 0.05) {
-        if (fsd < 26) amp *= fsd < 2 ? 0 : (fsd - 2) / 24; // eddies die at a wall
+        wf = fsd < 26 ? (fsd < 2 ? 0 : (fsd - 2) / 24) : 1; // eddies die at a wall
+        amp *= wf;
         const n = q.nsc;
         tileAt((x * n - oAx) * TINV, (y * n - oAy) * TINV);
         let nx = ty, ny = -tx;
@@ -593,7 +614,9 @@ export default {
       } else amp = 0;
       const v2 = vx * vx + vy * vy;
       if (v2 > q.vmax2) { const k = Math.sqrt(q.vmax2 / v2); vx *= k; vy *= k; }
-      fvx = vx; fvy = vy; famp = amp;
+      // the roughness of the open stream wrinkles the filaments but hardly
+      // stirs them into haze; the wakes and the shed vortices do
+      fvx = vx; fvy = vy; famp = amp; fmix = amp - 0.65 * amb * wf + 0.4 * ws; fs = s;
     }
 
     // ------------------------------------------------------------------
@@ -605,9 +628,10 @@ export default {
     function shedFrom(l, t) {
       const ux = sux, uy = suy, px = -uy, py = ux;
       const hw = bhw[l], side = (shSide[l] = shSide[l] > 0 ? -1 : 1);
-      const rc = clamp(0.3 * hw, 30, 66);
-      const x = bcx[l] + ux * (bhl[l] + 0.2 * hw) + px * side * 0.52 * hw;
-      const y = bcy[l] + uy * (bhl[l] + 0.2 * hw) + py * side * 0.52 * hw;
+      const rc = clamp(0.32 * hw, 30, 64);
+      // under the shear layer that leaves the flank, so it rolls the flank's smoke up
+      const x = bcx[l] + ux * (bhl[l] + 0.25 * hw) + px * side * 0.78 * hw;
+      const y = bcy[l] + uy * (bhl[l] + 0.25 * hw) + py * side * 0.78 * hw;
       const gx = ((x - GX0) * INVH) | 0, gy = ((y - GY0) * INVH) | 0;
       if (gx < 1 || gy < 1 || gx >= GC - 1 || gy >= GR - 1) return;
       if (sd[gy * GC + gx] < rc * 0.3) return; // no room: another body is in the way
@@ -636,9 +660,9 @@ export default {
         flowAt(VPX[i], VPY[i], 0);
         VPX[i] += fvx * 0.78 * dt; VPY[i] += fvy * 0.78 * dt;
         VA[i] *= fadeK;
-        VR[i] = Math.min(110, VR[i] * grow);
+        VR[i] = Math.min(72, VR[i] * grow);
         const x = VPX[i], y = VPY[i];
-        if (Math.abs(VA[i]) < 1 || fsd < 0 || !(x > -200 && x < W + 200 && y > -200 && y < H + 200)) {
+        if (Math.abs(VA[i]) < Math.max(1, 0.05 * q.U) || fsd < 0 || !(x > -200 && x < W + 200 && y > -200 && y < H + 200)) {
           nV--;
           VPX[i] = VPX[nV]; VPY[i] = VPY[nV]; VA[i] = VA[nV]; VR[i] = VR[nV];
           i--;
@@ -678,6 +702,8 @@ export default {
     const MX = new Float32Array(NL * NN); // how far turbulence has stirred it into haze, 0..1
     const BK = new Uint8Array(NL * NN); // drawing bucket of the core of the line at this particle
     const BH = new Uint8Array(NL * NN); // and of its halo
+    const BZ = new Uint8Array(NL * NN); // and of the haze around it
+    const cntZ = new Int32Array(NBZ);
     const cnt = new Int32Array(NB), cntH = new Int32Array(NBH);
     const off = new Float32Array(NL), lineW = new Float32Array(NL), drop = new Float32Array(NL);
     const act = new Uint8Array(NL);
@@ -685,12 +711,12 @@ export default {
       const r = rng(seed + 3);
       for (let i = 0; i < NL; i++) {
         off[i] = (i - (NL - 1) / 2 + r.range(-0.22, 0.22)) * LINE_GAP;
-        lineW[i] = r() < 0.2 ? r.range(0.35, 0.55) : r.range(0.7, 1);
+        lineW[i] = r() < 0.15 ? r.range(0.5, 0.65) : r.range(0.78, 1);
         drop[i] = r() < 0.56 ? 1 : 0; // filaments shut off when the air is still
       }
     }
     let head = 0, emitAcc = 0, emitCount = 1000;
-    const density = (i, n) => 0.45 + 0.55 * smoothstep(-0.6, 0.6, noise.n2(n * 0.07, i * 7.31));
+    const density = (i, n) => 0.62 + 0.38 * smoothstep(-0.6, 0.6, noise.n2(n * 0.07, i * 7.31));
     const MIX_RATE = 0.26;
     const nozX = (i) => CX - q.ux * q.rup - q.uy * off[i] * q.lineK;
     const nozY = (i) => CY - q.uy * q.rup + q.ux * off[i] * q.lineK;
@@ -704,12 +730,12 @@ export default {
       for (let a = 0; a < NN; a++) {
         let k = head + a; if (k >= NN) k -= NN;
         const af = a / NN;
-        const dt = (a === 0 ? emitAcc : q.spacing) / q.U / 2;
-        for (let sub = 0; sub < 2; sub++) {
+        const dt = (a === 0 ? emitAcc : q.spacing) / q.U;
+        for (let sub = 0; sub < 1; sub++) {
           flowAt(x, y, q.amb0 + q.amb1 * af * af);
           x += fvx * dt; y += fvy * dt;
           if (fsd < 2 && fc >= 0) { const g = pushOut(fc, fsd); x += gpx * g; y += gpy * g; }
-          m += (famp / (q.U + 12)) * MIX_RATE * dt;
+          m += (fmix / (q.U + 12)) * MIX_RATE * dt;
         }
         X[base + k] = x; Y[base + k] = y;
         MX[base + k] = m > 1 ? 1 : m;
@@ -722,7 +748,7 @@ export default {
       const gx = sd[c + 1] - sd[c - 1], gy = sd[c + GC] - sd[c - GC];
       const gl = Math.hypot(gx, gy) || 1;
       gpx = gx / gl; gpy = gy / gl;
-      return Math.min(5, (2 - d) * 0.4);
+      return Math.min(4, (2 - d) * 0.3);
     }
 
     // ------------------------------------------------------------------
@@ -731,18 +757,19 @@ export default {
     const PX = new Float32Array(NP), PY = new Float32Array(NP), PVX = new Float32Array(NP), PVY = new Float32Array(NP);
     const PT = new Float32Array(NP); // > 0: sitting on an edge for this long; < 0: just let go, cannot stick yet
     const PH = new Float32Array(NP);
+    const PA = new Float32Array(NP); // seconds since it came in
     const RX = new Float32Array(NRIME), RY = new Float32Array(NRIME);
     let nRime = 0, rimeAt = 0;
     const pr = rng(seed + 29);
     for (let i = 0; i < NP; i++) PH[i] = pr();
     function spawn(i, anywhere) {
-      const li = (pr() * NL) | 0;
-      const o = off[li] * q.lineK + pr.range(-10, 10);
+      const o = pr.range(-q.rperp, q.rperp);
       const along = anywhere ? pr.range(-q.rup, q.rup) : -q.rup + pr.range(0, 70);
       PX[i] = CX + q.ux * along - q.uy * o;
       PY[i] = CY + q.uy * along + q.ux * o;
       PVX[i] = q.ux * q.U; PVY[i] = q.uy * q.U;
       PT[i] = 0;
+      PA[i] = anywhere ? pr() * 10 : 0;
     }
     for (let i = 0; i < NP; i++) spawn(i, true);
     const addRime = (x, y) => {
@@ -755,7 +782,9 @@ export default {
       for (let i = 0; i < nRime; i++) {
         const gx = ((RX[i] - GX0) * INVH) | 0, gy = ((RY[i] - GY0) * INVH) | 0;
         const c = gy * GC + gx;
-        const ok = gx > 0 && gy > 0 && gx < GC - 1 && gy < GR - 1 && sd[c] > -8 && sd[c] < 16 && (nearBig[c] || (lab[c] && big[lab[c]]));
+        // only where the snow can get to: never inside the counter of a 0, 6, 8 or 9
+        const ok = gx > 0 && gy > 0 && gx < GC - 1 && gy < GR - 1 && sd[c] > -8 && sd[c] < 16 &&
+          (lab[c] ? big[lab[c]] && (open[c - 1] || open[c + 1] || open[c - GC] || open[c + GC]) : nearBig[c] && open[c]);
         if (ok) { RX[n] = RX[i]; RY[n] = RY[i]; n++; }
       }
       nRime = n; rimeAt = n % NRIME;
@@ -764,11 +793,11 @@ export default {
       let tries = count * 12;
       while (count > 0 && tries-- > 0 && nBnd > 0) {
         const k = (pr() * nBnd) | 0, c = bnd[k];
-        if (!big[bndL[k]]) continue;
+        if (!big[bndL[k]] || !open[c]) continue;
         const gx = sd[c + 1] - sd[c - 1], gy = sd[c + GC] - sd[c - GC];
         const gl = Math.hypot(gx, gy) || 1;
         if ((gx * q.ux + gy * q.uy) / gl > -0.3) continue; // windward faces only
-        addRime(GX0 + ((c % GC) + 0.5) * CELL + pr.range(-6, 6), GY0 + (((c / GC) | 0) + 0.5) * CELL + pr.range(-6, 6));
+        addRime(GX0 + ((c % GC) + 0.5) * CELL + pr.range(-8, 8), GY0 + (((c / GC) | 0) + 0.5) * CELL + pr.range(-8, 8));
         count--;
       }
     }
@@ -779,7 +808,7 @@ export default {
       const amount = snow ? q.snow : q.rain;
       nPart = amount > 0.01 ? Math.min(NP, Math.round(snow ? 170 + 390 * amount : 120 + 440 * amount)) : 0;
       partSnow = snow ? 1 : 0;
-      const tau = snow ? 0.9 : 0.3, gain = snow ? 0.55 : 1.12, stickAt = snow ? 6 : 5;
+      const tau = snow ? 0.9 : 0.3, gain = snow ? 0.6 : 1.05, stickAt = snow ? 6 : 5;
       const k = Math.min(1, dt / tau);
       const lim = q.rup + 40;
       for (let i = 0; i < nPart; i++) {
@@ -789,16 +818,20 @@ export default {
           continue;
         }
         if (PT[i] < 0) PT[i] = Math.min(0, PT[i] + dt);
+        PA[i] += dt;
+        if (PA[i] > 70) { spawn(i, false); continue; } // nothing loiters for ever
         let x = PX[i], y = PY[i];
         flowAt(x, y, snow ? 7 + q.U * 0.08 : 0);
-        PVX[i] += (fvx * gain - PVX[i]) * k;
-        PVY[i] += (fvy * gain - PVY[i]) * k;
+        // heavier than the smoke: carried by the flow but always on its way downwind
+        const drift = q.U * (snow ? 0.22 : 0.12);
+        PVX[i] += (fvx * gain + q.ux * drift - PVX[i]) * k;
+        PVY[i] += (fvy * gain + q.uy * drift - PVY[i]) * k;
         x += PVX[i] * dt; y += PVY[i] * dt;
         if (fc >= 0 && fsd < stickAt) {
           const gx = sd[fc + 1] - sd[fc - 1], gy = sd[fc + GC] - sd[fc - GC];
           const gl = Math.hypot(gx, gy) || 1, nx = gx / gl, ny = gy / gl;
           const vn = PVX[i] * nx + PVY[i] * ny;
-          if (vn < 0 && PT[i] === 0 && fsd > -4 && nearBig[fc]) {
+          if (vn < 0 && PT[i] === 0 && fsd > -4 && nearBig[fc] && open[fc]) {
             if (snow) { addRime(x, y); spawn(i, false); continue; }
             PT[i] = 3 + 9 * PH[i];
           } else {
@@ -809,8 +842,8 @@ export default {
         }
         if (fc >= 0 && !open[fc]) { spawn(i, false); continue; } // never inside a counter
         PX[i] = x; PY[i] = y;
-        const along = (x - CX) * q.ux + (y - CY) * q.uy;
-        if (!(along < lim && along > -lim - 80 && x > -160 && x < W + 160 && y > -160 && y < H + 160)) spawn(i, false);
+        const along = (x - CX) * q.ux + (y - CY) * q.uy, across = (y - CY) * q.ux - (x - CX) * q.uy;
+        if (!(along < lim && along > -lim - 80 && Math.abs(across) < q.rperp + 120)) spawn(i, false);
       }
     }
 
@@ -841,10 +874,13 @@ export default {
       }
       cnt.fill(0);
       cntH.fill(0);
+      cntZ.fill(0);
       const invSp = 1 / q.spacing, invN = 1 / NN;
       const fade = 0.55 * q.calm; // still air: the plumes thin out as they rise
       const haze = 0.82 * q.fog; // fog: mostly haze
       const mixK = (MIX_RATE * dt) / (q.U + 12);
+      const slow0 = 0.06 * q.U * dt, slowK = 1 / (0.2 * q.U * dt + 1e-6); // stagnant smoke disperses
+      const vig = 0.5 * col.light, invR2 = 1 / (820 * 820); // at night the light sheet falls off at the edges
       for (let i = 0; i < NL; i++) {
         if (!act[i]) continue;
         const base = i * NN;
@@ -855,20 +891,26 @@ export default {
           const n = base + k, af = a * invN;
           let x = X[n], y = Y[n];
           flowAt(x, y, q.amb0 + q.amb1 * af * af);
+          const mv = Math.sqrt(fvx * fvx + fvy * fvy) * dt;
           x += fvx * dt; y += fvy * dt;
           if (fsd < 2 && fc >= 0) { const g = pushOut(fc, fsd); x += gpx * g; y += gpy * g; } // never into a body
           if (!(x > -2000 && x < 3000 && y > -2000 && y < 4000)) { x = nozX(i); y = nozY(i); } // never lose a particle
           X[n] = x; Y[n] = y;
-          let m = MX[n] + famp * mixK;
+          let m = MX[n] + fmix * mixK;
           if (m > 1) m = 1;
           MX[n] = m;
-          let b = 0, bh = 0;
+          let b = 0, bh = 0, bz = 0;
           if (a > 0 && lw > 0.02 && x > -60 && x < W + 60 && y > -60 && y < H + 60 && (fc < 0 || open[fc])) {
             const dx = x - px, dy = y - py;
             const st = Math.sqrt(dx * dx + dy * dy) * invSp; // how far this piece has been pulled out
             if (st < 4.2) {
               let al = lw * DN[n];
               if (fade > 0) al *= 1 - fade * af * af;
+              if (dt > 0 && q.calm < 0.5 && fs < 0.1 && m < 0.1) al *= mv < slow0 ? 0 : Math.min(1, (mv - slow0) * slowK); // not in a wake
+              if (vig > 0) {
+                const rx = x - CX, ry = (y - CY) * 0.62;
+                al *= 1 - vig * Math.min(1, (rx * rx + ry * ry) * invR2);
+              }
               if (af > 0.8) al *= (1 - af) * 5; // the tail thins away
               if (st > 1.4) al *= (1.4 / st) * (1.4 / st); // stretched smoke thins
               else if (st < 0.3) al *= st / 0.3; // bunched up against a wall
@@ -877,10 +919,16 @@ export default {
               b = lv > NA ? NA : lv;
               lv = (al * (0.55 + 0.45 * m) * NH + 0.5) | 0;
               bh = lv > NH ? NH : lv;
+              if (m > 0.1) {
+                const mm = m > 0.6 ? 1 : (m - 0.1) * 2;
+                lv = (al * mm * NZ + 0.5) | 0;
+                bz = lv > NZ ? NZ : lv;
+              }
             }
           }
           BK[n] = b; cnt[b]++;
           BH[n] = bh; cntH[bh]++;
+          BZ[n] = bz; cntZ[bz]++;
           px = x; py = y;
         }
       }
@@ -894,8 +942,8 @@ export default {
     const col = { bg: "", num: "", ink: "", cap: "", smoke: INK, master: 0.6, light: 0, flip: -1, speck: "#fff" };
     function readColour(s, snap) {
       const dl = s.daylight;
-      let paper = mix(PAPER, "#8f9296", clamp(0.28 * q.cloud + 0.3 * q.rain + 0.34 * q.snow + 0.16 * q.fog));
-      paper = mix(paper, s.sky.mean, 0.12 + 0.1 * (1 - dl));
+      let paper = mix(PAPER, "#8f9296", clamp(0.46 * q.cloud * q.cloud + 0.3 * q.rain + 0.4 * q.snow + 0.16 * q.fog));
+      paper = mix(paper, s.sky.mean, 0.17 + 0.1 * (1 - dl));
       const night = mix(NIGHT, s.sky.mean, 0.05);
       // the ground moves continuously, but spends as little of twilight as it can in mid-grey
       const g = smoothstep(0.16, 0.66, dl);
@@ -916,7 +964,7 @@ export default {
       col.light = f;
       // how strongly the smoke is drawn
       const moon = s.moon.up ? s.moon.illumination : 0;
-      const day = lerp(0.8, 0.7, q.cloud);
+      const day = lerp(0.92, 0.82, q.cloud);
       const dark = 0.84 + 0.16 * moon;
       col.master = (f < 0.5 ? day : lerp(0.86, dark, 1 - lift)) * Math.abs(f * 2 - 1) * lerp(1, 0.55, q.fog) * (1 + 0.4 * q.flash);
       col.speck = f < 0.5 ? "#141417" : "#f8f5ee";
@@ -929,7 +977,8 @@ export default {
     // Drawing
     // ------------------------------------------------------------------
     // One pass per bucket: every piece of filament in it as a smoothed run.
-    function strokeBucket(c, bk, b) {
+    function strokeBucket(c, bk, b, b1 = b) {
+      const lim2 = 16 * q.spacing * q.spacing; // a link longer than 4 spacings is torn, not drawn
       c.beginPath();
       for (let i = 0; i < NL; i++) {
         if (!act[i]) continue;
@@ -939,10 +988,13 @@ export default {
         for (let a = 1; a < NN - 1; a++) {
           let kn = k + 1; if (kn >= NN) kn -= NN;
           const n = base + k;
-          if (bk[n] === b) {
+          const v = bk[n];
+          if (v >= b && v <= b1) {
             const x = X[n], y = Y[n];
+            const nx = X[base + kn], ny = Y[base + kn];
             if (!pen) { c.moveTo((X[base + kp] + x) * 0.5, (Y[base + kp] + y) * 0.5); pen = true; }
-            c.quadraticCurveTo(x, y, (x + X[base + kn]) * 0.5, (y + Y[base + kn]) * 0.5);
+            if ((nx - x) * (nx - x) + (ny - y) * (ny - y) > lim2) { c.lineTo(x, y); pen = false; }
+            else c.quadraticCurveTo(x, y, (x + nx) * 0.5, (y + ny) * 0.5);
           } else pen = false;
           kp = k; k = kn;
         }
@@ -952,20 +1004,40 @@ export default {
 
     function draw() {
       const night = col.light >= 0.5;
-      const wBase = lerp(lerp(night ? 1.9 : 2.2, 1.35, q.cold), 2.8, 0.45 * q.cloud * (1 - q.cold) + 0.3 * q.heat);
+      const wBase = lerp(lerp(night ? 3.6 : 3.4, 2, q.cold), 4.4, 0.4 * q.cloud * (1 - q.cold) + 0.3 * q.heat);
       const g = glow.ctx;
       glow.clear();
       g.lineJoin = "round";
-      g.lineCap = "butt";
+      g.lineCap = "round";
       g.strokeStyle = col.smoke;
-      g.lineWidth = wBase * lerp(night ? 4.4 : 3.6, 13, q.fog);
-      const ha = col.master * lerp(night ? 0.24 : 0.16, 0.3, q.fog);
-      for (let b = 1; b < NBH; b++) {
-        if (!cntH[b]) continue;
-        g.globalAlpha = Math.min(1, ha * (b / NH));
-        strokeBucket(g, BH, b);
-      }
+      g.lineWidth = wBase * lerp(night ? 3.6 : 3, 5, q.fog);
+      const ha = col.master * lerp(night ? 0.34 : 0.16, 0.22, q.fog);
+      // two strengths only: soft light needs no finer steps, and fewer runs means fewer seams
+      g.globalAlpha = Math.min(1, ha * 0.4);
+      strokeBucket(g, BH, 1, 3);
+      g.globalAlpha = Math.min(1, ha * 0.85);
+      strokeBucket(g, BH, 4, NH);
       g.globalAlpha = 1;
+
+      // the diffuse part: smoke stirred up in the wakes, and fog swelling every filament
+      const mz = mist.ctx;
+      mist.clear();
+      mz.lineJoin = "round";
+      mz.lineCap = "round";
+      mz.strokeStyle = col.smoke;
+      mz.lineWidth = lerp(night ? 34 : 30, 56, q.fog);
+      const za = col.master * (night ? 0.16 : 0.12);
+      for (let b = 1; b < NBZ; b++) {
+        if (!cntZ[b]) continue;
+        mz.globalAlpha = Math.min(1, za * (b / NZ));
+        strokeBucket(mz, BZ, b);
+      }
+      if (q.fog > 0.05) {
+        mz.lineWidth = 64;
+        mz.globalAlpha = Math.min(1, col.master * (night ? 0.15 : 0.2) * q.fog);
+        strokeBucket(mz, BH, 1, NH);
+      }
+      mz.globalAlpha = 1;
 
       layer.clear();
       ctx.lineCap = "butt";
@@ -978,12 +1050,14 @@ export default {
         strokeBucket(ctx, BK, b);
       }
       // rime, then what is in the air
-      if (nRime > 0) {
-        ctx.globalAlpha = 0.95;
-        ctx.fillStyle = "#fbf9f4";
+      if (nRime > 0) { // round grains, not square pixels
+        ctx.globalAlpha = 0.92;
+        ctx.strokeStyle = "#fbf9f4";
+        ctx.lineCap = "round";
+        ctx.lineWidth = 4.6;
         ctx.beginPath();
-        for (let i = 0; i < nRime; i++) ctx.rect(RX[i] - 1.8, RY[i] - 1.8, 3.6, 3.6);
-        ctx.fill();
+        for (let i = 0; i < nRime; i++) { ctx.moveTo(RX[i], RY[i]); ctx.lineTo(RX[i] + 0.01, RY[i]); }
+        ctx.stroke();
       }
       if (nPart > 0) {
         ctx.lineCap = "round";
@@ -993,7 +1067,7 @@ export default {
             if (pass === 0 && night) continue;
             ctx.strokeStyle = pass === 0 ? "#2a2a30" : "#fdfbf6";
             ctx.globalAlpha = pass === 0 ? 0.22 : pass === 1 ? 0.85 : 1;
-            ctx.lineWidth = pass === 0 ? 10 : pass === 1 ? 5.5 : 8;
+            ctx.lineWidth = pass === 0 ? 12 : pass === 1 ? 6.5 : 9;
             ctx.beginPath();
             for (let i = pass === 2 ? 1 : 0; i < nPart; i += pass === 0 ? 1 : 2) {
               const x = PX[i], y = PY[i];
@@ -1006,13 +1080,13 @@ export default {
           ctx.strokeStyle = col.speck;
           for (let pass = 0; pass < 2; pass++) { // in flight, then sitting on an edge
             ctx.globalAlpha = pass ? 1 : 0.85;
-            ctx.lineWidth = pass ? 6 : 3;
+            ctx.lineWidth = pass ? 6.5 : 3.6;
             ctx.beginPath();
             for (let i = 0; i < nPart; i++) {
               if ((PT[i] > 0 ? 1 : 0) !== pass) continue;
               const x = PX[i], y = PY[i];
               if (x < -8 || x > W + 8 || y < -8 || y > H + 8) continue;
-              ctx.moveTo(x, y); ctx.lineTo(x - PVX[i] * 0.06 + 0.01, y - PVY[i] * 0.06);
+              ctx.moveTo(x, y); ctx.lineTo(x - PVX[i] * 0.035 + 0.01, y - PVY[i] * 0.035);
             }
             ctx.stroke();
           }
@@ -1024,16 +1098,20 @@ export default {
     // ------------------------------------------------------------------
     // Text
     // ------------------------------------------------------------------
+    const windKey = { mph: -1, gu: -1, from: "", live: null };
     function readText(s) {
       const t = s.text, w = s.weather;
       put("date", t.date);
       put("temp", t.temp);
       if (put("cond", t.condition)) {
         T.cond.style.fontSize = "";
-        fitText(T.cond, Math.max(200, hdr.clientWidth - T.temp.offsetWidth - 34));
+        condFit = true;
       }
-      const mph = Math.round(w.wind);
-      put("wind", !w.live ? "Wind –" : mph < 2 ? "Calm air" : `Wind ${w.windFrom} ${mph} mph · gusts ${Math.round(Math.max(w.gust, w.wind))}`);
+      const mph = Math.round(w.wind), gu = Math.round(Math.max(w.gust, w.wind));
+      if (mph !== windKey.mph || gu !== windKey.gu || w.windFrom !== windKey.from || w.live !== windKey.live) { // build the string only on a change
+        windKey.mph = mph; windKey.gu = gu; windKey.from = w.windFrom; windKey.live = w.live;
+        put("wind", !w.live ? "Wind –" : mph < 2 ? "Calm air" : `Wind ${w.windFrom} ${mph} mph · gusts ${gu}`);
+      }
       put("sunL", t.sunLabel);
       put("sun", t.sunValue);
       put("moonL", "Moon");
@@ -1047,20 +1125,28 @@ export default {
         factBox.style.display = t.factValue ? "" : "none";
         T.fact.style.fontSize = "";
         T.fact.style.lineHeight = "";
-        if (t.factValue && T.fact.offsetHeight > 100) { T.fact.style.fontSize = "36px"; T.fact.style.lineHeight = "44px"; }
+        factFit = Boolean(t.factValue);
       }
     }
 
     // ------------------------------------------------------------------
     // Start: everything already in place on the first frame.
     // ------------------------------------------------------------------
-    let timeKey = "", lastMs = state.ms, pending = 0;
-    function setTime(s) {
-      const key = `${s.text.hh}:${s.text.mm} ${s.text.ampm}`;
-      if (key === timeKey && !textDirty) return false;
-      if (key !== timeKey) { timeKey = key; layoutTime(s.text.hh, s.text.mm, s.text.ampm); }
-      textDirty = false;
-      measureCaps();
+    let timeKey = "", ampmKey = "", lastMs = state.ms, pending = 0, condFit = false, factFit = false;
+    function setTime(s, withText) {
+      const same = s.text.time === timeKey && s.text.ampm === ampmKey;
+      if (same && !(textDirty && withText)) return false;
+      if (!same) { timeKey = s.text.time; ampmKey = s.text.ampm; layoutTime(s.text.hh, s.text.mm, s.text.ampm); }
+      // the lines of type are measured from the live layout, so never in mount()
+      if (withText) {
+        textDirty = false;
+        if (condFit) { condFit = false; fitText(T.cond, Math.max(200, hdr.clientWidth - T.temp.offsetWidth - 44)); }
+        if (factFit) { // two lines at most
+          factFit = false;
+          if (T.fact.offsetHeight > 100) { T.fact.style.fontSize = "36px"; T.fact.style.lineHeight = "44px"; }
+        }
+        measureCaps();
+      }
       buildBodies();
       measureBodies();
       buildWake();
@@ -1071,58 +1157,64 @@ export default {
     function seedVortices(t) {
       nV = 0;
       for (let l = 1; l <= nLab; l++) { shPh[l] = vr(); shSide[l] = vr() < 0.5 ? 1 : -1; }
-      const n = 60;
-      for (let i = 0; i < n; i++) stepVortices(0.25, t - (n - i) * 0.25, i === n - 1);
+      const n = 36;
+      for (let i = 0; i < n; i++) stepVortices(0.4, t - (n - i) * 0.4, i === n - 1);
     }
-    function settle(seconds) {
+    function settle() {
       for (let i = 0; i < NL; i++) { act[i] = inPlay(i); if (act[i]) trace(i); }
-      const n = Math.round(seconds * 8);
-      for (let i = 0; i < n; i++) { stepVortices(1 / 8, state.t, true); step(1 / 8); }
     }
 
-    __T.push(performance.now()); // DIAG
     readConditions(state, true);
     readColour(state, true);
     readText(state);
     turnStream(q.ux, q.uy);
-    __T.push(performance.now()); // DIAG
-    setTime(state);
-    __T.push(performance.now()); // DIAG
-    if (q.snow > 0.01) seedRime(Math.round(260 + 520 * q.snow));
-    relax(56, 1.94);
-    __T.push(performance.now()); // DIAG
-    pending = 360;
-    seedVortices(state.t);
-    __T.push(performance.now()); // DIAG
-    settle(2.5);
-    __T.push(performance.now()); // DIAG
-    console.warn('DIAG mount ' + __T.map((t, i) => i ? (t - __T[i - 1]).toFixed(1) : '').join(' ')); // DIAG
+    // The heavy start-up is spread over the first three (unseen) frames, so
+    // that no single block of work freezes the piece still on screen: the
+    // bodies are built once, from the live layout of the type, then the field
+    // is relaxed and the wake seeded, then the smoke is laid down.
+    let boot = 0;
+    function bootStep(s) {
+      if (boot === 0) {
+        readConditions(s, true);
+        readColour(s, true);
+        readText(s);
+        setTime(s, true);
+        if (q.snow > 0.01) seedRime(Math.round(260 + 520 * q.snow));
+      } else if (boot === 1) {
+        relax(2, 1.9);
+        pending = 400;
+        seedVortices(s.t);
+      } else settle();
+      boot++;
+      lastMs = s.ms;
+    }
 
     return {
       frame(s) {
+        if (boot < 3) { bootStep(s); draw(); return; }
         const jumped = Math.abs(s.ms - lastMs - s.dt * 1000) > 5000;
         lastMs = s.ms;
         readConditions(s, jumped);
         if (jumped || s.frame % 10 === 0 || (col.flip > 0 && col.flip < 1) || q.flash > 0) readColour(s, jumped);
         readText(s);
 
-        const __a = performance.now(); // DIAG
-        const changed = setTime(s);
-        if (performance.now() - __a > 8) console.warn('DIAG setTime ' + (performance.now() - __a).toFixed(1)); // DIAG
+        const changed = setTime(s, true);
         const turned = q.ux * sux + q.uy * suy < 0.99985; // about one degree
         if (turned) { turnStream(q.ux, q.uy); buildWake(); measureBodies(); }
+        else if (Math.abs(q.windy - wakeWindy) > 0.08) { buildWake(); pending = Math.max(pending, 40); }
         if (jumped && (changed || turned)) {
-          relax(48, 1.94);
-          pending = 160;
+          relax(20, 1.92);
+          pending = 200;
           seedVortices(s.t);
-          settle(1.5);
+          settle();
         } else {
           if (changed) pending = Math.max(pending, 150);
           else if (turned) pending = Math.max(pending, 24);
           if (pending > 0) {
-            const n = Math.min(pending, 3);
+            const n = Math.min(pending, 2);
             relax(n, 1.92);
             pending -= n;
+            if (relaxDelta < 0.004 && pending < 300) pending = 0; // settled
           }
           if (s.dt > 0) {
             stepVortices(s.dt, s.t, true);

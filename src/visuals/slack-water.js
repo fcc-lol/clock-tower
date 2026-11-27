@@ -29,10 +29,11 @@
 //               bleached, swimming horizon in a heat wave, and a brown haze
 //               when the air quality is poor.
 //
-// Readouts: the date and today's fact across the top of the sky; the weather
-// (temperature, condition, AQI, UV) and the sky (sunrise/sunset countdown,
-// moon) stand in the two flanks of the upper storey, on the hours' cap line
-// and above the slab. Their ink is one of two (paper white or the structure's
+// Readouts hang from the structure: the date and today's fact are one column
+// standing on the hours' cap line; temperature and condition in the upper
+// storey's left flank and the sunrise/sunset countdown in its right, all on the
+// hours' cap line; the moon stands level with the slab; AQI and UV hang from
+// the minutes' cap line in the lower storey's left flank. Their ink is one of two (paper white or the structure's
 // blue-black), chosen in one step from what is actually behind them; the sky
 // colours are nudged out of the mid-grey band so twilight passes through it
 // quickly.
@@ -75,13 +76,16 @@ const PILE_W = 14;
 // storey carry the weather (left) and the sky (right), sharing the hours' cap
 // line and baseline.
 const HOUR_TOP = HOUR_BASE - DIG_H;
-const FLANK_BASE = HOUR_BASE - 34; // the flanks' lowest baseline, clear of the slab
+const FLANK_BASE = HOUR_BASE - 10; // the flanks' lowest baseline, level with the foot of the hours
 const LB_PX = 26; // small labels (DM Mono caps)
 const DATE_PX = 70;
-const FACT_PX = 44, FACT_LH = 50, FACT_GAP = 10;
+const FACT_PX = 44, FACT_LH = 54, FACT_GAP = 12;
+const HEAD_GAP = 100; // clear air between the top band and the hours' cap line
 const TEMP_PX = 158;
-const COND_PX = 44, COND_LH = 48;
-const VAL_PX = 48, VAL_LH = 52;
+const COND_PX = 44, COND_LH = 60;
+const VAL_PX = 48, VAL_LH = 64;
+const AIR_PX = 64; // AQI and UV, hung from the minutes' cap line
+const MIN_TOP = MIN_BASE - DIG_H;
 const SUN_PX = 74;
 const INK_L = "#f4ecdc"; // the two inks: warm paper white, and the structure's blue-black
 const INK_D = "#0a1018";
@@ -118,19 +122,19 @@ const CSS = `
 .sw .c-snow { fill: var(--snow); }
 .sw .c-out { fill: none; stroke: var(--out); stroke-width: 2.5px; stroke-linejoin: round; }
 .sw-r { position: absolute; margin: 0; }
-.sw-top { color: var(--ink-a); text-shadow: 0 0 26px var(--halo-a); }
 .sw-flank { color: var(--ink-b); text-shadow: 0 0 26px var(--halo-b); }
+.sw-flank2 { color: var(--ink-c); text-shadow: 0 0 26px var(--halo-c); }
 .sw-lb { font: 500 ${LB_PX}px/${LB_PX + 6}px "DM Mono", ui-monospace, monospace; text-transform: uppercase; letter-spacing: 0.16em; white-space: nowrap; }
-.sw-date { left: 64px; font-weight: 800; font-size: ${DATE_PX}px; line-height: ${DATE_PX}px; text-transform: uppercase; letter-spacing: 0.015em; white-space: nowrap; }
+.sw-head { position: absolute; left: 64px; right: 64px; bottom: ${H - (HOUR_BASE - DIG_H - HEAD_GAP)}px; color: var(--ink-a); text-shadow: 0 0 26px var(--halo-a); }
+.sw-date { font-weight: 800; font-size: ${DATE_PX}px; line-height: ${DATE_PX}px; text-transform: uppercase; letter-spacing: 0.015em; white-space: nowrap; }
 .sw-date .md { font-weight: 500; margin-left: 0.28em; }
-.sw-fact { left: 64px; right: 64px; }
+.sw-fact { }
 .sw-fact .fv { font-weight: 700; font-size: ${FACT_PX}px; line-height: ${FACT_LH}px; margin-top: ${FACT_GAP}px; letter-spacing: 0.01em;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .sw-temp { left: 60px; font: 900 ${TEMP_PX}px/${TEMP_PX}px "Big Shoulders Display", sans-serif; white-space: nowrap; }
 .sw-cond { left: 64px; font-weight: 700; font-size: ${COND_PX}px; line-height: ${COND_LH}px; text-transform: uppercase; letter-spacing: 0.03em; }
-.sw-air { left: 64px; font-weight: 800; font-size: ${VAL_PX}px; line-height: ${VAL_PX}px; white-space: nowrap; }
-.sw-air .sw-lb { display: inline; margin-right: 0.5em; }
-.sw-air .gap { display: inline-block; width: 34px; }
+.sw-air { left: 64px; display: flex; gap: 48px; font-weight: 800; font-size: ${AIR_PX}px; white-space: nowrap; }
+.sw-air .vl { line-height: 1; }
 .sw-sun { right: 64px; text-align: right; }
 .sw-sun .vl { font-weight: 800; font-size: ${SUN_PX}px; line-height: ${SUN_PX}px; text-transform: uppercase; white-space: nowrap; letter-spacing: 0.01em; }
 .sw-moon { right: 64px; text-align: right; }
@@ -308,7 +312,7 @@ export default {
     art.append(lampDots);
 
     // The widths of the numerals set the slab, the lamps and where AM/PM stands.
-    let slabX0 = CX - 250, slabX1 = CX + 250, ampmX = 800, flankL = 260, flankR = 260;
+    let slabX0 = CX - 250, slabX1 = CX + 250, ampmX = 800, flankL = 260, flankR = 260, airW = 240;
     const meter = document.createElement("canvas").getContext("2d");
     function layout(s) {
       meter.font = NUM_FONT;
@@ -320,9 +324,13 @@ export default {
       // the flanks of the upper storey hold the readouts: as wide as the hours allow
       flankL = Math.floor(CX - wh / 2 - EX - 40 - 64);
       flankR = Math.floor(W - 64 - (CX + wh / 2 + 40));
-      for (const n of [nTemp, nCond, nAir]) n.style.width = `${flankL}px`;
-      for (const n of [nSun, nMoon]) n.style.width = `${flankR}px`;
-      shown.temp = shown.sunV = null; // refit on the next write
+      for (const n of [nTemp, nCond]) n.style.width = `${flankL}px`;
+      nSun.style.width = `${flankR}px`;
+      // the moon stands level with the slab, so it keeps clear of the slab's end;
+      // AQI and UV hang in the lower storey's left flank, clear of the minutes
+      nMoon.style.width = `${Math.min(flankR, Math.floor(W - 64 - (slabX1 + 48)))}px`;
+      airW = Math.floor(CX - wm / 2 - EX - 48 - 64);
+      shown.temp = shown.sunV = shown.aqi = null; // refit on the next write
       aT.setAttribute("x", ampmX);
       meter.font = AMPM_FONT;
       const wa = meter.measureText(s.text.ampm).width;
@@ -336,28 +344,29 @@ export default {
 
     // ----- readouts (DOM, in the sky) ------------------------------------------
     // Top band: the date, then today's fact. Left flank of the upper storey:
-    // temperature on the hours' cap line, the condition under it, AQI and UV on
-    // the hours' baseline. Right flank: the sunrise/sunset countdown on the cap
-    // line, the moon on the baseline.
+    // temperature on the hours' cap line, the condition under it. Right flank:
+    // the sunrise/sunset countdown on the cap line, the moon on the baseline.
+    // Left flank of the lower storey: AQI and UV on the minutes' cap line.
     const nWk = el("span", { class: "wk" });
     const nMd = el("span", { class: "md" });
-    const nDate = el("div", { class: "sw-r sw-top sw-date" }, nWk, nMd);
+    const nDate = el("div", { class: "sw-date" }, nWk, nMd);
     const nFl = el("div", { class: "sw-lb" });
     const nFv = el("div", { class: "fv" });
-    const nFact = el("div", { class: "sw-r sw-top sw-fact" }, nFl, nFv);
+    const nFact = el("div", { class: "sw-fact" }, nFl, nFv);
+    const nHead = el("div", { class: "sw-head" }, nDate, nFact);
     const nTemp = el("div", { class: "sw-r sw-flank sw-temp" });
     const nCond = el("div", { class: "sw-r sw-flank sw-cond" });
-    const nAqi = el("span", { class: "vl" });
-    const nUv = el("span", { class: "vl" });
-    const nAir = el("div", { class: "sw-r sw-flank sw-air" },
-      el("span", { class: "sw-lb", text: "AQI" }), nAqi, el("span", { class: "gap" }),
-      el("span", { class: "sw-lb", text: "UV" }), nUv);
+    const nAqi = el("div", { class: "vl" });
+    const nUv = el("div", { class: "vl" });
+    const nAir = el("div", { class: "sw-r sw-flank2 sw-air" },
+      el("div", {}, el("div", { class: "sw-lb", text: "AQI" }), nAqi),
+      el("div", {}, el("div", { class: "sw-lb", text: "UV" }), nUv));
     const nSunL = el("div", { class: "sw-lb" });
     const nSunV = el("div", { class: "vl" });
     const nSun = el("div", { class: "sw-r sw-flank sw-sun" }, nSunL, nSunV);
     const nMoonV = el("div", { class: "vl" });
     const nMoon = el("div", { class: "sw-r sw-flank sw-moon" }, el("div", { class: "sw-lb", text: "Moon" }), nMoonV);
-    wrap.append(nDate, nFact, nTemp, nCond, nAir, nSun, nMoon);
+    wrap.append(nHead, nTemp, nCond, nAir, nSun, nMoon);
     grain(wrap, { opacity: 0.05 });
 
     // Place every line by its baseline, from the fonts' own metrics (once).
@@ -373,19 +382,17 @@ export default {
       const dt = metric(`800 ${DATE_PX}px ${TXT}`, DATE_PX);
       const tp = metric(`900 ${TEMP_PX}px "Big Shoulders Display"`, TEMP_PX);
       const cd = metric(`700 ${COND_PX}px ${TXT}`, COND_LH);
-      const vl = metric(`800 ${VAL_PX}px ${TXT}`, VAL_PX);
       const vw = metric(`800 ${VAL_PX}px ${TXT}`, VAL_LH);
       const px = (v) => `${Math.round(v)}px`;
-      // top band
-      const dateBase = 64 + dt.cap;
-      nDate.style.top = px(dateBase - dt.base);
-      const factLbBase = dateBase + 64;
-      nFact.style.top = px(factLbBase - lb.base);
+      // top band: one column standing on the hours' cap line (it grows upward
+      // with a two-line fact, and the date settles onto it when there is none);
+      // 44 px of air between the date's baseline and the fact label's caps
+      nFact.style.marginTop = px(44 - (DATE_PX - dt.base) - (lb.base - lb.cap));
       // left flank
       const tempBase = HOUR_TOP + tp.cap;
       nTemp.style.top = px(tempBase - tp.base);
-      nCond.style.top = px(tempBase + 30 + cd.cap - cd.base);
-      nAir.style.top = px(FLANK_BASE - vl.base);
+      nCond.style.top = px(tempBase + 36 + cd.cap - cd.base);
+      nAir.style.top = px(MIN_TOP + lb.cap - lb.base);
       // right flank
       const sunLbBase = HOUR_TOP + lb.cap;
       nSun.style.top = px(sunLbBase - lb.base);
@@ -504,7 +511,7 @@ export default {
     let driftX = 0;
     let sceneKey = "", sceneDue = -1, lastPaint = -1, snowDepth = 0, snowKey = "", capsKey = "";
     let glitX = -999, glitK = 0, glitDp = 0;
-    let cold = 0, hot = 0, airWas = true;
+    let cold = 0, hot = 0, swLast = -1;
     const caps = []; // snow caps on the numerals: flat arrays [x, yTop, thickness, ...] per run
 
     // ----- snow caps: where the numerals' upward-facing edges are -----------------
@@ -715,8 +722,9 @@ export default {
         const need = clamp((7 - (light ? cl : cd)) / 3.5); // only as much halo as the contrast needs
         setVar(`--halo-${key}`, light ? rgba(mix(avg, "#000000", 0.6), (0.75 * need).toFixed(2)) : rgba(mix(avg, "#ffffff", 0.55), (0.65 * need).toFixed(2)));
       };
-      zoneInk("a", 60, 300);
+      zoneInk("a", 110, HOUR_TOP - HEAD_GAP);
       zoneInk("b", HOUR_TOP, HOUR_BASE);
+      zoneInk("c", MIN_TOP, MIN_TOP + 110);
 
       // waterline, current
       WL = Math.round(lerp(WL_LOW, WL_HIGH, clamp(s.tide.norm)) * 2) / 2;
@@ -776,7 +784,7 @@ export default {
       const amb = lamp * (0.5 + 0.5 * night);
       P.stk[0] = rgba("#ffcf8a", 0.85 * amb); P.stk[1] = rgba("#ff9f3a", 0.5 * amb); P.stk[2] = rgba("#e07a18", 0.26 * amb);
       P.shoreStk = rgba("#ffcb8c", 0.5 * night * (1 - clamp(haze * 1.4)));
-      P.rain = lumTop > 0.2 ? rgba(mix(inkD, skyMid, 0.25), 0.3) : rgba("#aeb9cc", 0.22 + 0.1 * dl);
+      P.rain = lumTop > 0.2 ? rgba(mix(inkD, skyMid, 0.25), 0.22 + 0.16 * wx.intensity) : rgba("#aeb9cc", 0.16 + 0.1 * dl + 0.2 * wx.intensity);
       P.rainLit = rgba("#ffc27a", 0.5);
       P.flake = rgba(mix("#ffffff", "#8e97a6", night), lerp(0.95, 0.6, night));
       P.flakeLit = rgba("#ffd29a", 0.95);
@@ -831,7 +839,8 @@ export default {
       put("cond", nCond, s.text.condition);
       put("sunL", nSunL, s.text.sunLabel);
       if (put("sunV", nSunV, s.text.sunValue)) fitText(nSunV, flankR, SUN_PX);
-      put("moon", nMoonV, s.text.moon); put("aqi", nAqi, s.text.aqi); put("uv", nUv, s.text.uv);
+      put("moon", nMoonV, s.text.moon);
+      if (put("aqi", nAqi, s.text.aqi) | put("uv", nUv, s.text.uv)) fitText(nAir, airW, AIR_PX); // a three-digit AQI beside wide minutes
       put("fl", nFl, s.text.factLabel); put("fv", nFv, s.text.factValue);
       setStyle("factShow", nFact, "display", s.text.factValue ? "block" : "none");
 
@@ -864,11 +873,9 @@ export default {
       const { ctx } = fx;
 
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      // only the water needs clearing unless something is drawn in the air
-      const airy = !!wx.falling || hot > 0.05;
-      const clearTop = airy || airWas || jump ? 0 : WL_HIGH - 60;
-      airWas = airy;
-      ctx.clearRect(0, clearTop, W, H - clearTop);
+      // a full clear: the browser can discard the old bitmap outright, where a
+      // partial clear makes it keep and composite the rest (measurably slower)
+      ctx.clearRect(0, 0, W, H);
 
       const rough = clamp(0.03 + Math.pow(wx.wind / 26, 1.15) + 0.12 * wx.intensity) * (1 - 0.55 * hot);
       const gustK = clamp((wx.gust - wx.wind) / (wx.wind + 6), 0.2, 1.2);
@@ -921,6 +928,7 @@ export default {
 
       // ---- the structure's reflection: strips of the offscreen scene, flipped
       ctx.setTransform(1, 0, 0, -1, 0, 2 * WL);
+      ctx.imageSmoothingEnabled = false; // the strips are copied 1:1 across; cheaper unsmoothed
       for (let i = 0; i < nVis; i++) {
         const a = AL[i];
         if (a < 0.02) continue;
@@ -932,6 +940,7 @@ export default {
         ctx.drawImage(scene, SX0, sy, SW, sh, SX0 + OFF[i], WL - d - h, SW, h * (1 - 0.32 * clamp(RGH[i] * 1.2)) + 0.4);
       }
       ctx.globalAlpha = 1;
+      ctx.imageSmoothingEnabled = true;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
 
       // ---- sodium light smeared down the water (brightness worked out once per
@@ -1023,12 +1032,12 @@ export default {
       {
         const cur = P.current, dir = cur < 0 ? -1 : 1, str = Math.abs(cur);
         const ph = (Math.abs(driftX) * 0.9) % 18;
-        ctx.fillStyle = P.gl[2];
+        ctx.fillStyle = P.gl[1];
         ctx.beginPath();
         for (let k = 0; k < PILES.length; k++) {
           const px = PILES[k] + PILE_W / 2;
           const bob = Math.sin(t * 1.3 + k * 1.7) * (0.5 + rough * 1.5);
-          ctx.rect(px - PILE_W / 2 - 4 - 3 * str, WL + 0.5 + bob, PILE_W + 8 + 6 * str, 1.6);
+          ctx.rect(px - PILE_W / 2 - 3 - 3 * str, WL + 0.5 + bob, PILE_W + 6 + 6 * str, 1.3);
           if (str < 0.12) continue;
           for (let j = 0; j < 5; j++) {
             const jj = j + ph / 18; // continuous position along the wake, so nothing pops
@@ -1183,7 +1192,7 @@ export default {
         const f = (t - start) / 3.4;
         if (f > 0 && f < 1) sw = Math.pow(Math.sin(f * Math.PI), 2) * (0.1 + 0.07 * hash(win, 5));
       }
-      setStyle("swell", swell, "opacity", sw.toFixed(3));
+      if (sw !== swLast) { swLast = sw; swell.style.opacity = sw.toFixed(3); }
 
       first = false;
     }

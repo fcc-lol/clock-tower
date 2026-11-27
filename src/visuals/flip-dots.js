@@ -1,8 +1,8 @@
 // Flip Dots
 //
 // A full-height wall of electromechanical flip-discs, the kind bus destination
-// signs are made of: 90 x 126 discs on a 12 px pitch, and below them a finer
-// module of 180 x 68 discs on a 6 px pitch for the small lines. Every disc has
+// signs are made of: 90 x 119 discs on a 12 px pitch, and below them a finer
+// module of 180 x 82 discs on a 6 px pitch for the small lines. Every disc has
 // a black face and a pale face, and nothing is ever drawn that a real sign could
 // not do: discs turn over, one at a time, in waves.
 //
@@ -23,8 +23,9 @@
 //           up) and stretching along it when it blows hard.
 //   wind    broad bands of discs that turn over and back, sweeping downwind;
 //           more wind, more and faster bands.
-//   rain    streaks of discs falling at the wind's slant, as many as it is
-//           raining hard, all the way to the floor. Drizzle is single ticks.
+//   rain    streaks of discs ticking down at the wind's slant, as many as it
+//           is raining hard, all the way to the floor (silver at night, black
+//           by day). Drizzle is single ticks.
 //           A storm sometimes lays a slow jagged branch and unpicks it.
 //   snow    single white discs wandering down and settling into a drift on the
 //           floor of the fine module, which the wind slowly erodes.
@@ -47,7 +48,7 @@ import { TAU, clamp, lerp, smoothstep, rng, mix, toOklch, oklch, parse, el, addS
 
 const W = 1080, H = 1920;
 // the main wall
-const P = 12, COLS = 90, ROWS = 126, N1 = COLS * ROWS;
+const P = 12, COLS = 90, ROWS = 119, N1 = COLS * ROWS;
 // the fine module below it
 const FP = 6, FCOLS = 180, FTOP = ROWS * P, FROWS = (H - FTOP) / FP, N2 = FCOLS * FROWS;
 const N = N1 + N2;
@@ -59,23 +60,23 @@ const DARK = 0, FIELD = 1, BRIGHT = 2, ACCENT = 3, SPARK = 4;
 // what a cell is reserved for
 const L_MOAT = 1, L_TEXT = 2, L_ACCENT = 3, L_SEC = 4, L_PLATE = 5;
 // weather overlays (bit flags)
-const O_RAIN = 1, O_FLAKE = 2, O_GUST = 4, O_BOLT = 8, O_STRAY = 16;
+const O_RAIN = 1, O_FLAKE = 2, O_GUST = 4, O_BOLT = 8, O_STRAY = 16, O_DRIP = 32; // DRIP: rain just left
 // sprites
 const SP_DARK = 0, SP_DARK_HALF = 1, SP_EDGE = 2, SP_PALE_HALF = 3, SP_PALE = 4;
 
 const FLIP = 0.19; // seconds a disc takes to turn over
 const BUSY = 160; // more discs than this turning at once: they skip the half-open step
 const SWEEP = 0.7; // every disc re-reads the weather this often (staggered)
-const CLOUD_SOFT = 30; // half-width of a cloud's dithered edge, in noise levels
+const CLOUD_SOFT = 26; // width of a cloud's dithered edge, in noise levels
 
 // layout of the main wall, in discs
 const LEFT = 6, RIGHT = 83; // 72 px margins
-const DIG_H = 31;
-const HOUR_ROW = 6, MIN_ROW = 41;
+const DIG_H = 28;
+const HOUR_ROW = 6, MIN_ROW = 36;
 const AMPM_ROW = MIN_ROW + DIG_H - 7;
-const DATE_ROW = 75, DATE_ROW2 = 84;
-const TEMP_ROW = 93, TEMP_H = 14;
-const COND_ROW = 110, COND_ROW2 = 119;
+const DATE_ROW = 69, DATE_ROW2 = 78;
+const TEMP_ROW = 89, TEMP_H = 12;
+const COND_ROW = 103, COND_ROW2 = 112;
 // layout of the fine module, in fine discs
 const FLEFT = 12, FRIGHT = 167; // 72 px margins, aligned with the wall's
 
@@ -188,9 +189,22 @@ function rasterDigits(rows, maxW, thr) {
   return out;
 }
 
-// The temperature, in the same face as the numerals, as one bitmap.
+// The temperature, in the same face as the numerals, as one bitmap. At only
+// twelve rows a heavy face clogs: a high threshold keeps its counters open.
+const TEMP_THR = 160;
 let tempFs = 0;
-function rasterTemp(str, rows) {
+function rasterTemp(text, rows) {
+  const ring = text.endsWith("°");
+  const str = ring ? text.slice(0, -1) : text;
+  if (str === "–" || str === "-") {
+    // no reading: a heavy dash at mid-height, then the ring
+    const w = 9 + (ring ? DEGREE.w + 2 : 0);
+    const d = new Uint8Array(w * rows);
+    const y0 = (rows >> 1) - 1;
+    for (let x = 0; x < 9; x++) d[y0 * w + x] = d[(y0 + 1) * w + x] = 1;
+    if (ring) for (let y = 0; y < DEGREE.h; y++) for (let x = 0; x < DEGREE.w; x++) d[y * w + 11 + x] = DEGREE.d[y * DEGREE.w + x];
+    return { w, h: rows, d };
+  }
   const cols = 96;
   const m = mask(cols, rows + 6, (c) => {
     if (!tempFs) {
@@ -205,67 +219,68 @@ function rasterTemp(str, rows) {
   let x1 = -1;
   for (let y = 2; y < rows + 4; y++) {
     for (let x = 0; x < cols; x++) {
-      if (m.data[y * cols + x] >= 120) {
+      if (m.data[y * cols + x] >= TEMP_THR) {
         if (x < x0) x0 = x;
         if (x > x1) x1 = x;
       }
     }
   }
-  const w = Math.max(1, x1 - x0 + 1);
+  const w0 = Math.max(1, x1 - x0 + 1);
+  // the degree sign, as a heavy ring of discs (the font's own is too small to survive the grid)
+  const deg = ring ? DEGREE.w + 2 : 0;
+  const w = w0 + deg;
   const d = new Uint8Array(w * rows);
-  for (let y = 0; y < rows; y++) for (let x = 0; x < w; x++) d[y * w + x] = m.data[(y + 3) * cols + x0 + x] >= 120 ? 1 : 0;
+  for (let y = 0; y < rows; y++) for (let x = 0; x < w0; x++) d[y * w + x] = m.data[(y + 3) * cols + x0 + x] >= TEMP_THR ? 1 : 0;
+  if (ring) for (let y = 0; y < DEGREE.h; y++) for (let x = 0; x < DEGREE.w; x++) d[y * w + w0 + 2 + x] = DEGREE.d[y * DEGREE.w + x];
   return { w, h: rows, d };
 }
+const DEGREE = { w: 6, h: 6, d: Uint8Array.from("011110111111110011110011111111011110".split(""), Number) };
 
-// A tileable 256 x 256 field of smooth noise, equalised so every value 0..255
-// is equally common (a threshold then cuts off a known share of it).
+// A tileable 128 x 128 field of smooth noise, equalised so every value 0..255
+// is about equally common (a threshold then cuts off a known share of it).
 function makeNoise(seed) {
   const r = rng(seed);
-  const f = new Float32Array(65536);
-  const ia = new Int32Array(256), ib = new Int32Array(256), tw = new Float32Array(256);
-  const rowA = new Float32Array(256), rowB = new Float32Array(256);
-  const octaves = [6, 0.56, 13, 0.28, 27, 0.16];
+  const M = 128;
+  const f = new Float32Array(M * M);
+  const ia = new Int32Array(M), ib = new Int32Array(M), tw = new Float32Array(M);
+  const octaves = [3, 0.56, 7, 0.28, 13, 0.16];
   for (let o = 0; o < 6; o += 2) {
     const g = octaves[o], amp = octaves[o + 1];
     const lat = new Float32Array(g * g);
     for (let i = 0; i < lat.length; i++) lat[i] = r() * amp;
-    for (let x = 0; x < 256; x++) {
-      const fx = (x * g) / 256;
+    for (let x = 0; x < M; x++) {
+      const fx = (x * g) / M;
       const x0 = fx | 0;
       const t = fx - x0;
       ia[x] = x0 % g;
       ib[x] = (x0 + 1) % g;
       tw[x] = t * t * (3 - 2 * t);
     }
-    for (let y = 0; y < 256; y++) {
+    for (let y = 0; y < M; y++) {
       const ya = ia[y] * g, yb = ib[y] * g, ty = tw[y];
-      // the two lattice rows, blended once per row
-      for (let x = 0; x < 256; x++) {
+      for (let x = 0; x < M; x++) {
         const a = lat[ya + ia[x]], b = lat[ya + ib[x]];
         const c = lat[yb + ia[x]], d = lat[yb + ib[x]];
         const t = tw[x];
         const top = a + (b - a) * t;
         const bot = c + (d - c) * t;
-        f[(y << 8) | x] += top + (bot - top) * ty;
+        f[y * M + x] += top + (bot - top) * ty;
       }
     }
   }
-  // equalise through a histogram (no sort: this runs inside mount)
-  const B = 4096;
+  // equalise through a histogram (no sort)
+  const B = 2048;
   const hist = new Uint32Array(B + 1);
-  const q = new Uint16Array(65536);
-  for (let i = 0; i < 65536; i++) {
+  const q = new Uint16Array(M * M);
+  for (let i = 0; i < M * M; i++) {
     let v = (f[i] * B) | 0;
     v = v < 0 ? 0 : v >= B ? B - 1 : v;
     q[i] = v;
     hist[v + 1]++;
   }
-  for (let b = 0; b < B; b++) hist[b + 1] += hist[b];
-  const out = new Uint8Array(65536);
-  for (let i = 0; i < 65536; i++) {
-    const v = q[i];
-    out[i] = (hist[v] + hist[v + 1]) >> 9;
-  }
+  for (let k = 0; k < B; k++) hist[k + 1] += hist[k];
+  const out = new Uint8Array(M * M);
+  for (let i = 0; i < M * M; i++) out[i] = Math.min(255, ((hist[q[i]] + hist[q[i] + 1]) * 128) / (M * M));
   return out;
 }
 
@@ -344,15 +359,19 @@ function makeSprites(pitch, ratio) {
     t.getContext("2d").drawImage(c, k * S, 0, S, S, 0, 0, S, S);
     return t;
   };
-  return { canvas: c, S, dark: tile(SP_DARK), pale: tile(SP_PALE) };
+  // the surround of a pale disc: the dark tile with the pale face cut out of it
+  const frame = tile(SP_DARK);
+  const fg = frame.getContext("2d");
+  fg.globalCompositeOperation = "destination-out";
+  fg.drawImage(c, SP_PALE * S, 0, S, S, 0, 0, S, S);
+  return { canvas: c, S, dark: tile(SP_DARK), frame };
 }
 
-const CNT = { d: 0, e: 0, n: 0, ds: [], es: [] };
 const CSS = `.fd { position: absolute; inset: 0; background: #0b0c0d; overflow: hidden; }`;
 
 export default {
   title: "Flip Dots",
-  description: "A wall of twenty-three thousand flip-discs that turns itself over with the light: the time in giant dot numerals, and the real weather passing through the discs around them.",
+  description: "A wall of twenty-five thousand flip-discs that turns itself over with the light: the time in giant dot numerals, and the real weather passing through the discs around them.",
   fonts: ["Archivo Black"],
   fps: 30,
 
@@ -363,7 +382,7 @@ export default {
     const under = pixelCanvas(wrap, { size: FP, alpha: false });
     const top = canvas2d(wrap, { maxScale: 2 });
     const ctx = top.ctx;
-    grain(wrap, { opacity: 0.035 });
+    grain(wrap, { opacity: 0.035, size: 128 });
 
     // ----- per-disc data -----
     const r = rng(seed);
@@ -376,7 +395,6 @@ export default {
     const pix = new Uint32Array(N); // its first pixel in the colour layer
     const pcol = new Uint8Array(N); // its column in the colour layer
     const bay = new Uint8Array(N); // ordered threshold 0..63
-    const rnd = new Uint8Array(N); // scattered threshold 0..63
     const lagOf = new Float32Array(N); // every disc is a little late; a few are sticky
     const warp = new Float32Array(N); // bends the wind bands
     const perm = new Uint16Array(N);
@@ -403,9 +421,9 @@ export default {
       cxs[i] = x;
       cys[i] = y;
       bay[i] = BAYER[(y & 7) * 8 + (x & 7)];
-      rnd[i] = (r() * 64) | 0;
-      lagOf[i] = r() < 0.02 ? r.range(0.3, 0.45) : r() * 0.05;
-      warp[i] = (NZ[(((fys[i] * 0.6) & 255) << 8) | ((fxs[i] * 0.6 + 90) & 255)] - 128) * 0.11;
+      const hh = Math.imul(i ^ seed, 0x9e3779b1) >>> 0;
+      lagOf[i] = (hh & 1023) < 20 ? 0.3 + ((hh >>> 10) & 255) / 1700 : ((hh >>> 18) & 1023) / 20480;
+      warp[i] = (NZ[(((fys[i] * 0.6) & 127) << 7) | ((fxs[i] * 0.6 + 90) & 127)] - 128) * 0.11;
       perm[i] = i;
     }
     for (let i = N - 1; i > 0; i--) {
@@ -433,17 +451,17 @@ export default {
     const thrOf = new Int16Array(101);
     {
       const hist = new Uint32Array(256);
-      for (let y = 0; y < 256; y++) {
-        for (let x = 0; x < 256; x++) {
-          const n1 = NZ[(y << 8) | x];
-          const n2 = NZ[(((y * 2.3 + 40) & 255) << 8) | ((x * 2.3 + 70) & 255)];
+      for (let y = 0; y < 128; y++) {
+        for (let x = 0; x < 128; x++) {
+          const n1 = NZ[(y << 7) | x];
+          const n2 = NZ[(((y * 2.3 + 40) & 127) << 7) | ((x * 2.3 + 70) & 127)];
           hist[(n1 * 3 + n2) >> 2]++;
         }
       }
       let acc = 0;
       let v = 255;
       for (let p = 1; p <= 100; p++) {
-        while (v > 0 && acc + hist[v] <= (p / 100) * 65536) acc += hist[v--];
+        while (v > 0 && acc + hist[v] <= (p / 100) * 16384) acc += hist[v--];
         thrOf[p] = v;
       }
       thrOf[0] = 999;
@@ -476,7 +494,7 @@ export default {
       const fc = Math.min(c.c * 1.15, lerp(0.035, 0.13, dd));
       put3(o, parse(oklch(fl, fc, h)));
       // type: white with a breath of the sky by day, a warm dim lamp at night
-      put3(o + 3, parse(mix(LAMP, oklch(0.965, Math.min(fc * 0.35, 0.035), h), dd)));
+      put3(o + 3, parse(mix(LAMP, oklch(Math.max(0.9, fl + 0.13), Math.min(fc * 0.55, 0.06), h), dd)));
       // weather: white by day, a cool moonlit silver at night
       put3(o + 6, parse(oklch(lerp(0.66, 0.97, dd), lerp(0.03, Math.min(fc * 0.3, 0.03), dd), h)));
     };
@@ -549,13 +567,20 @@ export default {
     };
     // an opaque tile, or (cut) a hole through what is there
     const blit = (i, sp) => {
-      CNT.d++;
       if (i < N1) ctx.drawImage(sheetM, sp * SM, 0, SM, SM, cxs[i] * P, cys[i] * P, P, P);
       else ctx.drawImage(sheetF, sp * SF, 0, SF, SF, cxs[i] * FP, FTOP + cys[i] * FP, FP, FP);
     };
-    const drawDark = (i) => {
-      cut(false);
-      blit(i, SP_DARK);
+    // this frame's paint, in two queues (see frame())
+    const qdI = new Uint16Array(N * 2), qdS = new Uint8Array(N * 2);
+    const qcI = new Uint16Array(N), qcS = new Uint8Array(N);
+    let nQD = 0, nQC = 0;
+    const qDark = (i, sp) => {
+      qdI[nQD] = i;
+      qdS[nQD++] = sp;
+    };
+    const qCut = (i, sp) => {
+      qcI[nQC] = i;
+      qcS[nQC++] = sp;
     };
     const toneOf = (face) => (face === BRIGHT ? 1 : face === ACCENT ? 2 : face === SPARK ? 3 : 0);
     const setTone = (i, face) => {
@@ -572,6 +597,12 @@ export default {
       p.setTransform(new DOMMatrix([pitch / S, 0, 0, pitch / S, 0, 0]));
       return p;
     };
+    const mc = document.createElement("canvas");
+    mc.width = UC;
+    mc.height = H / FP;
+    const mctx = mc.getContext("2d");
+    const mi = mctx.createImageData(mc.width, mc.height);
+    const m32 = new Uint32Array(mi.data.buffer);
     const renderAll = () => {
       for (let i = 0; i < N; i++) {
         tone[i] = toneOf(shown[i]);
@@ -586,12 +617,7 @@ export default {
       ctx.fillStyle = pattern(ctx, spF.dark, FP, SF);
       ctx.fillRect(0, FTOP, W, H - FTOP);
       // which discs are pale, one pixel per fine disc
-      const mc = document.createElement("canvas");
-      mc.width = UC;
-      mc.height = H / FP;
-      const mctx = mc.getContext("2d");
-      const mi = mctx.createImageData(mc.width, mc.height);
-      const m32 = new Uint32Array(mi.data.buffer);
+      m32.fill(0);
       for (let i = 0; i < N; i++) {
         if (!shown[i]) continue;
         const p = pix[i];
@@ -603,24 +629,17 @@ export default {
         }
       }
       mctx.putImageData(mi, 0, 0);
-      // holes everywhere, kept only where a disc is pale, then cut from the wall
-      const tc = document.createElement("canvas");
-      tc.width = top.canvas.width;
-      tc.height = top.canvas.height;
-      const tctx = tc.getContext("2d");
-      const k = tc.width / W;
-      tctx.setTransform(k, 0, 0, k, 0, 0);
-      tctx.fillStyle = pattern(tctx, spM.pale, P, SM);
-      tctx.fillRect(0, 0, W, FTOP);
-      tctx.fillStyle = pattern(tctx, spF.pale, FP, SF);
-      tctx.fillRect(0, FTOP, W, H - FTOP);
-      tctx.globalCompositeOperation = "destination-in";
-      tctx.imageSmoothingEnabled = false;
-      tctx.drawImage(mc, 0, 0, W, H);
+      // cut those cells out whole, then lay the surround of a pale disc under the holes
       ctx.globalCompositeOperation = "destination-out";
-      ctx.drawImage(tc, 0, 0, W, H);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(mc, 0, 0, W, H);
+      ctx.imageSmoothingEnabled = true;
+      ctx.globalCompositeOperation = "destination-over";
+      ctx.fillStyle = pattern(ctx, spM.frame, P, SM);
+      ctx.fillRect(0, 0, W, FTOP);
+      ctx.fillStyle = pattern(ctx, spF.frame, FP, SF);
+      ctx.fillRect(0, FTOP, W, H - FTOP);
       ctx.globalCompositeOperation = "source-over";
-      tc.width = tc.height = 1;
     };
 
     // ----- the weather field -----
@@ -641,6 +660,7 @@ export default {
     const driftTarget = new Uint8Array(FCOLS);
     const frostOrd = new Uint8Array(N);
     const frostEdge = new Uint8Array(ROWS + FROWS); // frost keeps to the right of the lettering
+    const rightmost = new Uint8Array(ROWS + FROWS);
 
     const startFlip = (i) => {
       if (instant) {
@@ -657,7 +677,6 @@ export default {
     };
 
     const evalCell = (i) => {
-      CNT.e++;
       let f;
       const L = lock[i];
       if (L) {
@@ -683,30 +702,35 @@ export default {
             if (d < 5 || (d < 10 && bay[i] > d * 12 - 56)) pale ^= 1;
           } else {
             let dens = dayDen;
-            let thr = bay[i];
+            const thr = bay[i];
             if (cloudThr < 300) {
               const u = (x * ux + y * uy) * invStretch - driftU + 8192;
               const w = y * ux - x * uy + driftW + 8192;
               const ui = u | 0;
-              const wr = (w & 255) << 8;
+              const wr = (w & 127) << 7;
               const uf = u - ui;
-              const n1 = NZ[wr | (ui & 255)] * (1 - uf) + NZ[wr | ((ui + 1) & 255)] * uf;
-              const n2 = NZ[(((w * 2.3 + 40) & 255) << 8) | ((u * 2.3 - driftU * 0.9 + 70) & 255)];
-              const dn = (n1 * 3 + n2) * 0.25 - cloudThr + CLOUD_SOFT;
+              const n1 = NZ[wr | (ui & 127)] * (1 - uf) + NZ[wr | ((ui + 1) & 127)] * uf;
+              const n2 = NZ[(((w * 2.3 + 40) & 127) << 7) | ((u * 2.3 - driftU * 0.9 + 70) & 127)];
+              const dn = (n1 * 3 + n2) * 0.25 - cloudThr;
               if (dn > 0) {
-                const m = dn > 2 * CLOUD_SOFT ? 1 : dn / (2 * CLOUD_SOFT);
+                // the edge ramps inward, so the share of the wall touched is the real cover
+                const m = dn > CLOUD_SOFT ? 1 : dn / CLOUD_SOFT;
                 // thick and thin patches inside the cloud
-                const n3 = NZ[(((w * 1.7 + 150) & 255) << 8) | ((u * 1.7 - driftU * 0.5 + 20) & 255)];
+                const n3 = NZ[(((w * 1.7 + 150) & 127) << 7) | ((u * 1.7 - driftU * 0.5 + 20) & 127)];
                 const cl = cloudLo + (cloudHi - cloudLo) * (n3 / 255);
                 dens += (cl - dens) * m;
               }
             }
             if (fogOn) {
-              const d = (y - fogTop + (NZ[(((y * 2) & 255) << 8) | ((x * 2 + fogScroll) & 255)] - 128) * 0.09) * fogK;
+              // long horizontal banks drifting with the wind, thin at the top
+              // and thick at the floor, with clear lanes between them
+              const nz = NZ[(((y * 1.9 + 30) & 127) << 7) | ((x * 0.2 + fogScroll) & 127)];
+              const d = (y - fogTop + (nz - 128) * 0.12) * fogK;
               if (d > 0) {
-                const fm = (d > 1 ? 1 : d) * fogMax; // thin at the top, thick at the floor
+                const bank = nz < 80 ? 0 : nz > 190 ? 1 : (nz - 80) / 110;
+                let fm = (d > 1 ? 1 : d) * fogMax * (0.2 + bank * 0.95);
+                if (fm > 1) fm = 1;
                 dens += (fogLevel - dens) * fm;
-                if (fm > 0.45) thr = bay[i];
               }
             }
             pale = dens > thr ? 1 : 0;
@@ -829,11 +853,12 @@ export default {
       const rw = Math.max(textWidth(aq), textWidth(uv));
       const rcol = FRIGHT + 1 - rw;
       if (!moon.includes("MOON") && textWidth(`${moon} MOON`) < rcol - FLEFT - 8) moon += " MOON";
-      const lines = []; // [str, col] pairs, or a gap
+      // small readouts: two lines with AQI and UV in a right-hand column, or three
+      const small = [];
       if (textWidth(sun) < rcol - FLEFT - 8 && textWidth(moon) < rcol - FLEFT - 8) {
-        lines.push([[sun, FLEFT], [aq, rcol]], [[moon, FLEFT], [uv, rcol]]);
+        small.push([[sun, FLEFT], [aq, rcol]], [[moon, FLEFT], [uv, rcol]]);
       } else {
-        lines.push([[sun, FLEFT]], [[moon, FLEFT]], [[`${aq}  ${uv}`, FLEFT]]);
+        small.push([[sun, FLEFT]], [[moon, FLEFT]], [[`${aq}   ${uv}`, FLEFT]]);
       }
       const fl = signText(raw.factLabel);
       let fv = raw.factValue ? wrapDots(signText(raw.factValue), span) : [];
@@ -848,28 +873,30 @@ export default {
         }
         fv = best;
       }
-      if (fv.length) {
-        lines.push(null);
-        if (fl) lines.push([[fl, FLEFT]]);
-        for (const l of fv) lines.push([[l, FLEFT]]);
-      }
-      // line pitch: 9 fine rows, 8 if that is what it takes to keep the margin
-      const bottom = (H - 64 - FTOP) / FP - 7; // last row a line may start on
-      let pitch = 9;
-      let row0 = 2;
-      const count = lines.filter(Boolean).length;
-      const gaps = lines.length - count;
-      if (row0 + (count - 1) * pitch + gaps * 2 > bottom) pitch = 8;
-      if (row0 + (count - 1) * pitch + gaps * 2 > bottom) row0 = 1;
-      if (row0 + (count - 1) * pitch + gaps > bottom) pitch = 7;
-      let row = row0;
-      for (const l of lines) {
-        if (!l) {
-          row += pitch >= 9 ? 2 : 1;
-          continue;
-        }
+      // rows: 7-dot lines 4 rows apart (24 px), 8 rows (48 px) between the
+      // small readouts and the fact, 2 between the fact's label and its text.
+      // Only an unusually long fact is set tighter, to keep the bottom margin.
+      const last = Math.floor((H - 64 - FTOP) / FP) - 7; // the last row a line may start on
+      const top0 = tx.c2 ? 10 : 7; // more air under a condition on two lines
+      let pitch = 11, gapS = 8;
+      const need = () => top0 + (small.length - 1) * pitch + (fv.length ? 7 + gapS + (fl ? 9 : 0) + (fv.length - 1) * pitch : 0);
+      while (need() > last && pitch > 9) pitch--;
+      while (need() > last && gapS > 4) gapS--;
+      let row = top0;
+      for (const l of small) {
         for (const [str, col] of l) fine.push({ str, col, row });
         row += pitch;
+      }
+      row += gapS + 7 - pitch;
+      if (fv.length) {
+        if (fl) {
+          fine.push({ str: fl, col: FLEFT, row });
+          row += 9;
+        }
+        for (const l of fv) {
+          fine.push({ str: l, col: FLEFT, row });
+          row += pitch;
+        }
       }
     };
     const buildLocks = () => {
@@ -891,7 +918,20 @@ export default {
       if (tempG) stamp(tempG, MAIN, LEFT, TEMP_ROW, L_TEXT, false);
       stampText(MAIN, tx.c1, LEFT, COND_ROW, L_TEXT);
       if (tx.c2) stampText(MAIN, tx.c2, LEFT, COND_ROW2, L_TEXT);
+      // a halo of clear sky two discs wide round all the type, so no weather ever touches it
       halo(MAIN, DATE_ROW, ROWS - 1, 2);
+      // a condition on two lines reaches the foot of the wall: carry its halo
+      // on across the seam into the fine module, so the letters never touch it
+      if (tx.c2) {
+        for (let x = 0; x < COLS; x++) {
+          let near = false;
+          for (let dx = -2; dx <= 2 && !near; dx++) {
+            const xx = x + dx;
+            if (xx >= 0 && xx < COLS && (lockNew[(ROWS - 1) * COLS + xx] === L_TEXT || lockNew[(ROWS - 2) * COLS + xx] === L_TEXT)) near = true;
+          }
+          if (near) rect(FINE, x * 2, 0, x * 2 + 1, 3, L_MOAT);
+        }
+      }
       // the fine module
       for (let k = 0; k < fine.length; k++) stampText(FINE, fine[k].str, fine[k].col, fine[k].row, L_TEXT);
       halo(FINE, 0, FROWS - 1, 2);
@@ -899,14 +939,18 @@ export default {
       for (let g = 0; g < ROWS + FROWS; g++) {
         const pn = g < ROWS ? MAIN : FINE;
         const y = g < ROWS ? g : g - ROWS;
-        const reach = g < ROWS ? 3 : 6;
+        let x = pn.cols - 1;
+        while (x >= 0 && !lockNew[pn.base + y * pn.cols + x]) x--;
+        rightmost[g] = x + 1;
+      }
+      for (let g = 0; g < ROWS + FROWS; g++) {
+        const fineRow = g >= ROWS;
+        const reach = fineRow ? 6 : 3;
+        const lo = fineRow ? ROWS : 0;
+        const hi = fineRow ? ROWS + FROWS - 1 : ROWS - 1;
         let far = 0;
-        for (let yy = Math.max(0, y - reach); yy <= Math.min(pn.rows - 1, y + reach); yy++) {
-          let x = pn.cols - 1;
-          while (x >= 0 && !lockNew[pn.base + yy * pn.cols + x]) x--;
-          if (x > far) far = x;
-        }
-        frostEdge[g] = far + (g < ROWS ? 3 : 6);
+        for (let k = Math.max(lo, g - reach); k <= Math.min(hi, g + reach); k++) if (rightmost[k] > far) far = rightmost[k];
+        frostEdge[g] = far + (fineRow ? 5 : 2);
       }
     };
     // Reserve the new cells and let go of the old ones. With `scan`, the
@@ -981,14 +1025,14 @@ export default {
       crystal(COLS, fr.range(100, 118), fr.range(0, 1), 28, 100);
     }
 
-    // ----- wind bands -----
+    
     const gq = new Uint16Array(N);
     const bStart = new Uint16Array(514);
     const bCells = new Uint16Array(N);
     const bFill = new Uint16Array(513);
     let nB = 0;
     let bux = 0, buy = 0; // direction the buckets were built for (0, 0 = not yet)
-    const KB = 4;
+    const KB = 2;
     const bandHead = new Int16Array(KB);
     const bandG = new Float32Array(KB);
     const bandV = new Float32Array(KB);
@@ -1044,7 +1088,7 @@ export default {
           for (let j = bStart[bOn]; j < bStart[bOn + 1]; j++) {
             const i = bCells[j];
             if (bay[i] >> 4 !== q) continue;
-            if (NZ[(((fys[i] + sy) & 255) << 8) | ((fxs[i] + sx) & 255)] > 100) {
+            if (NZ[(((fys[i] + sy) & 127) << 7) | ((fxs[i] + sx) & 127)] > 100) {
               ov[i] |= O_GUST;
               evalCell(i);
             }
@@ -1102,12 +1146,18 @@ export default {
       const xf = rX[k] + rS[k] * row;
       if (row < ROWS) {
         const x = Math.round(xf);
-        if (x >= 0 && x < COLS) flag(row * COLS + x, O_RAIN, on);
+        if (x >= 0 && x < COLS) {
+          if (!on) ov[row * COLS + x] |= O_DRIP;
+          flag(row * COLS + x, O_RAIN, on);
+        }
       } else {
         // on the fine discs a streak is a dotted line, every other row
         const x = Math.round(xf * 2);
         const y = (row - ROWS) * 2;
-        if (x >= 0 && x < FCOLS) flag(N1 + y * FCOLS + x, O_RAIN, on);
+        if (x >= 0 && x < FCOLS) {
+          if (!on) ov[N1 + y * FCOLS + x] |= O_DRIP;
+          flag(N1 + y * FCOLS + x, O_RAIN, on);
+        }
       }
     };
 
@@ -1128,7 +1178,7 @@ export default {
     };
     const setDriftTarget = (amount) => {
       for (let x = 0; x < FCOLS; x++) {
-        const dune = NZ[(37 << 8) | ((x + seed) & 255)] / 255;
+        const dune = NZ[(37 << 7) | ((x + seed) & 127)] / 255;
         driftTarget[x] = amount > 0 ? Math.min(9, Math.round(2 + amount * 3 + dune * (2 + amount * 4))) : 0;
       }
     };
@@ -1215,7 +1265,7 @@ export default {
         heatTimer -= dt;
         if (heatTimer <= 0) {
           heatTimer = 0.22;
-          const lim = lerp(0.98, 0.9, heat);
+          const lim = lerp(0.99, 0.95, heat);
           let changed = false;
           for (let y = HOUR_ROW; y < MIN_ROW + DIG_H; y++) {
             const v = heat > 0 ? Math.sin(y * 0.24 + t * 0.8 + Math.sin(y * 0.05 - t * 0.17) * 1.3) : 0;
@@ -1255,11 +1305,11 @@ export default {
       fogK = 1 / (FLOOR - fogTop + 1);
       fogMax = Math.min(0.97, 0.35 + fogAmt * 0.65);
       fogLevel = lerp(0.44, 0.5, day) * 64;
-      fogScroll = (fogScroll + dt * (0.8 + wind * 0.2)) % 256;
+      fogScroll = (fogScroll + dt * (0.35 + wind * 0.12)) % 256;
 
       // cloud (in thick fog there is no sky to see). Inside a cloud the share of
       // pale discs is lower than clear sky by day and higher than it by night.
-      const cover = live ? clamp(w.cloud / 100) * (1 - 0.85 * fogAmt * fogAmt) : 0;
+      const cover = live ? clamp(w.cloud / 100) * (1 - fogAmt) : 0;
       cloudThr = cover < 0.03 ? 999 : thrOf[Math.round(cover * 100)] - cover * cover * 40;
       let lo = lerp(0.12, 0.38, day);
       let hi = lerp(0.5, 0.8, day);
@@ -1268,8 +1318,8 @@ export default {
         lo += lerp(-0.04, 0.16, day);
         hi += lerp(-0.08, 0.1, day);
       } else if (fall === "snow") {
-        lo += 0.08 * day;
-        hi += 0.06 * day;
+        // an even, quiet sky, so the white flakes are what moves
+        lo = hi = lerp(0.3, 0.5, day);
       }
       cloudLo = lo * 64;
       cloudHi = hi * 64;
@@ -1294,9 +1344,9 @@ export default {
       if (live) {
         bandTimer -= dt;
         if (bandTimer <= 0) {
-          bandTimer = clamp(11 - wind * 0.32, 2.6, 11) * r.range(0.7, 1.3);
+          bandTimer = clamp(12 - wind * 0.25, 4.5, 12) * r.range(0.75, 1.25);
           const force = wind * 0.6 + gust * 0.4;
-          spawnBand(Math.min(18, 6 + force * 0.42), Math.round(clamp(8 + force * 0.3, 8, 16)), 1);
+          spawnBand(Math.min(18, 6 + force * 0.42), Math.round(clamp(16 + force * 0.45, 16, 30)), force > 12 ? 1 : 0);
         }
       }
       for (let k = 0; k < KB; k++) {
@@ -1479,16 +1529,22 @@ export default {
       instant = false;
     };
 
-    // ----- set up: the wall is complete on the first frame -----
-    settle(state, 0);
+    // ----- set up: the wall is built on the first frame, complete. (Doing it
+    // there rather than here splits the work of arriving into two shorter
+    // stalls; the runner gives a piece unseen frames before it is cut to.)
+    let ready = false;
     let lastMs = state.ms;
 
     return {
       frame(s) {
-        if (CNT.n++ > 0) { CNT.ds.push(CNT.d); CNT.es.push(CNT.e); } CNT.d = 0; CNT.e = 0;
-        if (CNT.n % 300 === 0) { const a = [...CNT.ds].sort((x, y) => x - y), b = [...CNT.es].sort((x, y) => x - y); console.warn('CNT draws avg', (a.reduce((x, y) => x + y, 0) / a.length).toFixed(0), 'p95', a[(a.length * 0.95) | 0], 'max', a[a.length - 1], 'evals avg', (b.reduce((x, y) => x + y, 0) / b.length).toFixed(0), 'p95', b[(b.length * 0.95) | 0], 'na', na); CNT.ds.length = 0; CNT.es.length = 0; }
         const t = s.t;
         const dt = s.dt;
+        if (!ready) {
+          ready = true;
+          lastMs = s.ms;
+          settle(s, t);
+          return;
+        }
         // the clock jumped (fast gallery, test steps, a wake from sleep)
         if (Math.abs(s.ms - lastMs - dt * 1000) > 5000) {
           lastMs = s.ms;
@@ -1517,27 +1573,27 @@ export default {
               continue;
             }
             aTo[k] = to;
-            aQuick[k] = na > BUSY || ov[i] & O_RAIN ? 1 : 0; // rain is too quick to see the half-open step
+            // rain ticks straight over (it is gone again in a moment); gusts and
+            // flakes, and everything when the wall is busy, skip the half-open step
+            const drip = ov[i] & (O_RAIN | O_DRIP);
+            ov[i] &= ~O_DRIP;
+            aQuick[k] = drip ? 2 : na > BUSY || ov[i] & (O_GUST | O_FLAKE) ? 1 : 0;
           }
           // edge on, half open, open (when the wall is busy the middle step is dropped)
-          const stage = p < 0.36 ? 1 : p < 0.7 ? 2 : 3;
+          const stage = aQuick[k] === 2 || p >= 0.7 ? 3 : p < 0.36 ? 1 : 2;
           const was = aStage[k];
           if (stage !== was) {
             if (was === 255) {
               if (to) setTone(i, to);
-              if (to || !aQuick[k]) {
-                cut(false);
-                blit(i, SP_EDGE);
-              }
+              if ((to || !aQuick[k]) && aQuick[k] !== 2) qDark(i, SP_EDGE);
             }
             if (stage === 2 && !aQuick[k]) {
-              cut(!!to);
-              blit(i, to ? SP_PALE_HALF : SP_DARK_HALF);
+              if (to) qCut(i, SP_PALE_HALF);
+              else qDark(i, SP_DARK_HALF);
             } else if (stage === 3) {
               if (to) {
-                cut(true);
-                blit(i, SP_PALE);
-              } else drawDark(i);
+                if (!(aQuick[k] === 2 && shown[i])) qCut(i, SP_PALE);
+              } else qDark(i, SP_DARK);
             }
             aStage[k] = stage;
           }
@@ -1556,6 +1612,19 @@ export default {
             continue;
           }
           k++;
+        }
+        // paint them: every opaque tile first, then every hole, so the canvas
+        // changes mode twice a frame rather than at every disc (a disc's own
+        // steps within one frame are always opaque before hole)
+        if (nQD) {
+          cut(false);
+          for (let q = 0; q < nQD; q++) blit(qdI[q], qdS[q]);
+          nQD = 0;
+        }
+        if (nQC) {
+          cut(true);
+          for (let q = 0; q < nQC; q++) blit(qcI[q], qcS[q]);
+          nQC = 0;
         }
         cut(false);
         if (uDirty) {

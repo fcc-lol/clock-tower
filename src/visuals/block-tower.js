@@ -7,37 +7,47 @@
 // base plank has today's fact burned into it.
 //
 // How the conditions drive it:
-//   wind       every course is a slow spring-damper rocking on the one below,
-//              pushed by the live wind speed and gusts from the live direction
-//              (wind from the west leans it to the right). The pennant streams
-//              downwind, a marble rolls along the groove in the top plank as
-//              the stack tilts, and in a real gust (about 34 mph and up) the
-//              roof block slides off, tumbles away and is dropped back on.
+//   wind       every course is a slow spring-damper rocking on an edge of the
+//              one below, pushed by the live wind speed and gusts from the live
+//              direction (wind from the west leans it to the right); in still
+//              air it keeps a slow wobble. The pennant streams downwind, a marble
+//              rolls along the groove in the top plank as the stack leans, the
+//              hanging sky swings, and in a real gust (about 34 mph and up, at
+//              most once a minute) the roof slides off, tumbles away and is
+//              dropped back on with a bounce.
 //   clock      a cube whose digit changes rolls forward a quarter turn, the
 //              stack above it hops and a settle wave runs up the tower.
 //   daylight   painted beech by day; at night the wood drops out to near black
 //              and the letters turn to glow paint. Ink flips where the face
 //              behind it is mid-grey and is always fitted to a contrast ratio.
+//   sky        the wall is the sky's measured color in four directions. In
+//              front of it hangs a toy-theatre sky of painted plywood cut-outs
+//              on threads: clouds lowered in as the real cover thickens (white,
+//              then grey, then slate in a storm), a sun when it is day and
+//              clear, stars on clear nights; painted drops dangle under the
+//              clouds in rain, flakes in snow.
 //   cloud/sun  how far apart the lit top, front and shaded side of each block
-//              are, the gloss on the paint and the shadow on the floor.
-//   rain       the wood soaks to wet walnut, drops run down the faces, a
-//              puddle at the foot mirrors the base plank.
-//   snow       a white cap grows on every exposed top and the floor drifts
+//              are, the gloss on the paint and the shadow on the table.
+//   rain       the wood soaks to wet walnut, drops run down the faces, and a
+//              puddle at the foot mirrors the plank and the glowing numerals,
+//              rippled and ringed by the drops.
+//   snow       a white cap grows on every exposed top and the table drifts
 //              over; the caps on the top blocks slide off when the stack rocks.
-//   fog        the upper courses pale toward the sky and banks drift past.
-//   heat/cold  hot: saturated paint and glints on the floor. Freezing: a
-//              frost line along the top edges.
-//   sky        the wall behind is the sky's measured color in four directions.
+//   fog        a veil over the wall, the upper courses pale into it, banks drift.
+//   heat/cold  hot: saturated paint and a warm glare off the table. Freezing:
+//              a frost line along the top edges.
 //
-// Type is DOM (Fredoka), the blocks are inline SVG inside nested, transformed
-// groups (one per course, so the rocking composes for free), and one canvas
-// in front carries rain, snow, drips and glints.
+// Type is DOM (Fredoka); the blocks are inline SVG inside nested groups, one
+// per course. The rocking is shown as each course's displacement (a translate
+// snapped to whole device pixels), because rotated or sub-pixel layers cost far
+// more to composite than everything else here. One canvas in front carries
+// rain, snow, drips, the puddle and glints.
 
 import { W, H, TAU, clamp, lerp, smoothstep, approach, ease, rng, createNoise, mix, adjust, rgba, luminance, toOklab, fromOklab, el, addStyle, canvas2d, grain } from "../lib/kit.js";
 
 const KX = 0.2; // oblique projection: a unit of depth moves this far right...
 const KY = 0.16; // ...and this far up
-const GROUND = 1800;
+const GROUND = 1820;
 const CUBE = 430;
 const TIP = 0.62; // seconds a cube takes to roll over
 
@@ -65,7 +75,7 @@ const CSS = `
 .bt{position:absolute;inset:0;overflow:hidden;background:#05060a;font-family:"Fredoka","Arial Rounded MT Bold","Helvetica Rounded",system-ui,sans-serif;font-weight:700}
 .bt div{box-sizing:border-box}
 .bt .sky,.bt .swell,.bt .haze{position:absolute;inset:0}
-.bt .swell{background:radial-gradient(ellipse 90% 60% at 50% 8%,rgba(196,208,255,.95),rgba(196,208,255,0) 72%);opacity:0;will-change:opacity}
+.bt .swell{background:radial-gradient(ellipse 90% 60% at 50% 8%,rgba(196,208,255,.95),rgba(196,208,255,0) 72%);opacity:0;display:none}
 .bt .stars{position:absolute;left:0;top:0;width:2px;height:2px;border-radius:50%}
 .bt .hg{position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0;will-change:transform}
 .bt .hg>svg{position:absolute;overflow:visible}
@@ -85,7 +95,7 @@ const CSS = `
 .bt .floor:before{content:"";position:absolute;left:0;top:0;right:0;height:3px;background:var(--floorline)}
 .bt .floor svg{position:absolute;left:0;top:0}
 .bt .seam{fill:none;stroke:var(--seam);stroke-width:2}
-.bt .shadow{position:absolute;left:44px;top:${GROUND}px;width:1000px;height:${H - GROUND}px;transform-origin:0 0;background:linear-gradient(to bottom,rgba(0,0,0,.62),rgba(0,0,0,.3));will-change:transform}
+.bt .shadow{position:absolute;left:44px;top:${GROUND}px;width:1000px;height:${H - GROUND}px;transform-origin:0 0;background:linear-gradient(to bottom,rgba(0,0,0,.62),rgba(0,0,0,.3))}
 .bt .contact{position:absolute;left:14px;top:${GROUND}px;width:1052px;height:30px;background:linear-gradient(to bottom,rgba(0,0,0,.42),rgba(0,0,0,0))}
 .bt .tower{position:absolute;left:0;top:0}
 .bt .grp{position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0;will-change:transform}
@@ -102,36 +112,36 @@ const CSS = `
 .bt .streak{fill:none;stroke:#1a0c04;stroke-linecap:round;opacity:var(--streak)}
 .bt .grv{fill:none;stroke:var(--s);stroke-width:8;stroke-linecap:round}
 .bt .grv2{fill:none;stroke:var(--bev);stroke-width:1.5;stroke-linecap:round}
-.bt .cap{transform-origin:var(--ox) var(--oy);will-change:transform}
+.bt .cap{transform-origin:var(--ox) var(--oy)}
 .bt .sn{fill:var(--sn);stroke:var(--sn);stroke-width:6;stroke-linejoin:round}
 .bt .sn2{fill:var(--sn2)}
 .bt .sn3{fill:none;stroke:var(--sn2);stroke-width:2.5;stroke-linecap:round}
 .bt .face{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--ink);text-align:center;white-space:nowrap;text-transform:uppercase;letter-spacing:.02em;text-shadow:0 2px 0 var(--hi),0 -1px 0 var(--lo),0 0 20px var(--halo)}
 .bt .face>*{flex:none}
 .bt .cube{text-shadow:0 4px 0 var(--hi),0 -2px 0 var(--lo),0 0 46px var(--halo);letter-spacing:0}
-.bt .dg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:428px;line-height:1;padding-bottom:10px;will-change:transform}
+.bt .dg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:428px;line-height:1;padding-bottom:10px}
 .bt .dg.cur{transform-origin:50% 100%}
 .bt .dg.nxt{transform-origin:50% 0;transform:scaleY(0)}
 .bt .tsh{position:absolute;inset:0;background:var(--t);transform-origin:50% 0;transform:scaleY(0);opacity:0}
 .bt .ted{position:absolute;left:0;right:0;top:-3px;height:6px;background:var(--s);opacity:0}
-.bt .row{flex-direction:row;justify-content:flex-start;padding:0 30px;gap:24px}
+.bt .row{flex-direction:row;justify-content:flex-start;padding:0 30px 0 44px;gap:40px}
 .bt .chip{font-size:46px;line-height:1;padding:11px 18px 13px;border-radius:14px;background:var(--chip);color:var(--chipink);text-shadow:none;box-shadow:inset 0 -3px 0 rgba(0,0,0,.18),inset 0 2px 0 rgba(255,255,255,.14)}
 .bt .date{font-size:58px;line-height:1;letter-spacing:.035em}
 .bt .temp{font-size:138px;line-height:1;letter-spacing:-.01em;padding-left:.12em}
-.bt .cond{font-size:58px;line-height:1.06}
+.bt .cond{font-size:58px;line-height:1.18}
 .bt .lab{font-size:30px;line-height:1;letter-spacing:.1em;font-weight:600;margin-bottom:7px}
 .bt .val{font-size:58px;line-height:1}
 .bt .valb{font-size:76px;line-height:.98}
 .bt .moon{font-size:56px;line-height:1;letter-spacing:.03em}
 .bt .fact{padding:0 40px 4px;text-shadow:0 1px 0 var(--hi),0 0 5px var(--scorch)}
 .bt .flab{font-size:28px;line-height:1;letter-spacing:.14em;font-weight:700;margin-bottom:12px}
-.bt .fval{font-size:46px;line-height:1.1;font-weight:600;white-space:normal;text-transform:none;letter-spacing:.005em;max-width:826px;text-wrap:balance}
+.bt .fval{font-size:46px;line-height:1.25;font-weight:600;white-space:normal;text-transform:none;letter-spacing:.005em;max-width:826px;text-wrap:balance}
 .bt .stamp{font-size:30px;letter-spacing:.3em;font-weight:600;opacity:.5}
 .bt .marble{position:absolute;left:0;top:0;width:44px;height:44px;margin:-22px 0 0 -22px;will-change:transform}
 .bt .marble b{position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle at 50% 50%,var(--m1) 0 46%,var(--m2) 47% 100%);overflow:hidden}
 .bt .marble b:before{content:"";position:absolute;left:-20%;top:38%;width:140%;height:26%;border-radius:50%;background:var(--m3)}
 .bt .marble u{position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle at 34% 28%,rgba(255,255,255,var(--mh)) 0 7%,rgba(255,255,255,0) 26%),radial-gradient(circle at 60% 70%,rgba(255,255,255,0) 40%,rgba(0,0,0,.35) 100%)}
-.bt .mound{position:absolute;left:0;top:0;transform-origin:0 ${GROUND + 26}px;will-change:transform}
+.bt .mound{position:absolute;left:0;top:0;transform-origin:0 ${GROUND + 26}px}
 .bt .pen{position:absolute;overflow:visible;left:0;top:0}
 .bt .ao{position:absolute;left:0;height:26px;background:linear-gradient(rgba(0,0,0,var(--ao)),rgba(0,0,0,0))}
 `;
@@ -198,7 +208,7 @@ function grainD(r, w, h, { sp = 7, cath = false } = {}) {
     const a2 = r.range(0.3, 1.3);
     const p2 = r.range(0, TAU);
     let s = "";
-    for (let x = x0; ; x += 18) {
+    for (let x = x0; ; x += 24) {
       const xx = Math.min(x, x1);
       let y = y0 + A * Math.sin(xx * F + P) + a2 * Math.sin(xx * F * 2.7 + p2);
       if (cath) {
@@ -274,7 +284,7 @@ function woodMarkup(r, o, dx, dy) {
   let m = `<svg width="${w + dx + pad * 2}" height="${h + dy + pad * 2}" viewBox="${-pad} ${f1(-dy - pad)} ${w + dx + pad * 2} ${f1(h + dy + pad * 2)}" style="left:${-pad}px;top:${f1(-dy - pad)}px">`;
   // top face: local (u, v), v = 0 at the back edge
   m += `<g transform="matrix(1 0 ${(-dx / dy).toFixed(4)} 1 ${f1(dx)} ${f1(-dy)})"><rect class="ft" width="${w}" height="${f1(dy + 0.7)}"/>`;
-  if (!painted) m += grainD(r, w, dy, { sp: 3.4 });
+  if (!painted) m += grainD(r, w, dy, { sp: 4.2 });
   if (o.groove) m += `<path class="grv" d="M34 ${f1(dy * 0.5)}H${w - 34}"/><path class="grv2" d="M34 ${f1(dy * 0.5 + 4.5)}H${w - 34}"/>`;
   m += `</g>`;
   // right side: local (u, v)
@@ -361,7 +371,7 @@ export default {
       const node = el("div", { class: "hg", style: { left: `${ax}px` } });
       node.innerHTML = `<svg width="10" height="10"><path class="thr" d="M0 -40V${f1(L + 4)}"/><g transform="translate(0 ${f1(L)})">${inner}</g></svg>`;
       hangLayer.append(node);
-      const h = { node, kind, th, op: -1, k: (TAU / period) ** 2, c: 2 * 0.09 * (TAU / period), a: 0, v: 0, gain: 0.6 + 0.6 * (L / 400), tf: "" };
+      const h = { node, kind, th, op: -1, lift: L + (kind === "cloud" ? 400 : kind === "sun" ? 220 : 70), arm: L + (kind === "cloud" ? 80 : kind === "sun" ? 92 : 20), k: (TAU / period) ** 2, c: 2 * 0.09 * (TAU / period), a: 0, v: 0, gain: 0.6 + 0.6 * (L / 400), hx: NaN, hy: NaN };
       hangs.push(h);
       return h;
     }
@@ -518,7 +528,7 @@ export default {
     const cubeSchemes = r.shuffle([{ ink: "red" }, { ink: "cobalt" }, { ink: "green" }, { face: "yellow", ink: "yellow" }]);
     const cubeO = (x, y, i) => ({ x, y, w: CUBE, h: CUBE, D: CUBE, scheme: cubeSchemes[i], grain: r() < 0.5 ? "v" : "h", cath: true, course: i < 2 ? 2 : 1, ratio: 3.25, cls: "cube" });
 
-    const base = mk(tower, { x: 44, y: 1600, w: 906, h: 200, D: 470, scheme: { ink: "burn" }, grain: "h", rings: true, course: 0, cls: "fact", capT: 16 });
+    const base = mk(tower, { x: 44, y: 1600, w: 906, h: 220, D: 470, scheme: { ink: "burn" }, grain: "h", rings: true, course: 0, cls: "fact", capT: 16 });
     const C1 = group(tower);
     const j2 = jit(6);
     const hourX = [64 + j2, 500 + j2, 282 + j2];
@@ -602,7 +612,7 @@ export default {
       moundEl.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="position:absolute;left:0;top:0"><path style="fill:var(--sn)" d="${d}"/></svg>`;
     }
     wrap.append(moundEl, fogFront);
-    const fx = canvas2d(wrap, { adaptive: true, maxScale: 0.5 });
+    const fx = canvas2d(wrap, { adaptive: true });
     grain(wrap, { opacity: 0.05 });
 
     // ----- snow caps ----------------------------------------------------------
@@ -663,6 +673,13 @@ export default {
       { T: 3.2, z: 0.17, A: 0.02, par: 3, cl: moonB.o.x, cr: moonB.o.x + moonB.o.w, iy: 402, gain: 1 },
       { T: 2.9, z: 0.17, A: 0.022, par: 3, cl: aqiB.o.x, cr: uvB.o.x + uvB.o.w, iy: 402, gain: 1 },
     ];
+    // the middle of each course, the point whose displacement moves it on screen
+    const CH = [430, 430, 118, 220, 104, 160];
+    for (let j = 0; j < OSC.length; j++) {
+      const o = OSC[j];
+      o.cxk = (o.cl + o.cr) / 2;
+      o.cyk = o.iy - CH[j] / 2;
+    }
     for (const o of OSC) {
       o.w2 = (TAU / o.T) ** 2;
       o.c = 2 * o.z * (TAU / o.T);
@@ -702,6 +719,7 @@ export default {
       const rt = hR.o.x + CUBE;
       OSC[1].cl = OSC[2].cl = l;
       OSC[1].cr = OSC[2].cr = rt;
+      OSC[1].cxk = OSC[2].cxk = (l + rt) / 2;
       OSC[1].gain = single ? 1.3 : 1;
       OSC[2].gain = single ? 1.6 : 1;
       const hours = single ? [hR] : [hL, hR];
@@ -722,10 +740,9 @@ export default {
     // world matrix of each group (index 0 is the identity)
     const M = new Float32Array(7 * 6);
     M[0] = M[3] = 1;
-    const lastTf = new Array(NO).fill("");
 
     // ----- particles ------------------------------------------------------------
-    const NR = 420;
+    const NR = 300;
     const rain = new Float32Array(NR * 4); // x, y, length, speed
     for (let i = 0; i < NR; i++) rain.set([r.range(-200, W + 200), r.range(-100, H), r.range(34, 80), r.range(1300, 2000)], i * 4);
     const NS = 380;
@@ -819,8 +836,8 @@ export default {
         }
       }
       put("ampm", T.ampm, tx.ampm);
-      if (put("date", T.date, tx.date)) fit(T.date, 900 - 60 - T.ampm.offsetWidth - 24, 58, 44);
-      if (put("temp", T.temp, tx.temp)) fit(T.temp, 244 - 30, 138, 90);
+      if (put("date", T.date, tx.date)) fit(T.date, 900 - 44 - 36 - T.ampm.offsetWidth - 40, 58, 44);
+      if (put("temp", T.temp, tx.temp)) fit(T.temp, 244 - 44, 138, 90);
       if (shown.cond !== tx.condition) {
         shown.cond = tx.condition;
         const words = tx.condition.split(" ");
@@ -842,18 +859,18 @@ export default {
         T.cond1.textContent = a;
         T.cond2.textContent = b;
         T.cond2.style.display = b ? "" : "none";
-        fit(T.cond1, 380 - 44, 58, 44);
+        fit(T.cond1, 380 - 64, 58, 44);
         if (b) {
-          fit(T.cond2, 380 - 44, 58, 44);
+          fit(T.cond2, 380 - 64, 58, 44);
           const fs = Math.min(parseFloat(T.cond1.style.fontSize), parseFloat(T.cond2.style.fontSize));
           T.cond1.style.fontSize = T.cond2.style.fontSize = `${fs}px`;
         }
       }
-      if (put("sunLabel", T.sunLabel, tx.sunLabel)) fit(T.sunLabel, 236 - 28, 30, 24);
-      if (put("sunValue", T.sunValue, tx.sunValue)) fit(T.sunValue, 236 - 30, 58, 36);
-      if (put("moon", T.moon, tx.moon)) fit(T.moon, 470 - 44, 56, 40);
-      if (put("aqi", T.aqi, tx.aqi)) fit(T.aqi, 160 - 24, 76, 44);
-      if (put("uv", T.uv, tx.uv)) fit(T.uv, 160 - 24, 76, 44);
+      if (put("sunLabel", T.sunLabel, tx.sunLabel)) fit(T.sunLabel, 236 - 44, 30, 24);
+      if (put("sunValue", T.sunValue, tx.sunValue)) fit(T.sunValue, 236 - 48, 58, 36);
+      if (put("moon", T.moon, tx.moon)) fit(T.moon, 470 - 64, 56, 40);
+      if (put("aqi", T.aqi, tx.aqi)) fit(T.aqi, 160 - 40, 76, 44);
+      if (put("uv", T.uv, tx.uv)) fit(T.uv, 160 - 40, 76, 44);
       const fl = put("factLabel", T.factLabel, tx.factLabel);
       const fv = put("factValue", T.factValue, tx.factValue);
       if (fl || fv || !shown.factInit) {
@@ -867,18 +884,18 @@ export default {
           let ok = false;
           for (let fs = 46; fs >= 36 && !ok; fs -= 2) {
             st.fontSize = `${fs}px`;
-            ok = T.factValue.offsetHeight <= fs * 2.3;
+            ok = T.factValue.offsetHeight <= fs * 2.6;
           }
           for (let fsr = 94; fsr >= 76 && !ok; fsr -= 6) {
             st.fontStretch = `${fsr}%`;
-            ok = T.factValue.offsetHeight <= 36 * 2.3;
+            ok = T.factValue.offsetHeight <= 36 * 2.6;
           }
         }
       }
     }
 
     // ----- color ----------------------------------------------------------------
-    const FOGK = [0, 0.1, 0.22, 0.38, 0.52, 0.62, 0.7];
+    const FOGK = [0, 0.12, 0.26, 0.44, 0.58, 0.68, 0.78];
     function palette(s) {
       const wx = s.weather;
       const day = s.daylight;
@@ -925,11 +942,11 @@ export default {
       const sunF = mix("#ffc21a", "#ff7a2a", golden);
       setG("--sf", sunF);
       setG("--ss", mix(sunF, "#7a3a08", 0.4));
-      E.sunVis = smoothstep(0.2, 0.55, day) * (1 - smoothstep(0.5, 0.88, cloud)) * (1 - E.fog);
+      E.sunVis = smoothstep(0.3, 0.6, day) * (1 - smoothstep(0.5, 0.88, cloud));
       const starF = mix("#ffe7a0", wall, 0.12);
       setG("--stf", starF);
       setG("--sts", mix(starF, "#2a1e08", 0.65));
-      E.starVis = nightK * (1 - smoothstep(0.3, 0.8, cloud)) * (1 - E.fog);
+      E.starVis = smoothstep(0.55, 0.9, nightK) * (1 - smoothstep(0.3, 0.8, cloud));
       E.cloudFade = 1 - 0.9 * E.fog;
       const dropF = mix("#2a63d4", mix(wall, "#6f9be8", 0.45), nightK);
       setG("--dpf", dropF);
@@ -979,7 +996,7 @@ export default {
         const sc = b.o.scheme;
         const darkPaint = sc.face && sc.face !== "yellow";
         let f = sc.face ? faceCol[sc.face] : wood;
-        const fk = E.fog * FOGK[b.o.course] * (darkPaint ? 0.3 : 1);
+        const fk = E.fog * FOGK[b.o.course] * (darkPaint ? 0.55 : 1);
         if (fk > 0.004) f = mix(f, fogCol, fk);
         const ink = mix(inkFor(f, INK[sc.ink], b.o.ratio || 4.7), "#000000", 0);
         const dark = luminance(ink) < luminance(f);
@@ -1016,25 +1033,25 @@ export default {
       const dk = (c, k) => mix(c, "#000000", k);
       const bf = base.vars["--f"];
       rctx.fillStyle = dk(bf, 0.25);
-      rctx.fillRect(base.o.x, 0, base.o.w, 50);
+      rctx.fillRect(base.o.x, 0, base.o.w, 32);
       rctx.fillStyle = dk(base.vars["--s"], 0.5);
-      rctx.fillRect(base.o.x + base.o.w, 0, base.dx, 50 - base.dy * 0.5);
+      rctx.fillRect(base.o.x + base.o.w, 0, base.dx, 32 - base.dy * 0.3);
       const cubes = [mL, mR];
       for (const b of cubes) {
         rctx.fillStyle = dk(b.vars["--f"], 0.3);
-        rctx.fillRect(b.o.x, 54, b.o.w, REFH - 54);
-        const g = rctx.createRadialGradient(b.o.x + b.o.w / 2, 104, 4, b.o.x + b.o.w / 2, 104, 120);
+        rctx.fillRect(b.o.x, 35, b.o.w, REFH - 35);
+        const g = rctx.createRadialGradient(b.o.x + b.o.w / 2, 78, 4, b.o.x + b.o.w / 2, 78, 110);
         g.addColorStop(0, rgba(b.ink, 0.75 + 0.25 * nightK));
         g.addColorStop(1, rgba(b.ink, 0));
         rctx.fillStyle = g;
-        rctx.fillRect(b.o.x, 54, b.o.w, REFH - 54);
+        rctx.fillRect(b.o.x, 35, b.o.w, REFH - 35);
       }
       // the wet seam where plank meets floor
       rctx.fillStyle = rgba("#ffffff", 0.12 * (1 - nightK) + 0.04);
       rctx.fillRect(base.o.x, 0, base.o.w, 2);
       const fade = rctx.createLinearGradient(0, 0, 0, REFH);
       fade.addColorStop(0, "rgba(0,0,0,0)");
-      fade.addColorStop(1, "rgba(0,0,0,1)");
+      fade.addColorStop(1, "rgba(0,0,0,0.7)");
       rctx.globalCompositeOperation = "destination-out";
       rctx.fillStyle = fade;
       rctx.fillRect(0, 0, W, REFH);
@@ -1114,29 +1131,53 @@ export default {
       roof.capDrop = t + 0.15;
     }
 
+    // Each course rocks on an edge of the one below. On screen that rocking is
+    // shown as the displacement it gives each course (a pure translate: rotated
+    // layers are far costlier to composite, and at these angles the eye reads
+    // the shift, not the tilt). World offsets are summed exactly up the chain.
+    // Moving layers sit on whole device pixels: a layer at a fractional offset
+    // has to be resampled every frame, which costs more than everything else here.
+    const devScale = (root.getBoundingClientRect().width / W || 1) * (window.devicePixelRatio || 1);
+    const PX = 1 / Math.max(1, Math.round(devScale));
+    const snap = (v) => Math.round(v / PX) * PX;
+    const LX = new Float32Array(NO).fill(NaN);
+    const LY = new Float32Array(NO).fill(NaN);
+    const WX = new Float32Array(NO);
+    const WY = new Float32Array(NO);
     function transforms() {
-      for (let j = 0; j < NO; j++) {
-        const o = OSC[j];
-        const a = phi[j];
-        const c = Math.cos(a);
-        const sn = Math.sin(a);
-        const px = a > 0 ? o.cr : o.cl;
-        const e = px - c * px + sn * o.iy;
-        const f = o.iy - sn * px - c * o.iy + hopY[j];
-        // world matrix = parent's world x local
-        const pi = (o.par + 1) * 6;
-        const mi = (j + 1) * 6;
-        const pa = M[pi], pb = M[pi + 1], pc = M[pi + 2], pd = M[pi + 3];
-        M[mi] = pa * c + pc * sn;
-        M[mi + 1] = pb * c + pd * sn;
-        M[mi + 2] = -pa * sn + pc * c;
-        M[mi + 3] = -pb * sn + pd * c;
-        M[mi + 4] = pa * e + pc * f + M[pi + 4];
-        M[mi + 5] = pb * e + pd * f + M[pi + 5];
-        const tf = `matrix(${c.toFixed(5)},${sn.toFixed(5)},${(-sn).toFixed(5)},${c.toFixed(5)},${e.toFixed(2)},${f.toFixed(2)})`;
-        if (tf !== lastTf[j]) {
-          lastTf[j] = tf;
-          groups[j].style.transform = tf;
+      for (let k = 0; k < NO; k++) {
+        const ok = OSC[k];
+        const qx = ok.cxk;
+        const qy = ok.cyk;
+        let x = qx;
+        let y = qy;
+        // apply the rotations from the top of the chain down to the base
+        for (let j = k; j >= 0; j = OSC[j].par) {
+          const o = OSC[j];
+          const a = phi[j];
+          const c = Math.cos(a);
+          const sn = Math.sin(a);
+          const px = a > 0 ? o.cr : o.cl;
+          const dx = x - px;
+          const dy = y - o.iy;
+          x = px + c * dx - sn * dy;
+          y = o.iy + sn * dx + c * dy + hopY[j];
+          if (o.par < 0) break;
+        }
+        WX[k] = x - qx;
+        WY[k] = y - qy;
+        const par = ok.par;
+        const mi = (k + 1) * 6;
+        M[mi] = M[mi + 3] = 1;
+        M[mi + 1] = M[mi + 2] = 0;
+        M[mi + 4] = WX[k];
+        M[mi + 5] = WY[k];
+        const lx = snap(WX[k]) - (par >= 0 ? snap(WX[par]) : 0);
+        const ly = snap(WY[k]) - (par >= 0 ? snap(WY[par]) : 0);
+        if (lx !== LX[k] || ly !== LY[k]) {
+          LX[k] = lx;
+          LY[k] = ly;
+          groups[k].style.transform = `translate(${lx}px,${ly}px)`;
         }
       }
     }
@@ -1205,9 +1246,7 @@ export default {
           roof.hit = false;
         }
       }
-      // a touch of its own rocking, a beat behind the cubes it sits on
-      rot += (phi[5] + phi[3]) * 0.5;
-      const tf = `translate(${x.toFixed(1)}px,${y.toFixed(1)}px) rotate(${rot.toFixed(4)}rad)`;
+      const tf = rot ? `translate(${x.toFixed(1)}px,${y.toFixed(1)}px) rotate(${rot.toFixed(4)}rad)` : `translate(${x.toFixed(1)}px,${y.toFixed(1)}px)`;
       if (tf !== shown.roofTf) {
         shown.roofTf = tf;
         roofG.style.transform = tf;
@@ -1230,13 +1269,13 @@ export default {
           MAR.v = -Math.abs(MAR.v) * 0.3;
         }
       }
-      const q = Math.round(MAR.s * 4) / 4;
+      const q = snap(MAR.s);
       if (q === MAR.shown && !jump) return;
       MAR.shown = q;
       const cx = moonB.o.x + q + moonB.dx * 0.5;
       const cy = moonB.o.y - moonB.dy * 0.5;
-      marble.style.transform = `translate(${cx.toFixed(2)}px,${(cy - 19).toFixed(2)}px) rotate(${(q / 22).toFixed(3)}rad)`;
-      marbleShadow.style.transform = `translate(${(cx + 5).toFixed(2)}px,${(cy + 1).toFixed(2)}px)`;
+      marble.style.transform = `translate(${snap(cx)}px,${snap(cy - 19)}px) rotate(${(q / 22).toFixed(3)}rad)`;
+      marbleShadow.style.transform = `translate(${snap(cx + 5)}px,${snap(cy + 1)}px)`;
     }
 
     function pennant(t, dt) {
@@ -1322,13 +1361,15 @@ export default {
       const h = dt / n;
       for (let i = 0; i < hangs.length; i++) {
         const hg = hangs[i];
-        let op = hg.kind === "cloud" ? smoothstep(hg.th - 3, hg.th + 3, cloud) * E.cloudFade : hg.kind === "sun" ? E.sunVis : E.starVis;
-        op = Math.round(op * 50) / 50;
+        // a cut-out is lowered on its thread when it is wanted and hoisted out of sight when not
+        const vis = hg.kind === "cloud" ? smoothstep(hg.th - 4, hg.th + 4, cloud) : hg.kind === "sun" ? E.sunVis : E.starVis;
+        const op = vis > 0.002 ? Math.round(E.cloudFade * 50) / 50 : 0;
         if (op !== hg.op) {
           hg.op = op;
           hg.node.style.opacity = op;
           hg.node.style.display = op > 0 ? "" : "none";
         }
+        const lift = Math.round((1 - ease.cubicInOut(vis)) * hg.lift * 2) / 2;
         const turb = noise.n2(s.t * 0.55, i * 5.3);
         const target = -hg.gain * (0.03 * pNow + (0.012 + 0.02 * Math.abs(pNow)) * turb);
         for (let k = 0; k < n; k++) {
@@ -1340,13 +1381,16 @@ export default {
           hg.v = 0;
         }
         if (op <= 0) continue;
-        const tf = `rotate(${hg.a.toFixed(4)}rad)`;
-        if (tf !== hg.tf) {
-          hg.tf = tf;
-          hg.node.style.transform = tf;
+        // the swing shown as the sideways shift of the cut-out (cheap to composite)
+        const hx = snap(-hg.a * hg.arm);
+        const hy = snap(-lift);
+        if (hx !== hg.hx || hy !== hg.hy) {
+          hg.hx = hx;
+          hg.hy = hy;
+          hg.node.style.transform = `translate(${hx}px,${hy}px)`;
         }
       }
-      const fq = wx.fog || wx.visibility < 0.5 ? Math.round(E.fog * 40) / 40 : 0;
+      const fq = wx.kind === "fog" ? Math.round(E.fog * 40) / 40 : 0;
       if (fq !== shown.fogq) {
         shown.fogq = fq;
         fogBack.style.display = fogFront.style.display = fq > 0.02 ? "" : "none";
@@ -1357,7 +1401,7 @@ export default {
           f.x += (f.sp + drift * 0.6) * dt;
           if (f.x > W + 80) f.x = -f.w - 60;
           else if (f.x < -f.w - 80) f.x = W + 60;
-          f.node.style.transform = `translate(${f.x.toFixed(1)}px,${f.y.toFixed(0)}px)`;
+          f.node.style.transform = `translate(${snap(f.x)}px,${f.y.toFixed(0)}px)`;
         }
       }
       // storm: a slow, soft swell of light behind the tower, now and then
@@ -1371,6 +1415,7 @@ export default {
       } else E.swell = 0;
       const sw = Math.round(E.swell * 0.2 * 100) / 100;
       styleIf("swell", swellEl, "opacity", String(sw));
+      styleIf("swellD", swellEl, "display", sw > 0 ? "block" : "none");
 
       // floor shadow from the sun (or a bright moon), its lean from which side the light is on
       const alt = s.sun.alt;
@@ -1437,9 +1482,9 @@ export default {
         ctx.fillStyle = E.pudCol;
         ctx.fillRect(0, GROUND, W, H - GROUND);
         const amp = 0.8 + 2.6 * rainAmt;
-        for (let y = 0; y < REFH; y += 3) {
+        for (let y = 0; y < REFH; y += 5) {
           const off = amp * (1 + y * 0.03) * Math.sin(y * 0.23 - s.t * 2.1) + amp * 0.6 * Math.sin(y * 0.071 + s.t * 1.3);
-          ctx.drawImage(refl, 0, y, W, 3, off, GROUND + y, W, 3);
+          ctx.drawImage(refl, 0, y, W, 5, Math.round(off), GROUND + y, W, 5);
         }
         ctx.globalAlpha = 1;
         ctx.restore();
@@ -1573,7 +1618,8 @@ export default {
         const fall = wx.falling;
         const wetT = fall === "rain" || fall === "storm" || fall === "freezing" ? 1 : fall === "drizzle" ? 0.42 : 0;
         const snowT = fall === "snow" ? 1 : 0;
-        const fogT = smoothstep(2.2, 0.2, wx.visibility);
+        // low visibility in falling rain or snow is the precipitation itself, not fog
+        const fogT = smoothstep(2.2, 0.2, wx.visibility) * (wx.kind === "fog" ? 1 : wx.falling ? 0.3 : 0.7);
         if (jump) {
           E.wet = wetT;
           E.puddle = wetT >= 1 ? 1 : 0;

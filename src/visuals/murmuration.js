@@ -1,11 +1,18 @@
 // Murmuration
 //
 // A flock of starlings over the East River, in the measured colour of the sky.
-// The densest part of the flock is the time: about 2,300 birds circulate inside
-// the strokes of giant numerals (hour over minutes), and about 700 more fly as
-// a free ribbon that folds and twists around them. The other readouts are
-// captions sitting on three sagging wires at the bottom, with birds perched in
-// the gaps between the words.
+// The densest part of the flock is the time: about 2,100 birds (and 1,800 far
+// specks) circulate inside the strokes of giant numerals (hour over minutes),
+// over a soft silhouette of the figures, and about 600 more (with 600 specks)
+// fly as a free ribbon that folds and twists around them. The other readouts
+// are captions sitting on three sagging wires at the bottom (the air now; the
+// calendar; the fact and the sun), with birds perched in the gaps between words.
+//
+// Built to be cheap: birds are small filled chevrons batched by size and ink;
+// sky, numeral silhouettes and grain share one canvas repainted only when they
+// change; each wire is its own little SVG so its sway is a transform; digit
+// fields are built only for the digits on show, and the cloud texture a few
+// rows per frame after mount.
 //
 // How the conditions drive it:
 //   sky      the whole backdrop is the four measured sky colours, west at the
@@ -28,36 +35,39 @@
 //            the air; it settles again over a few seconds
 import {
   W, H, TAU, clamp, lerp, smoothstep, rng, hash, createNoise,
-  mix, rgba, toOklab, el, svg, addStyle, canvas2d, mask, grain,
+  mix, rgba, toOklab, el, svg, addStyle, canvas2d, mask,
 } from "../lib/kit.js";
 
 const DISPLAY = '"Big Shoulders Display", "Anton", "Arial Narrow", sans-serif';
 const SANS = '"Instrument Sans", "Helvetica Neue", Arial, sans-serif';
 const SERIF = '"Instrument Serif", Georgia, serif';
 
-const NG = 2300; // birds that live in the numerals
-const NF = 700; // free birds: the ribbon, the wires, and at night the numerals too
+const NG = 2100; // birds that live in the numerals
+const NF = 600; // free birds: the ribbon, the wires, and at night the numerals too
 const N = NG + NF;
-const NDG = 4200; // far birds, drawn as specks: these stay in the numerals
-const NDF = 1100; // far birds that fly with the ribbon by day and come down at night
+const NDG = 1800; // far birds, drawn as specks: these stay in the numerals
+const NDF = 600; // far birds that fly with the ribbon by day and come down at night
 const ND = NDG + NDF;
 
-const FONT_PX = 700; // the numerals' size
+const FONT_PX = 670; // the numerals' size
 const CELL = 6; // glyph field resolution, stage px
 const PAD = 42; // empty margin around a glyph in its field
 const LEFT = 104; // left edge of both lines of numerals
 const TRACK = 12;
-const HOUR_BASE = 690;
-const MIN_BASE = 1318;
+const HOUR_BASE = 660;
+const MIN_BASE = 1260;
 const MAX_SHEAR = 0.2;
 
 const MARGIN = 64;
 const WX0 = -40; // wires run past both edges
 const WSPAN = 1160;
 const WIRES = [
-  { y0: 1470, yc: 1548, y1: 1490, top: 1330, bot: 1560 }, // top/bot: the band each wire and its captions live in
-  { y0: 1578, yc: 1636, y1: 1562, top: 1500, bot: 1650 },
-  { y0: 1656, yc: 1716, y1: 1670, top: 1590, bot: 1730 },
+  // parallel enough that the captions on one never crowd the next (the first
+  // sits a little higher: its descenders need clear air above the date);
+  // top/bot: the band each wire and its captions live in
+  { y0: 1460, yc: 1510, y1: 1470, top: 1300, bot: 1504 },
+  { y0: 1578, yc: 1628, y1: 1588, top: 1510, bot: 1620 },
+  { y0: 1680, yc: 1720, y1: 1690, top: 1612, bot: 1722 },
 ];
 const wireY = (w, x) => {
   const k = (x - WX0) / WSPAN;
@@ -79,32 +89,31 @@ const SR = 56;
 export default {
   title: "Murmuration",
   description: "Three thousand starlings wheel in the real colour of the sky, and the densest part of the flock is the time; the real wind tears at it.",
+  fps: 24, // the flock reads as smooth at film rate, and the Pi is spared a fifth of the drawing
   fonts: ["Big Shoulders Display:wght@900", "Instrument Sans:wdth,wght@75..100,400..700", "Instrument Serif:ital@0;1"],
 
   mount(root, { state, seed }) {
     addStyle(root, `
       .mu { position: absolute; inset: 0; overflow: hidden; background: #05070f; }
-      .mu canvas.ghost { position: absolute; left: 0; top: 0; will-change: transform; }
-      .mu .cloud { position: absolute; left: 0; top: 0; width: ${Math.ceil(3240 / 24) * 24}px; height: ${Math.ceil(1440 / 24) * 24}px; will-change: transform; }
+            .mu .cloud { position: absolute; left: 0; top: 0; width: ${Math.ceil(3240 / 24) * 24}px; height: ${Math.ceil(1440 / 24) * 24}px; will-change: transform; }
       .mu .glow { position: absolute; left: 0; top: 0; width: 1500px; height: 1300px; opacity: 0; will-change: opacity;
         background: radial-gradient(closest-side, rgba(226,224,255,0.9), rgba(200,205,255,0.35) 45%, rgba(190,200,255,0) 100%); }
       .mu .band { position: absolute; left: 0; overflow: visible; z-index: 6; will-change: transform; }
       .mu .band text { font-family: ${SANS}; fill: currentColor; font-kerning: normal; }
       .mu .wire { fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; opacity: 0.7; }
       .mu .rime { fill: none; stroke: #f4f6f8; stroke-width: 3; stroke-linecap: round; }
-      .mu .temp { font-family: ${DISPLAY}; font-size: 134px; font-weight: 900; letter-spacing: 0.005em; }
+      .mu .band .temp { font-size: 140px; font-weight: 700; letter-spacing: -0.005em; }
       .mu .cond { font-size: 50px; font-weight: 500; }
       .mu .date { font-size: 48px; font-weight: 600; }
       .mu .val { font-size: 46px; font-weight: 600; }
-      .mu .lab { font-size: 28px; font-weight: 600; letter-spacing: 0.12em; }
+      .mu .lab { font-size: 28px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; }
       .mu .soft { font-size: 34px; font-weight: 400; }
       .mu .ampmBox { position: absolute; overflow: visible; z-index: 6; will-change: transform; }
       .mu .ampm { font-family: ${DISPLAY}; font-size: 108px; font-weight: 900; fill: currentColor; letter-spacing: 0.01em; }
-      .mu .fact { position: absolute; left: ${MARGIN}px; top: 1716px; width: ${W - 2 * MARGIN}px; z-index: 6; will-change: transform;
-        font-family: ${SERIF}; font-style: italic; font-size: 46px; line-height: 52px; max-height: 104px; overflow: hidden;
+      .mu .fact { position: absolute; left: ${MARGIN}px; top: 1738px; width: ${W - 2 * MARGIN}px; z-index: 6; will-change: transform;
+        font-family: ${SERIF}; font-style: italic; font-size: 46px; line-height: 56px; max-height: 112px; overflow: hidden;
         text-wrap: balance; letter-spacing: 0.003em; }
     `);
-    const __T=[performance.now()];const __m=(n)=>__T.push(n,performance.now());
     const wrap = el("div", { class: "mu" });
     root.append(wrap);
 
@@ -112,10 +121,27 @@ export default {
     const noise = createNoise(seed + 11);
 
     // ---------------------------------------------------------------- sky
-    const skyLayer = canvas2d(wrap, { alpha: false });
+    // The ground layer: the sky (a 32 x 56 grid of colour, stretched smooth),
+    // the soft silhouettes of the numerals, and a fine grain against banding,
+    // all in one canvas that is repainted only when one of them changes.
+    const ground = canvas2d(wrap, { alpha: false });
     const skyTiny = document.createElement("canvas");
     skyTiny.width = SC;
     skyTiny.height = SR;
+    let groundDirty = true;
+    const grainTile = document.createElement("canvas");
+    grainTile.width = grainTile.height = 128;
+    {
+      const gctx = grainTile.getContext("2d");
+      const img = gctx.createImageData(128, 128);
+      for (let i = 0; i < img.data.length; i += 4) {
+        const v = R();
+        img.data[i] = img.data[i + 1] = img.data[i + 2] = v > 0.5 ? 255 : 0;
+        img.data[i + 3] = Math.abs(v - 0.5) * 510;
+      }
+      gctx.putImageData(img, 0, 0);
+    }
+    const grainFill = ground.ctx.createPattern(grainTile, "repeat");
     const skyTinyCtx = skyTiny.getContext("2d");
     const skyImg = skyTinyCtx.createImageData(SC, SR);
     const skyLum = new Float32Array(SC * SR);
@@ -144,7 +170,7 @@ export default {
         const dusk = 1 - 0.22 * dim * smoothstep(0.55, 0.9, v);
         const unify = 0.8 * smoothstep(0.45, 0.9, v); // the horizon gathers the four directions into one tone
         const deep = 1 - (0.08 * day * clearness + 0.04 * day + 0.3 * night) * Math.pow(top, 1.5);
-        const haze = 0.1 * day * smoothstep(0.5, 1, v);
+        const haze = 0.15 * day * smoothstep(0.5, 1, v); // the sky pales toward the horizon (and lifts the captions off it)
         const glow = night * smoothstep(0.62, 1, v);
         for (let i = 0; i < SC; i++) {
           const f = clamp((i / (SC - 1) - 0.05) / 0.9) * 3;
@@ -194,10 +220,7 @@ export default {
         }
       }
       skyTinyCtx.putImageData(skyImg, 0, 0);
-      const c = skyLayer.ctx;
-      c.imageSmoothingEnabled = true;
-      c.imageSmoothingQuality = "high";
-      c.drawImage(skyTiny, 0.5, 0.5, SC - 1, SR - 1, 0, 0, W, H);
+      groundDirty = true;
     }
     const lumAt = (x, y) => {
       const i = clamp(Math.floor((x / W) * SC), 0, SC - 1);
@@ -218,7 +241,6 @@ export default {
       return `#${h(skyImg.data[o])}${h(skyImg.data[o + 1])}${h(skyImg.data[o + 2])}`;
     };
 
-    __m("sky-fns");
     // ------------------------------------------------------------- clouds
     // One soft band texture, built once, twice as wide as its period so it can
     // drift for ever; its tint and opacity follow the cloud cover and the light.
@@ -254,7 +276,7 @@ export default {
         cloudKey = "";
       }
     }
-    __m("cloudmask");
+
     const cloud = el("canvas", { class: "cloud", width: CW, height: CH });
     wrap.append(cloud);
     const cloudCtx = cloud.getContext("2d");
@@ -290,7 +312,7 @@ export default {
         c.textBaseline = "alphabetic";
         c.fillText(String(d), PAD, PAD + capH);
       });
-      __m("mask"+d);const n = GC * GR;
+      const n = GC * GR;
       const dist = new Float32Array(n);
       let area = 0;
       for (let i = 0; i < n; i++) {
@@ -328,43 +350,29 @@ export default {
         gx[i] = (psi[i + 1] - psi[i - 1]) / (2 * CELL);
         gy[i] = (psi[i + GC] - psi[i - GC]) / (2 * CELL);
       }
-      __m("dt"+d);// the cells a bird may call home: well inside the stroke
+      // the cells a bird may call home: well inside the stroke
       let nv = 0;
       const validTmp = new Int32Array(n);
       for (let i = 0; i < n; i++) if (m.data[i] >= 128 && psi[i] >= 2.5) validTmp[nv++] = i;
       fields[d] = { psi, gx, gy, area, cover: m.data, valid: validTmp.subarray(0, nv) };
 
       // a soft silhouette at field resolution (shown upscaled): the far mass of
-      // the flock. Two separable box blurs of the coverage, about 10 px.
-      let a = new Float32Array(n);
-      for (let i = 0; i < n; i++) a[i] = m.data[i];
-      const b = new Float32Array(n);
-      for (let pass = 0; pass < 2; pass++) {
-        for (let y = 0; y < GR; y++) for (let x = 1; x < GC - 1; x++) {
-          const i = y * GC + x;
-          b[i] = (a[i - 1] + a[i] + a[i + 1]) / 3;
-        }
-        for (let y = 1; y < GR - 1; y++) for (let x = 0; x < GC; x++) {
-          const i = y * GC + x;
-          a[i] = (b[i - GC] + b[i] + b[i + GC]) / 3;
-        }
-      }
+      // the flock. The glyph drawn once through a blur of about 10 px.
       const g = document.createElement("canvas");
       g.width = GC;
       g.height = GR;
       const gc = g.getContext("2d");
-      const img = gc.createImageData(GC, GR);
-      for (let i = 0; i < n; i++) {
-        const o = i * 4;
-        img.data[o] = img.data[o + 1] = img.data[o + 2] = 255;
-        img.data[o + 3] = a[i];
-      }
-      gc.putImageData(img, 0, 0);
+      gc.filter = "blur(1.15px)";
+      gc.fillStyle = "#fff";
+      gc.scale(1 / CELL, 1 / CELL);
+      gc.font = FONT;
+      gc.textBaseline = "alphabetic";
+      gc.fillText(String(d), PAD, PAD + capH);
       ghostSprites[d] = g;
       return fields[d];
     }
     const field = (d) => fields[d] || buildField(d);
-    __m("fields");
+
     // bilinear sample of a field at glyph-local stage px: results in fPsi, fGx, fGy
     let fPsi = 0, fGx = 0, fGy = 0;
     const sample = (F, x, y) => {
@@ -389,12 +397,10 @@ export default {
     // Four places a digit can stand: hour (one or two), minute tens, minute ones.
     const slots = [0, 1, 2, 3].map((id) => ({ id, ch: -1, ox: 0, oy: 0, pivot: 0, rel: 0, dir: id % 2 ? -1 : 1, k: Math.floor(R.range(0, 5000)), cx: 0, cy: 0, changed: false, light: 0 }));
     const ghosts = slots.map(() => {
-      const c = el("canvas", { class: "ghost", width: GC, height: GR });
-      c.style.width = `${GWpx}px`;
-      c.style.height = `${GHpx}px`;
-      c.style.display = "none";
-      wrap.append(c);
-      return { c, ctx: c.getContext("2d"), key: "", tf: "", op: -1 };
+      const c = document.createElement("canvas");
+      c.width = GC;
+      c.height = GR;
+      return { c, ctx: c.getContext("2d"), key: "", on: false, sh: 0, x: 0, op: -1, dark: true, lumGap: 0 };
     });
 
     // ------------------------------------------------------------- birds
@@ -405,7 +411,8 @@ export default {
     const sl = new Int8Array(N).fill(-1), size = new Uint8Array(N), bk = new Uint8Array(N), md = new Uint8Array(N);
     const fl = new Float32Array(NF), lag = new Float32Array(NF), sb = new Float32Array(NF), sc = new Float32Array(NF), kF = new Float32Array(NF);
     const cand = new Int16Array(NF).fill(-1), perched = new Uint8Array(NF);
-    const HALF = [3.5, 5, 9.4];
+    const HALF = [4, 5.6, 9.6];
+
     for (let i = 0; i < N; i++) {
       const r = R();
       size[i] = r < 0.4 ? 0 : r < 0.84 ? 1 : 2;
@@ -413,9 +420,10 @@ export default {
       kT[i] = R.range(24, 40);
       loose[i] = R.chance(0.27) ? Math.pow(R(), 1.6) * 0.95 + 0.05 : 0; // the birds the wind can carry off
       peel[i] = loose[i] === 0 && R.chance(0.28) ? R.range(0.5, 1) : 0; // the ones a gust can peel
-      const bank = R.gauss() * 0.42; // each bird banks at its own angle
+      const bank = clamp(R.gauss() * 0.42, -1, 1); // each bird banks at its own angle
       bankC[i] = Math.cos(bank);
       bankS[i] = Math.sin(bank);
+
       jump[i] = R.chance(0.42) ? R.range(0.5, 1) : 0; // the ones a storm glow startles
       ph[i] = R.range(0, TAU);
     }
@@ -464,7 +472,7 @@ export default {
     const cum = [0, 0, 0, 0];
     function setTime(hh, mm, first) {
       const want = [+hh[0], hh.length > 1 ? +hh[1] : -1, +mm[0], +mm[1]];
-      __m("st0");for (let k = 0; k < 4; k++) if (want[k] >= 0) field(want[k]);__m("fieldbuild");
+      for (let k = 0; k < 4; k++) if (want[k] >= 0) field(want[k]);
       let x = LEFT;
       for (let k = 0; k < 4; k++) {
         const s = slots[k];
@@ -482,7 +490,7 @@ export default {
         s.cy = base - capH / 2;
         if (s.changed && !first) s.rel = 1;
         x += adv[ch] + TRACK;
-      }__m("slots");
+      }
       let total = 0;
       for (let k = 0; k < 4; k++) total += slots[k].ch >= 0 ? fields[slots[k].ch].area : 0;
       let run = 0;
@@ -518,7 +526,6 @@ export default {
       }
     }
 
-    __m("birds-init");
     // ----------------------------------------------- wires and captions
     // Each wire is its own small SVG band, so its sway is a cheap transform.
     const bands = [];
@@ -544,7 +551,7 @@ export default {
     });
     const onWire = (w, cls, anchor, ...kids) => {
       const tp = svg("textPath", { href: `#mu-w${w}` }, kids);
-      const text = svg("text", { class: cls, "text-anchor": anchor, dy: -10 }, tp);
+      const text = svg("text", { class: cls, "text-anchor": anchor, dy: -17 }, tp);
       bands[w].append(text);
       return { text, tp, w };
     };
@@ -557,9 +564,9 @@ export default {
     // wire 1: the air now (temperature and condition at the left, air quality and UV at the right)
     const tTemp = onWire(0, "temp", "start");
     const tCond = onWire(0, "cond", "start");
-    const aqiVal = svg("tspan", { class: "val", dx: 10 });
-    const uvVal = svg("tspan", { class: "val", dx: 10 });
-    const tAir = onWire(0, "lab", "end", svg("tspan", { text: "AQI" }), aqiVal, svg("tspan", { text: "UV", dx: 34 }), uvVal);
+    const aqiVal = svg("tspan", { class: "val", dx: 12 });
+    const uvVal = svg("tspan", { class: "val", dx: 12 });
+    const tAir = onWire(0, "lab", "end", svg("tspan", { text: "AQI" }), aqiVal, svg("tspan", { text: "UV", dx: 44 }), uvVal);
     // wire 2: the calendar (date at the left, the moon at the right)
     const tDate = onWire(1, "date", "start");
     const tMoon = onWire(1, "val", "end");
@@ -629,44 +636,48 @@ export default {
 
     const GAP = 16;
     const len = (t) => t.text.getComputedTextLength();
-    // Narrow the sans captions on one wire (Instrument Sans has a width axis) if they would not fit.
-    const fit = (items, room) => {
-      for (const t of items) t.text.style.fontStretch = "";
+    // Narrow the sans captions on a wire (Instrument Sans has a width axis) if
+    // they would not fit. Every natural width is read in one layout pass and
+    // all the narrowing is written before the next, so the browser lays the
+    // captions out at most twice, not once per caption.
+    const stretchFor = (items, room) => {
       let total = 0;
-      for (const t of items) total += len(t);
-      if (total <= room) return;
-      const st = `${Math.max(75, Math.floor((100 * room) / total) - 1)}%`;
-      for (const t of items) t.text.style.fontStretch = st;
+      for (const t of items) total += t.width;
+      return total <= room ? "" : `${Math.max(75, Math.floor((100 * room) / total) - 1)}%`;
     };
+    const caps = [tTemp, tCond, tAir, tDate, tMoon, tFactLab, tSun];
     function layoutCaptions(hasFact) {
       const full = W - 2 * MARGIN;
-      // wire 1
-      const wt = len(tTemp);
-      fit([tCond, tAir], full - wt - 22 - 40);
-      const wc = len(tCond), wa = len(tAir);
-      place(tTemp, MARGIN - 4);
-      place(tCond, MARGIN + wt + 18);
-      place(tAir, W - MARGIN);
-      busy[0] = [[MARGIN - GAP, MARGIN + wt + 18 + wc + GAP], [W - MARGIN - wa - GAP, W - MARGIN + GAP]];
-      // wire 2
-      fit([tDate, tMoon], full - 48);
-      const wd = len(tDate), wm = len(tMoon);
-      place(tDate, MARGIN);
-      place(tMoon, W - MARGIN);
-      busy[1] = [[MARGIN - GAP, MARGIN + wd + GAP], [W - MARGIN - wm - GAP, W - MARGIN + GAP]];
-      // wire 3
       tFactLab.text.style.display = hasFact ? "" : "none";
       fact.style.display = hasFact ? "" : "none";
-      fit(hasFact ? [tFactLab, tSun] : [tSun], full - 48);
-      const ws = len(tSun);
+      for (const t of caps) t.text.style.fontStretch = "";
+      for (const t of caps) t.width = len(t);
+      const wt = tTemp.width;
+      const s1 = stretchFor([tCond, tAir], full - wt - 22 - 40);
+      const s2 = stretchFor([tDate, tMoon], full - 48);
+      const s3 = stretchFor(hasFact ? [tFactLab, tSun] : [tSun], full - 48);
+      tCond.text.style.fontStretch = tAir.text.style.fontStretch = s1;
+      tDate.text.style.fontStretch = tMoon.text.style.fontStretch = s2;
+      tFactLab.text.style.fontStretch = tSun.text.style.fontStretch = s3;
+      if (s1 || s2 || s3) for (const t of caps) t.width = len(t);
+      // wire 1: the air now
+      place(tTemp, MARGIN);
+      place(tCond, MARGIN + wt + 18);
+      place(tAir, W - MARGIN);
+      busy[0] = [[MARGIN - GAP, MARGIN + wt + 18 + tCond.width + GAP], [W - MARGIN - tAir.width - GAP, W - MARGIN + GAP]];
+      // wire 2: the calendar
+      place(tDate, MARGIN);
+      place(tMoon, W - MARGIN);
+      busy[1] = [[MARGIN - GAP, MARGIN + tDate.width + GAP], [W - MARGIN - tMoon.width - GAP, W - MARGIN + GAP]];
+      // wire 3: the fact's label and the sun
       place(tSun, W - MARGIN);
-      busy[2] = [[W - MARGIN - ws - GAP, W - MARGIN + GAP]];
+      busy[2] = [[W - MARGIN - tSun.width - GAP, W - MARGIN + GAP]];
       if (hasFact) {
         place(tFactLab, MARGIN);
-        busy[2].push([MARGIN - GAP, MARGIN + len(tFactLab) + GAP]);
+        busy[2].push([MARGIN - GAP, MARGIN + tFactLab.width + GAP]);
         // up to two lines; a long fact steps down in size rather than overflow
         for (const fs of [46, 41, 37]) {
-          const lh = Math.round(fs * 1.13);
+          const lh = Math.ceil(fs * 1.2);
           fact.style.fontSize = `${fs}px`;
           fact.style.lineHeight = `${lh}px`;
           fact.style.maxHeight = `${2 * lh}px`;
@@ -678,18 +689,15 @@ export default {
 
     // -------------------------------------------------------------- inks
     const INK_DAY = "#0b0d12";
-    const INK_NIGHT = "#a9a293"; // birds lit from below by the city
+    const INK_NIGHT = "#d2c8b2"; // birds lit from below by the city
     const INK_DUSK = "#ece6d6"; // the same birds catching the last light on a mid-toned sky
-    const TYPE_DAY = "#0c0e13";
+    const TYPE_DAY = "#07080b";
     const TYPE_NIGHT = "#e2dccd";
     const FLIP = 0.15; // sky luminance where dark and pale type read equally well
     let birdFlip = 0.1; // the same for birds, which stay silhouettes for as long as there is daylight
-    const ALPHA = [0.75, 0.92, 1];
-    const WIDTH = [1.6, 2, 2.4];
-    const styles = new Array(12).fill("");
-    const dotStyles = ["", "", "", ""];
+    const ALPHA = [0.86, 0.95, 1];
+    const WIDTH = [1.8, 2.2, 2.6];
     let pale = INK_NIGHT;
-    let styleKey = "";
     let skyKey = "";
     let typeInk = "";
     let ampmInk = "";
@@ -721,8 +729,7 @@ export default {
         const mean = lumRegion(60, 1020, 100, 1400);
         birdFlip = lerp(0.155, 0.085, s.daylight);
         pale = mix(INK_NIGHT, INK_DUSK, smoothstep(0.012, 0.08, mean));
-        styleKey = "";
-        rainInk = mean > 0.3 ? rgba("#1d2733", 0.3) : rgba("#c9d2de", 0.3 - 0.1 * (1 - s.daylight));
+        rainInk = mean > 0.3 ? rgba("#1d2733", 0.4) : rgba("#c9d2de", 0.42 - 0.12 * (1 - s.daylight));
         snowInk = rgba(mix("#8f959c", "#ffffff", 0.35 + 0.65 * s.daylight), 0.9);
         // cloud tint: lit from above by day, from the city below at night; heavy weather is darker than its sky
         const heavy = s.weather.kind === "storm" || s.weather.kind === "rain";
@@ -738,7 +745,8 @@ export default {
       if (s.ch < 0) {
         if (g.key !== "off") {
           g.key = "off";
-          g.c.style.display = "none";
+          g.on = false;
+          groundDirty = true;
         }
         return;
       }
@@ -748,7 +756,8 @@ export default {
       const key = `${s.ch}${dark}${dark ? "" : pale}`;
       if (g.key !== key) {
         g.key = key;
-        g.c.style.display = "";
+        g.on = true;
+        groundDirty = true;
         g.ctx.globalCompositeOperation = "copy";
         g.ctx.drawImage(ghostSprites[s.ch], 0, 0);
         g.ctx.globalCompositeOperation = "source-in";
@@ -759,16 +768,15 @@ export default {
       g.dark = dark;
     }
 
-    __m("inks");
     // ------------------------------------------------------ the simulation
     const birds = canvas2d(wrap, { maxScale: 2, adaptive: true });
     birds.canvas.style.zIndex = "4";
-    grain(wrap, { opacity: 0.05, size: 128 });
 
     const P = [R.range(0, TAU), R.range(0, TAU), R.range(0, TAU), R.range(0, TAU), R.range(0, TAU), R.range(0, TAU)];
     const sway = [0, 0, 0];
     let T = R.range(0, 400); // the ribbon's own clock
     let shear = 0;
+    let baseShear = 0;
     let act = 1;
     let fog = 0;
     let startle = 0;
@@ -819,7 +827,8 @@ export default {
       windSign = ux >= 0 ? 1 : -1;
       const q = TAU / 1900;
       const om = q * (70 + 9 * mph);
-      shear = clamp(ux * mph * 0.0086, -MAX_SHEAR, MAX_SHEAR) * (1 + 0.12 * fsin(t * 0.43 + P[0]) * windiness);
+      baseShear = clamp(ux * mph * 0.0086, -MAX_SHEAR, MAX_SHEAR);
+      shear = baseShear * (1 + 0.12 * fsin(t * 0.43 + P[0]) * windiness);
 
       // mood
       const heat = smoothstep(82, 99, wx.temp);
@@ -1048,26 +1057,40 @@ export default {
     }
 
     // ------------------------------------------------------------- drawing
-    let dbgS = 1, dbgB = 1, dbgR = 1;
+    // Every bird is a small filled chevron (filling is far cheaper than
+    // stroking), all of one size and ink in a single path.
+    // bird indices grouped by size, glyph birds first then free ones, so each
+    // group is drawn in one run with one alpha
+    const runs = [];
+    const drawOrder = new Uint16Array(N);
+    {
+      let o = 0;
+      for (let free = 0; free < 2; free++) for (let z = 0; z < 3; z++) {
+        const from = o;
+        for (let i = free ? NG : 0; i < (free ? N : NG); i++) if (size[i] === z) drawOrder[o++] = i;
+        runs.push({ from, to: o, z, free });
+      }
+    }
+    const runAlpha = new Float32Array(6);
+    const dotStyles = ["", "", "", ""];
+    let styleFog = -1;
+    let stylePale = "";
+
     function draw(s, t) {
       const ctx = birds.ctx;
       birds.clear();
-      ctx.lineCap = dbgR ? "round" : "butt";
-      ctx.lineJoin = dbgR ? "round" : "miter";
-      const key = `${fog.toFixed(2)}`;
-      if (key !== styleKey) {
-        styleKey = key;
-        for (let b = 0; b < 12; b++) {
-          const free = b >= 6;
-          const sz = (b % 6) >> 1;
-          const light = b & 1;
-          const a = ALPHA[sz] * (free ? 1 - fog * [0.92, 0.7, 0.3][sz] : 1 - fog * [0.25, 0.1, 0][sz]);
-          styles[b] = rgba(light ? pale : INK_DAY, +a.toFixed(3));
+      const fq = Math.round(fog * 100);
+      if (fq !== styleFog || pale !== stylePale) {
+        styleFog = fq;
+        stylePale = pale;
+        for (let r = 0; r < 6; r++) {
+          const z = r % 3;
+          runAlpha[r] = ALPHA[z] * (r >= 3 ? 1 - fog * [0.92, 0.7, 0.3][z] : 1 - fog * [0.25, 0.1, 0][z]);
         }
         dotStyles[0] = rgba(INK_DAY, +(0.8 * (1 - 0.3 * fog)).toFixed(3));
-        dotStyles[1] = rgba(pale, +(0.72 * (1 - 0.3 * fog)).toFixed(3));
+        dotStyles[1] = rgba(pale, +(0.8 * (1 - 0.3 * fog)).toFixed(3));
         dotStyles[2] = rgba(INK_DAY, +(0.8 * (1 - 0.9 * fog)).toFixed(3));
-        dotStyles[3] = rgba(pale, +(0.72 * (1 - 0.9 * fog)).toFixed(3));
+        dotStyles[3] = rgba(pale, +(0.8 * (1 - 0.9 * fog)).toFixed(3));
       }
       // far birds first: specks
       for (let i = 0; i < NDG; i++) dbk[i] = slots[dsl[i]].light;
@@ -1082,105 +1105,94 @@ export default {
         if (cj < 0) cj = 0; else if (cj >= SR) cj = SR - 1;
         dbk[i] = (skyLum[cj * SC + ci] < birdFlip ? 1 : 0) + 2;
       }
-      for (let b = 0; b < (dbgS ? 4 : 0); b++) {
+      for (let b = 0; b < 4; b++) {
         ctx.fillStyle = dotStyles[b];
         ctx.beginPath();
         for (let i = b < 2 ? 0 : NDG; i < ND; i++) {
           if (dbk[i] !== b) continue;
-          const sz = 2.1 + (i & 3) * 0.3;
+          const sz = 2.6 + (i & 3) * 0.35;
           ctx.rect(dX[i] - sz * 0.5, dY[i] - sz * 0.5, sz * 1.25, sz);
         }
         ctx.fill();
       }
-      // Sort every bird into a batch: how near it is, and which ink reads on the sky behind it.
-      // A whole digit flips together, so it never averages out to the tone of the sky.
+      // the birds proper. A whole digit flips ink together, so it never averages
+      // out to the tone of the sky; a free bird takes the ink that reads where it is.
       for (let i = 0; i < N; i++) {
-        let light;
-        if (md[i] === 0) light = slots[sl[i]].light;
+        if (md[i] === 0) bk[i] = slots[sl[i]].light;
+        else if (md[i] === 1 && perched[i - NG]) bk[i] = 2;
         else {
           let ci = (px[i] * (SC / W)) | 0;
           let cj = (py[i] * (SR / H)) | 0;
           if (ci < 0) ci = 0; else if (ci >= SC) ci = SC - 1;
           if (cj < 0) cj = 0; else if (cj >= SR) cj = SR - 1;
-          light = skyLum[cj * SC + ci] < birdFlip ? 1 : 0;
+          bk[i] = skyLum[cj * SC + ci] < birdFlip ? 1 : 0;
         }
-        bk[i] = (i >= NG ? (perched[i - NG] ? 100 : 6) : 0) + size[i] * 2 + light;
       }
-      for (let b = 0; b < (dbgB ? 12 : 0); b++) {
-        const from = b >= 6 ? NG : 0;
-        const to = b >= 6 ? N : NG;
-        ctx.fillStyle = styles[b];
-        const wd = WIDTH[(b % 6) >> 1];
-        const gull = (b % 6) >> 1 === 2;
-        ctx.beginPath();
-        for (let i = from; i < to; i++) {
-          if (bk[i] !== b) continue;
-          // seen from far off and side-on: a wingspan that beats between a V and a ^,
-          // filled (much cheaper than stroking) and tapering from the body to the tips
-          const hs = half[i];
-          const f = fsin(t * flap * (1 + 0.3 * bankS[i]) + ph[i] * 3) * beat;
-          const sq = 1 - 0.14 * f * f;
-          const sx = bankC[i] * hs * sq, sy = bankS[i] * hs * sq;
-          const ux_ = bankS[i] * hs, uy_ = -bankC[i] * hs;
-          const ox = -bankS[i] * wd, oy = bankC[i] * wd;
-          const x = px[i], y = py[i];
-          if (gull) {
-            const wl = 0.26 + 0.36 * f, tl = 0.62 * f - 0.04;
-            const ax = x - sx + ux_ * tl, ay = y - sy + uy_ * tl;
-            const bx = x - sx * 0.46 + ux_ * wl, by = y - sy * 0.46 + uy_ * wl;
-            const cx = x - ux_ * 0.06, cy = y - uy_ * 0.06;
-            const dx = x + sx * 0.46 + ux_ * wl, dy = y + sy * 0.46 + uy_ * wl;
-            const ex = x + sx + ux_ * tl, ey = y + sy + uy_ * tl;
-            ctx.moveTo(ax, ay);
-            ctx.lineTo(bx, by);
-            ctx.lineTo(cx, cy);
-            ctx.lineTo(dx, dy);
-            ctx.lineTo(ex, ey);
-            ctx.lineTo(ex + ox * 0.45, ey + oy * 0.45);
-            ctx.lineTo(dx + ox, dy + oy);
-            ctx.lineTo(cx + ox * 1.7, cy + oy * 1.7);
-            ctx.lineTo(bx + ox, by + oy);
-            ctx.lineTo(ax + ox * 0.45, ay + oy * 0.45);
-          } else {
-            const tl = 0.1 + 0.6 * f;
-            const ax = x - sx + ux_ * tl, ay = y - sy + uy_ * tl;
-            const bx = x - ux_ * 0.16 * f, by = y - uy_ * 0.16 * f;
-            const cx = x + sx + ux_ * tl, cy = y + sy + uy_ * tl;
-            ctx.moveTo(ax, ay);
-            ctx.lineTo(bx, by);
-            ctx.lineTo(cx, cy);
-            ctx.lineTo(cx + ox * 0.5, cy + oy * 0.5);
-            ctx.lineTo(bx + ox * 1.6, by + oy * 1.6);
-            ctx.lineTo(ax + ox * 0.5, ay + oy * 0.5);
+      for (let r = 0; r < 6; r++) {
+        const run = runs[r];
+        const z = run.z;
+        const wd = WIDTH[z];
+        ctx.globalAlpha = runAlpha[r];
+        for (let ink = 0; ink < 2; ink++) {
+          ctx.fillStyle = ink ? pale : INK_DAY;
+          ctx.beginPath();
+          for (let o = run.from; o < run.to; o++) {
+            const i = drawOrder[o];
+            if (bk[i] !== ink) continue;
+            // seen from far off and side-on: a wingspan that beats between a V
+            // and a ^, thickest at the body
+            const hs = half[i];
+            const f = fsin(t * flap * (1 + 0.3 * bankS[i]) + ph[i] * 3) * beat;
+            const sq = 1 - 0.14 * f * f;
+            const bc = bankC[i], bs = bankS[i];
+            const sx = bc * hs * sq, sy = bs * hs * sq;
+            const ux = bs * hs, uy = -bc * hs;
+            const ox = -bs * wd, oy = bc * wd;
+            const x = px[i], y = py[i];
+            if (z === 2) {
+              const wl = 0.26 + 0.36 * f, tl = 0.62 * f - 0.04;
+              const ax = x - sx + ux * tl, ay = y - sy + uy * tl;
+              const bx = x - sx * 0.46 + ux * wl, by = y - sy * 0.46 + uy * wl;
+              const cx = x - ux * 0.06, cy = y - uy * 0.06;
+              const dx = x + sx * 0.46 + ux * wl, dy = y + sy * 0.46 + uy * wl;
+              const ex = x + sx + ux * tl, ey = y + sy + uy * tl;
+              ctx.moveTo(ax, ay);
+              ctx.lineTo(bx, by);
+              ctx.lineTo(cx, cy);
+              ctx.lineTo(dx, dy);
+              ctx.lineTo(ex, ey);
+              ctx.lineTo(dx + ox, dy + oy);
+              ctx.lineTo(cx + ox * 1.7, cy + oy * 1.7);
+              ctx.lineTo(bx + ox, by + oy);
+            } else {
+              const tl = 0.1 + 0.6 * f;
+              const bx = x - ux * 0.16 * f, by = y - uy * 0.16 * f;
+              ctx.moveTo(x - sx + ux * tl, y - sy + uy * tl);
+              ctx.lineTo(bx, by);
+              ctx.lineTo(x + sx + ux * tl, y + sy + uy * tl);
+              ctx.lineTo(bx + ox * 1.7, by + oy * 1.7);
+            }
           }
+          ctx.fill();
         }
-        ctx.fill();
       }
-      // birds on the wires, facing into the wind
+      ctx.globalAlpha = 1;
+      // birds on the wires, facing into the wind: body, head and tail
       const d = -windSign;
-      ctx.strokeStyle = perchDark ? INK_DAY : pale;
-      for (let part = 0; part < 3; part++) {
-        ctx.lineWidth = part === 0 ? 5.6 : part === 1 ? 4.2 : 2;
-        ctx.beginPath();
-        for (let j = NF - NP; j < NF; j++) {
-          if (!perched[j]) continue;
-          const x = px[NG + j], y = py[NG + j];
-          if (part === 0) {
-            // body
-            ctx.moveTo(x - d * 1.3, y - 3.4);
-            ctx.lineTo(x + d * 0.7, y - 6.6);
-          } else if (part === 1) {
-            // head
-            ctx.moveTo(x + d * 2.3, y - 10.2);
-            ctx.lineTo(x + d * 2.4, y - 10.2);
-          } else {
-            // tail
-            ctx.moveTo(x - d * 1.8, y - 2.6);
-            ctx.lineTo(x - d * 5, y + 3);
-          }
-        }
-        ctx.stroke();
+      ctx.fillStyle = perchDark ? INK_DAY : pale;
+      ctx.beginPath();
+      for (let j = NF - NP; j < NF; j++) {
+        if (!perched[j]) continue;
+        const x = px[NG + j], y = py[NG + j];
+        ctx.moveTo(x - d * 4.2, y - 4.4);
+        ctx.lineTo(x + d * 0.4, y - 9.6);
+        ctx.lineTo(x + d * 3.6, y - 6.2);
+        ctx.lineTo(x + d * 1.2, y - 1.4);
+        ctx.lineTo(x - d * 5.6, y + 3.4);
+        ctx.lineTo(x - d * 6.4, y + 2.6);
+        ctx.rect(x + d * 0.8 - 2.1, y - 12.3, 4.2, 4.2);
       }
+      ctx.fill();
 
       // what is falling, through the flock
       const wx = s.weather;
@@ -1190,32 +1202,28 @@ export default {
         if (wx.falling === "snow") {
           const n = Math.floor(110 + 420 * wx.intensity);
           const vxs = ux * 9;
-          ctx.strokeStyle = snowInk;
-          for (let pass = 0; pass < 2; pass++) {
-            ctx.lineWidth = pass ? 4.8 : 3;
-            ctx.beginPath();
-            for (let i = pass; i < n; i += 2) {
-              const h1 = hash(i, 71), h2 = hash(i, 72), h3 = hash(i, 73);
-              const fall = 70 + 90 * h3 + 40 * wx.intensity;
-              const sw = 18 * fsin(t * (0.5 + h1) + h2 * 30);
-              const drift_ = vxs * (0.7 + 0.6 * h3);
-              let x = (h1 * (W + 240) + drift_ * t + sw) % (W + 240);
-              if (x < 0) x += W + 240;
-              const y = ((h2 * (H + 60) + fall * t) % (H + 60)) - 30;
-              const sx = drift_ * 0.028;
-              ctx.moveTo(x - 120, y);
-              ctx.lineTo(x - 120 + sx + 0.01, y + fall * 0.012);
-            }
-            ctx.stroke();
+          ctx.fillStyle = snowInk;
+          ctx.beginPath();
+          for (let i = 0; i < n; i++) {
+            const h1 = hash(i, 71), h2 = hash(i, 72), h3 = hash(i, 73);
+            const fall = 70 + 90 * h3 + 40 * wx.intensity;
+            const sw = 18 * fsin(t * (0.5 + h1) + h2 * 30);
+            const drift_ = vxs * (0.7 + 0.6 * h3);
+            let x = (h1 * (W + 240) + drift_ * t + sw) % (W + 240);
+            if (x < 0) x += W + 240;
+            const y = ((h2 * (H + 60) + fall * t) % (H + 60)) - 30;
+            const r = i & 1 ? 4.6 : 3;
+            ctx.rect(x - 120 - r * 0.5, y - r * 0.5, r, r);
           }
+          ctx.fill();
         } else {
           const drizzle = wx.falling === "drizzle";
           const n = Math.floor((drizzle ? 50 : 40) + (drizzle ? 160 : 250) * wx.intensity);
           const fall = drizzle ? 760 : 1250;
           const vxr = ux * 13;
           const lenK = drizzle ? 0.022 : 0.036;
-          ctx.strokeStyle = rainInk;
-          ctx.lineWidth = drizzle ? 1.2 : 1.5;
+          const lw = drizzle ? 1.3 : 1.6;
+          ctx.fillStyle = rainInk;
           ctx.beginPath();
           for (let i = 0; i < n; i++) {
             const h1 = hash(i, 51), h2 = hash(i, 52), h3 = hash(i, 53);
@@ -1223,21 +1231,25 @@ export default {
             let x = (h1 * (W + 400) + vxr * t * (0.9 + 0.2 * h3)) % (W + 400);
             if (x < 0) x += W + 400;
             const y = ((h2 * (H + 120) + vyr * t) % (H + 120)) - 60;
-            ctx.moveTo(x - 200, y);
-            ctx.lineTo(x - 200 + vxr * lenK, y + vyr * lenK);
+            const x0 = x - 200;
+            const x1 = x0 + vxr * lenK, y1 = y + vyr * lenK;
+            ctx.moveTo(x0, y);
+            ctx.lineTo(x1, y1);
+            ctx.lineTo(x1 + lw, y1);
+            ctx.lineTo(x0 + lw, y);
           }
-          ctx.stroke();
+          ctx.fill();
         }
       }
     }
 
     // ------------------------------------------------------ slow things
-    function syncText(s) {
+    function syncText(s, jumped) {
       const tx = s.text;
       let relayout = false;
       const tk = `${tx.hh}:${tx.mm}`;
       if (tk !== timeKey) {
-        const first = timeKey === "";
+        const first = timeKey === "" || jumped;
         timeKey = tk;
         setTime(tx.hh, tx.mm, first);
         for (let k = 0; k < 4; k++) drawGhost(k);
@@ -1252,32 +1264,55 @@ export default {
       if (put("aqi", aqiVal, tx.aqi)) relayout = true;
       if (put("uv", uvVal, tx.uv)) relayout = true;
       const hasFact = tx.factValue !== "";
-      if (put("factL", tFactLab.tp, hasFact ? tx.factLabel.toUpperCase() : "")) relayout = true;
+      if (put("factL", tFactLab.tp, hasFact ? tx.factLabel : "")) relayout = true;
       if (put("factV", fact, tx.factValue)) relayout = true;
-      __m("puts");if (relayout) layoutCaptions(hasFact);__m("layout");
+      if (relayout) layoutCaptions(hasFact);
     }
 
+    function paintGround() {
+      groundDirty = false;
+      const c = ground.ctx;
+      c.resetTransform();
+      c.globalAlpha = 1;
+      c.imageSmoothingEnabled = true;
+      c.imageSmoothingQuality = "high";
+      c.drawImage(skyTiny, 0.5, 0.5, SC - 1, SR - 1, 0, 0, W, H);
+      for (let k = 0; k < 4; k++) {
+        const S = slots[k];
+        const g = ghosts[k];
+        if (S.ch < 0 || !g.on || g.op <= 0) continue;
+        // lean with the numerals: x shifts by (pivot - y) * shear
+        c.globalAlpha = g.op;
+        c.setTransform(1, 0, -g.sh, 1, S.ox + g.sh * (S.pivot - S.oy), S.oy);
+        c.drawImage(g.c, 0, 0, GC, GR, 0, 0, GWpx, GHpx);
+      }
+      c.resetTransform();
+      c.globalAlpha = 0.05;
+      c.fillStyle = grainFill;
+      c.fillRect(0, 0, W, H);
+      c.globalAlpha = 1;
+    }
+    const swayShown = [NaN, NaN, NaN];
     function syncLayers(s, dt) {
       // ghosts lean with the numerals
       const wx = s.weather;
       const night = 1 - s.daylight;
+      // (in coarse steps, so the ground is repainted only now and then)
+      const qs = Math.round(baseShear * 250) / 250;
       for (let k = 0; k < 4; k++) {
         const S = slots[k];
         const g = ghosts[k];
         if (S.ch < 0) continue;
-        const tf = `translate(${S.ox.toFixed(1)}px, ${S.oy}px) skewX(${((-Math.atan(shear) * 180) / Math.PI).toFixed(2)}deg)`;
-        if (tf !== g.tf) {
-          g.tf = tf;
-          g.c.style.transformOrigin = `0 ${S.pivot - S.oy}px`;
-          g.c.style.transform = tf;
-        }
-        const op = +((g.dark ? 0.27 : 0.19) * smoothstep(0, 0.035, g.lumGap) * (1 - 0.5 * S.rel)).toFixed(3);
-        if (op !== g.op) {
+        const op = Math.round((g.dark ? 0.34 : 0.3) * smoothstep(0, 0.035, g.lumGap) * (1 - 0.5 * S.rel) * 40) / 40;
+        if (op !== g.op || qs !== g.sh || S.ox !== g.x) {
           g.op = op;
-          g.c.style.opacity = op;
+          g.sh = qs;
+          g.x = S.ox;
+          groundDirty = true;
         }
       }
-      const sk = `skewX(${((-Math.atan(shear) * 180) / Math.PI).toFixed(2)}deg)`;
+      if (groundDirty) paintGround();
+      const sk = `skewX(${((-Math.atan(qs) * 180) / Math.PI).toFixed(2)}deg)`;
       if (shown.ampmTf !== sk) {
         shown.ampmTf = sk;
         ampmBox.style.transform = sk;
@@ -1299,17 +1334,19 @@ export default {
       if (shown.cop !== cop) {
         shown.cop = cop;
         cloud.style.opacity = cop;
+        cloud.style.display = cop < 0.03 ? "none" : "";
       }
       const gop = +(glowAmt * (0.2 + 0.12 * s.daylight)).toFixed(3);
       if (shown.gop !== gop) {
         shown.gop = gop;
         glow.style.opacity = gop;
+        glow.style.display = gop > 0 ? "" : "none";
       }
       for (let w = 0; w < 3; w++) {
-        const y = sway[w].toFixed(1);
-        if (shown[`sw${w}`] !== y) {
-          shown[`sw${w}`] = y;
-          bands[w].style.transform = `translate3d(0, ${y}px, 0)`;
+        const y = Math.round(sway[w] * 10);
+        if (swayShown[w] !== y) {
+          swayShown[w] = y;
+          bands[w].style.transform = `translate3d(0, ${y / 10}px, 0)`;
         }
       }
       const rime = wx.falling === "snow" ? +(0.35 + 0.5 * wx.intensity).toFixed(2) : 0;
@@ -1317,28 +1354,30 @@ export default {
         shown.rime = rime;
         for (const r of rimes) r.setAttribute("opacity", rime);
       }
-      const fy = (sway[2] * 0.6).toFixed(1);
+      const fy = Math.round(sway[2] * 6);
       if (shown.fy !== fy) {
         shown.fy = fy;
-        fact.style.transform = `translate3d(0, ${fy}px, 0)`;
+        fact.style.transform = `translate3d(0, ${fy / 10}px, 0)`;
       }
     }
 
-    // Start already in full flight: place every bird, then let the flock run for a few seconds.
-    syncText(state);
-    __m("synctext");
+    let lastMs = state.ms;
+    // Start in full flight: the first frame places every bird at its home
+    // (`snap`), and the runner then gives the piece plenty of unseen frames for
+    // the streamers to develop. Leaving that to the first frame keeps mount short.
+    syncText(state, false);
     syncLook(state);
-    __m("synclook");
-    step(state, 1 / 30, -3);
-    step(state, 1 / 10, -2.9);
 
-    __m("warm");
-    {const bench=(a,b,r)=>{dbgS=a;dbgB=b;dbgR=r;birds.ctx.lineCap=r?"round":"butt";birds.ctx.lineJoin=r?"round":"miter";const t0=performance.now();for(let k=0;k<6;k++){draw(state,k*0.1);birds.ctx.getImageData(0,0,1,1);}return ((performance.now()-t0)/6).toFixed(1);};
-     const res=[];for(let rep=0;rep<2;rep++)res.push("all:"+bench(1,1,1),"specks:"+bench(1,0,1),"birds:"+bench(0,1,1),"birdsButt:"+bench(0,1,0),"none:"+bench(0,0,1));console.warn("BENCH "+res.join(" "));dbgS=1;dbgB=1;}
-    {let o=[];for(let i=1;i<__T.length;i+=2)o.push(__T[i]+":"+(__T[i+1]-(i>1?__T[i-1]:__T[0])).toFixed(1));console.warn("MOUNT "+o.join(" "));}
     return {
       frame(s) {
-        syncText(s);
+        // the clock jumped (a time-lapse, a laptop waking): go straight to the new state
+        const jumped = Math.abs(s.ms - lastMs) > 5000;
+        lastMs = s.ms;
+        if (jumped) {
+          snap = true;
+          for (let k = 0; k < 4; k++) slots[k].rel = 0;
+        }
+        syncText(s, jumped);
         syncLook(s);
         step(s, s.dt, s.t);
         syncLayers(s, s.dt);

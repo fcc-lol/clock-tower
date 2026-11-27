@@ -11,14 +11,16 @@
 // minute blows in as a front that crosses the field, shearing the lines half a
 // pitch as it passes. The lines take their colors from the measured sky, west
 // at the left of the frame to east at the right, on paper by day and on black
-// at night. Everything else is set on the solid block the field stands on.
+// at night. Everything else is set on the solid block the field stands on:
+// the sky's own hue made deep (navy under a blue sky, slate under cloud, an
+// inky blue at night), with AM/PM on a tab standing up out of it.
 
 import { W, clamp, lerp, smoothstep, mix, adjust, oklch, toOklch, rng, hash, el, addStyle, canvas2d, mask, grain, fitText } from "../lib/kit.js";
 
-const FIELD_H = 1340; // the lines cover the frame down to here; the block of type is below
+const FIELD_H = 1290; // the lines cover the frame down to here; the block of type is below
 const TAB_H = 126; // the AM/PM tab stands this far up out of the block
 const PITCH = 21; // distance between lines
-const STEP = 11; // sampling along a line
+const STEP = 9; // sampling along a line
 const CELL = 4; // the digit mask is this coarse
 const MC = Math.ceil(W / CELL);
 const MR = Math.ceil(FIELD_H / CELL);
@@ -40,26 +42,26 @@ export default {
   title: "Prevailing",
   description: "Lines laid along the real wind, heaving with its gusts; the time is where they swell.",
   fonts: ["Archivo Black", "Space Grotesk:wght@400;500;700"],
-  fps: 30,
+  fps: 24, // the waves are slow; 24 is smooth for them and leaves the Pi room to fill a 4K field
 
   mount(root, { seed }) {
     addStyle(root, `
       .pv { position: absolute; inset: 0; font-family: "Space Grotesk", sans-serif; color: ${INK}; }
       .pv .band { position: absolute; left: 0; right: 0; top: ${FIELD_H}px; bottom: 0; }
       .pv .tab { position: absolute; right: 0; top: ${FIELD_H - TAB_H}px; height: ${TAB_H + 2}px; padding: 0 64px 0 34px; font-family: "Archivo Black", sans-serif; font-size: 112px; line-height: ${TAB_H + 10}px; white-space: nowrap; }
-      .pv .plate { position: absolute; left: ${M}px; right: ${M}px; top: ${FIELD_H + 78}px; bottom: 70px; display: flex; flex-direction: column; justify-content: space-between; }
-      .pv .now { display: flex; align-items: center; gap: 36px; white-space: nowrap; }
-      .pv .temp { font-size: 172px; font-weight: 700; line-height: 0.74; letter-spacing: -0.045em; }
-      .pv .cond { font-size: 58px; font-weight: 500; line-height: 1; }
-      .pv .date { font-size: 46px; font-weight: 400; line-height: 1; margin-top: 16px; opacity: 0.86; }
-      .pv .stats { display: grid; grid-template-columns: 236px 1fr 214px 118px; }
-      .pv .stat span, .pv .fact span { display: block; font-size: 24px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; white-space: nowrap; opacity: 0.7; }
-      .pv .stat b { display: block; margin-top: 10px; font-size: 40px; font-weight: 500; line-height: 1; white-space: nowrap; }
-      .pv .fact b { display: block; margin-top: 10px; font-size: 38px; font-weight: 500; line-height: 1.14; text-wrap: balance; max-height: 87px; overflow: hidden; }
+      .pv .plate { position: absolute; left: ${M}px; right: ${M}px; top: ${FIELD_H + 50}px; bottom: 64px; display: flex; flex-direction: column; justify-content: space-between; gap: 48px; }
+      .pv .date { font-size: 46px; font-weight: 400; line-height: 1; white-space: nowrap; opacity: 0.86; }
+      .pv .now { display: flex; align-items: baseline; gap: 40px; white-space: nowrap; }
+      .pv .temp { font-size: 164px; font-weight: 700; line-height: 0.74; letter-spacing: -0.04em; }
+      .pv .cond { font-size: 60px; font-weight: 500; line-height: 1; }
+      .pv .stats { display: flex; justify-content: space-between; column-gap: 48px; }
+      .pv .stat span, .pv .fact span { display: block; font-size: 24px; font-weight: 500; line-height: 1; letter-spacing: 0.14em; text-transform: uppercase; white-space: nowrap; opacity: 0.72; }
+      .pv .stat b { display: block; margin-top: 14px; font-size: 40px; font-weight: 500; line-height: 1; white-space: nowrap; }
+      .pv .fact b { display: block; margin-top: 14px; font-size: 37px; font-weight: 500; line-height: 1.24; text-wrap: balance; max-height: ${Math.ceil(37 * 1.24 * 2) + 1}px; overflow: hidden; }
     `);
     const wrap = el("div", { class: "pv" });
     root.append(wrap);
-    const field = canvas2d(wrap, { maxScale: 2, adaptive: true });
+    const field = canvas2d(wrap, { maxScale: 1.5, adaptive: true }); // 1.5 px per unit: crisp enough at 4K, and a third less to fill than 2
 
     const band = el("div", { class: "band" });
     const ampm = el("div", { class: "tab" }); // AM/PM: a tab of the block, standing up beside the minutes
@@ -73,7 +75,7 @@ export default {
     };
     const sSun = stat("");
     const sMoon = stat("Moon");
-    const sAir = stat("Air quality");
+    const sAir = stat("AQI");
     const sUv = stat("UV index");
     const factLabel = el("span", {});
     const factValue = el("b", {});
@@ -82,7 +84,8 @@ export default {
       band,
       ampm,
       el("div", { class: "plate" },
-        el("div", { class: "now" }, temp, el("div", {}, cond, date)),
+        date,
+        el("div", { class: "now" }, temp, cond),
         el("div", { class: "stats" }, sSun.node, sMoon.node, sAir.node, sUv.node),
         fact),
     );
@@ -341,7 +344,7 @@ export default {
           // The block: the sky's own color, deep. By day a strong ink (navy under a blue sky,
           // slate under cloud); at night the same hue sunk almost to black, never plain black.
           const sm = toOklch(sk.mean);
-          const night = oklch(0.17, clamp(sm.c * 1.1, 0.02, 0.05), sm.c < 0.012 ? 262 : sm.h); // a grey sky has no hue worth keeping: ink blue
+          const night = oklch(0.17, clamp(sm.c * 1.1, 0.028, 0.05), sm.c < 0.012 ? 262 : sm.h); // a grey sky has no hue worth keeping: ink blue
           const block = mix(night, adjust(sk.mean, { l: 0.26, c: (v) => Math.min(0.13, v * 1.4 + 0.012) }), day);
           wrap.style.background = ground;
           band.style.background = block;
@@ -584,9 +587,8 @@ export default {
         // ---- type ----
         put("ampm", ampm, tx.ampm);
         const fresh = put("temp", temp, tx.temp);
-        const room = fresh || shown.room == null ? (shown.room = W - 2 * M - 36 - temp.offsetWidth) : shown.room;
-        if (put("cond", cond, tx.condition) || fresh) cond.style.fontSize = `${Math.max(44, fitText(cond, room, 58))}px`;
-        if (put("date", date, tx.date) || fresh) date.style.fontSize = `${Math.max(44, fitText(date, room, 46))}px`;
+        if (put("cond", cond, tx.condition) || fresh) fitText(cond, W - 2 * M - 40 - temp.offsetWidth, 60);
+        if (put("date", date, tx.date)) fitText(date, W - 2 * M, 46);
         put("sunL", sSun.span, tx.sunLabel);
         put("sunV", sSun.b, tx.sunValue);
         put("moon", sMoon.b, tx.moon);

@@ -9,7 +9,7 @@
 // heat, interpuncts for dust. After a while the shape of the numerals says what
 // it is like outside before any number is read.
 
-import { W, H, TAU, clamp, lerp, remap, smoothstep, approach, mix, ramp, rgba, contrast, rng, hash, createNoise, el, addStyle, canvas2d, grain, fitText } from "../lib/kit.js";
+import { W, H, TAU, clamp, lerp, remap, smoothstep, approach, mix, ramp, rgba, contrast, toOklch, oklch, rng, hash, createNoise, el, addStyle, canvas2d, grain, fitText } from "../lib/kit.js";
 
 const M = 96; // side margin
 const MEASURE = W - 2 * M;
@@ -323,9 +323,14 @@ export default {
           const paper = mix(nightPaper, dayPaper, day);
           const dark = contrast(paper, NIGHT_INK(tt)) > contrast(paper, INK(tt));
           // At night the warm, heavy instances cover a lot of the sheet: their ink
-          // is held lower in deep night so the room is not lit by the figures.
+          // is held lower in deep night (lightness only, so the hue stays
+          // saturated) and the room is not lit by the figures.
           const dim = (1 - day) * (0.1 + 0.3 * smoothstep(0.4, 0.85, tt));
-          let ink = dark ? mix(NIGHT_INK(tt), paper, dim) : INK(tt);
+          let ink = INK(tt);
+          if (dark) {
+            const lch = toOklch(NIGHT_INK(tt));
+            ink = oklch(lch.l * (1 - 0.9 * dim), lch.c, lch.h);
+          }
           if (w.fog) ink = mix(ink, paper, 0.2);
           wrap.style.background = paper;
           wrap.style.color = ink;

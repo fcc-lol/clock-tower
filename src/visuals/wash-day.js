@@ -43,8 +43,8 @@ import { W, H, TAU, clamp, lerp, smoothstep, approach, rng, hash, createNoise, o
 const FONT = '"Fraunces", Georgia, serif';
 const WALL = 50; // width of each brick sliver
 const GRAV = 900; // px/s^2: a little slower than life, so it is calm to live with
-const LINE_Y = [84, 716, 1344, 1630];
-const SHEET_H = 570;
+const LINE_Y = [64, 674, 1320, 1644];
+const SHEET_H = 550;
 const PERSP = 4200;
 const HORIZON = 860;
 
@@ -55,12 +55,11 @@ const SPEC = [
   { key: "ap", line: 0, x: 548, w: 150, h: 216, cols: 6, rows: 8, pegs: [0, 5] },
   { key: "m1", line: 1, x: 84, w: 448, h: SHEET_H, cols: 16, rows: 20, pegs: [0, 5, 10, 15], tether: true },
   { key: "m2", line: 1, x: 548, w: 448, h: SHEET_H, cols: 16, rows: 20, pegs: [0, 5, 10, 15], tether: true },
-  { key: "temp", line: 2, x: 84, w: 284, h: 244, cols: 11, rows: 9, pegs: [0, 10] },
-  { key: "sun", line: 2, x: 380, w: 236, h: 206, cols: 9, rows: 8, pegs: [0, 8] },
-  { key: "aqi", line: 2, x: 628, w: 178, h: 182, cols: 7, rows: 7, pegs: [0, 6] },
-  { key: "uv", line: 2, x: 818, w: 178, h: 182, cols: 7, rows: 7, pegs: [0, 6] },
-  { key: "fact", line: 3, x: 84, w: 640, h: 222, cols: 22, rows: 9, pegs: [0, 7, 14, 21] },
-  { key: "moon", line: 3, x: 736, w: 260, h: 196, cols: 10, rows: 8, pegs: [0, 9] },
+  { key: "temp", line: 2, x: 84, w: 232, h: 196, cols: 9, rows: 8, pegs: [0, 8] },
+  { key: "sun", line: 2, x: 332, w: 232, h: 190, cols: 9, rows: 8, pegs: [0, 8] },
+  { key: "moon", line: 2, x: 580, w: 220, h: 206, cols: 8, rows: 8, pegs: [0, 7] },
+  { key: "air", line: 2, x: 816, w: 180, h: 256, cols: 7, rows: 10, pegs: [0, 6] },
+  { key: "fact", line: 3, x: 84, w: 912, h: 196, cols: 30, rows: 8, pegs: [0, 10, 19, 29] },
 ];
 
 // One ink at a time, chosen by the temperature. All dark enough for small type on cotton.
@@ -74,6 +73,14 @@ const INK_RAMP = ramp([
   [0.88, "#c9321e"], // 86 F: tomato
   [1.0, "#c63c14"], // 97 F and above
 ]);
+
+const LAMP_COL = [0.14, 0.084, 0.0392];
+const SIL_DAY = [0.07, 0.08, 0.11];
+const CLOUD_NIGHT = [0.09, 0.1, 0.13];
+const ROPE = [0.6, 0.52, 0.4];
+const ROPE_N = [0.17, 0.165, 0.17];
+const CORD = [0.44, 0.4, 0.34];
+const CORD_N = [0.12, 0.12, 0.13];
 
 const PREC = `#ifdef GL_FRAGMENT_PRECISION_HIGH
 precision highp float;
@@ -218,9 +225,9 @@ void main() {
   gl_FragColor = vec4(c, t.a);
 }`;
 
-const pow2 = (v) => {
+const pow2 = (v, cap) => {
   let p = 64;
-  while (p < v && p < 1024) p *= 2;
+  while (p < v && p < cap) p *= 2;
   return p;
 };
 const font = (weight, size, italic) => `${italic ? "italic " : ""}${weight} ${size}px ${FONT}`;
@@ -262,8 +269,8 @@ export default {
         ...sp, i, off: N, n: sp.cols * sp.rows, dx: sp.w / (sp.cols - 1), dy: sp.h / (sp.rows - 1),
         idx0: indexCount, idxN: (sp.cols - 1) * (sp.rows - 1) * 6,
         visible: true, sig: null, dirty: false, tex: null,
-        tw: pow2(sp.w * texScale), th: pow2(sp.h * texScale), canvas: document.createElement("canvas"), ctx: null,
-        wetA: 0, wetB: 0, wetAmt: 0, ax: 0, az: 0, rip: 0, damp: 1.5, mass: 1, cs: 1,
+        tw: pow2(sp.w * texScale, 2048), th: pow2(sp.h * texScale, 1024), canvas: document.createElement("canvas"), ctx: null,
+        wetA: 0, wetB: 0, wetAmt: 0, ax: 0, az: 0, rip: 0, damp: 1.5, mass: 1, cs: 1, slack: 0,
         th1: 0, th1v: 0, ph1: 0, ph1v: 0, frozenSet: false, seed: r.range(0, 10),
         scallop: new Float32Array(sp.cols),
       };
@@ -422,81 +429,97 @@ export default {
     function printTemp(c, text) {
       const x = begin(c);
       const { w, h } = c;
-      x.fillRect(0, 18, w, 8);
-      x.fillRect(0, 31, w, 3);
-      x.fillRect(0, h - 26, w, 8);
-      x.fillRect(0, h - 34, w, 3);
-      const size = fit(x, text, 900, 214, w - 40, false, 90);
-      x.fillText(text, w / 2 + size * 0.04, h / 2 + size * 0.36 + 2);
+      x.fillRect(0, 14, w, 7);
+      x.fillRect(0, 26, w, 2.5);
+      x.fillRect(0, h - 21, w, 7);
+      x.fillRect(0, h - 28.5, w, 2.5);
+      const size = fit(x, text, 900, 146, w - 44, false, 90);
+      x.fillText(text, w / 2 + size * 0.05, h / 2 + size * 0.34);
     }
     function printSun(c, label, value) {
       const x = begin(c);
       const { w, h } = c;
-      x.fillRect(0, h - 28, w, 6);
-      x.fillRect(0, h - 38, w, 2.5);
-      x.fillRect(0, h - 46, w, 2.5);
-      x.fillRect(0, 16, w, 2.5);
-      x.font = font(500, 30, true);
-      x.fillText(label, w / 2, 70);
-      fit(x, value, 900, 60, w - 34, false, 40);
-      x.fillText(value, w / 2, 134);
+      x.fillRect(0, 14, w, 2.5);
+      x.fillRect(0, h - 33, w, 2.5);
+      x.fillRect(0, h - 25, w, 6);
+      fit(x, label, 500, 28, w - 36, false, 24);
+      x.fillText(label, w / 2, 62);
+      fit(x, value, 900, 56, w - 36, false, 36);
+      x.fillText(value, w / 2, 128);
     }
-    function printFlannel(c, label, value) {
+    function printAir(c, aqi, uv) {
+      // a flannel with two numbers knitted into it, one above the other
       const x = begin(c);
       const { w, h } = c;
-      x.fillRect(10, 0, 6, h);
-      x.fillRect(20, 0, 2.5, h);
-      x.fillRect(w - 16, 0, 6, h);
-      x.fillRect(w - 22.5, 0, 2.5, h);
-      fit(x, label, 500, 26, w - 52, true, 24);
-      x.fillText(label, w / 2, 56);
-      fit(x, value, 900, 76, w - 70, false, 40);
-      x.fillText(value, w / 2, 128);
+      x.fillRect(0, 12, w, 6);
+      x.fillRect(0, 22, w, 2);
+      x.fillRect(0, h - 18, w, 6);
+      x.fillRect(0, h - 24, w, 2);
+      x.save();
+      x.globalAlpha = 0.6;
+      x.setLineDash([6, 5]);
+      x.lineWidth = 1.6;
+      x.beginPath();
+      x.moveTo(26, 132);
+      x.lineTo(w - 26, 132);
+      x.stroke();
+      x.restore();
+      fit(x, "Air quality", 500, 26, w - 30, false, 24);
+      x.fillText("Air quality", w / 2, 54);
+      fit(x, aqi, 900, 60, w - 34, false, 36);
+      x.fillText(aqi, w / 2, 112);
+      fit(x, "UV index", 500, 26, w - 30, false, 24);
+      x.fillText("UV index", w / 2, 170);
+      fit(x, uv, 900, 60, w - 34, false, 36);
+      x.fillText(uv, w / 2, 226);
     }
     function printMoon(c, name) {
       const x = begin(c);
       const { w, h } = c;
-      x.fillRect(0, 16, w, 6);
-      x.fillRect(0, 27, w, 2.5);
-      x.fillRect(0, h - 22, w, 6);
-      x.fillRect(0, h - 29.5, w, 2.5);
-      x.font = font(500, 27, true);
-      x.fillText("Moon", w / 2, 68);
+      x.fillRect(0, 14, w, 6);
+      x.fillRect(0, 25, w, 2.5);
+      x.fillRect(0, h - 20, w, 6);
+      x.fillRect(0, h - 27.5, w, 2.5);
+      x.font = font(500, 28);
+      x.fillText("Moon", w / 2, 64);
       const words = name.split(" ");
       const rowsOf = words.length > 1 ? [words.slice(0, -1).join(" "), words[words.length - 1]] : [name];
-      let size = 48;
-      for (const t of rowsOf) size = Math.min(size, fit(x, t, 900, 48, w - 40, false, 36));
+      let size = 46;
+      for (const t of rowsOf) size = Math.min(size, fit(x, t, 900, 46, w - 36, false, 36));
       x.font = font(900, size);
-      rowsOf.forEach((t, k) => x.fillText(t, w / 2, (rowsOf.length > 1 ? 114 : 136) + k * (size + 2)));
+      const lh = Math.round(size * 1.16);
+      rowsOf.forEach((t, k) => x.fillText(t, w / 2, (rowsOf.length > 1 ? 114 : 136) + k * lh));
     }
     function printFact(c, label, value) {
       const x = begin(c);
       const { w, h } = c;
-      x.lineWidth = 5;
-      x.strokeRect(15.5, 15.5, w - 31, h - 31);
-      x.lineWidth = 1.5;
-      x.strokeRect(24.5, 24.5, w - 49, h - 49);
+      x.lineWidth = 4;
+      x.strokeRect(16, 16, w - 32, h - 32);
       if (!value) {
-        // nothing to say today: a plain striped towel
-        for (let k = 0; k < 5; k++) x.fillRect(25, h / 2 - 34 + k * 16, w - 50, k === 2 ? 8 : 3);
+        // nothing to say today: a plain striped tea towel
+        for (let k = 0; k < 5; k++) x.fillRect(16, h / 2 - 34 + k * 16, w - 32, k === 2 ? 8 : 3);
         return;
       }
       let size = 40;
       let rowsOf;
       for (;;) {
         x.font = font(600, size);
-        rowsOf = wrapText(x, value, w - 84);
-        if (rowsOf.length <= (size > 36 ? 2 : 3) || size <= 36) break;
+        rowsOf = wrapText(x, value, w - 110);
+        if (rowsOf.length <= 2 || size <= 36) break;
         size -= 2;
       }
-      const lh = Math.round(size * 1.2);
-      const blockH = 34 + rowsOf.length * lh;
-      let y = (h - blockH) / 2 + 26;
-      x.font = font(500, 27, true);
+      const lh = Math.round(size * 1.24);
+      // label cap-height, a gap, then the lines
+      const blockH = 20 + 16 + rowsOf.length * lh - (lh - size * 0.72);
+      let y = (h - blockH) / 2 + 20;
+      x.font = font(500, 27);
       x.fillText(label, w / 2, y);
       x.font = font(600, size);
-      y += 10;
-      for (const t of rowsOf) x.fillText(t, w / 2, (y += lh));
+      y += 16 + size * 0.72;
+      for (const t of rowsOf) {
+        x.fillText(t, w / 2, y);
+        y += lh;
+      }
     }
 
     function print(c) {
@@ -508,8 +531,7 @@ export default {
         case "m2": printSheet(c, disp.mm[1], disp.monthDay); break;
         case "temp": printTemp(c, tx.temp); break;
         case "sun": printSun(c, tx.sunLabel, tx.sunValue); break;
-        case "aqi": printFlannel(c, "Air quality", tx.aqi); break;
-        case "uv": printFlannel(c, "UV index", tx.uv); break;
+        case "air": printAir(c, tx.aqi, tx.uv); break;
         case "fact": printFact(c, tx.factLabel, tx.factValue); break;
         default: printMoon(c, tx.moon);
       }
@@ -523,8 +545,7 @@ export default {
         case "m2": return `${disp.mm[1]}|${disp.monthDay}`;
         case "temp": return tx.temp;
         case "sun": return `${tx.sunLabel}|${tx.sunValue}`;
-        case "aqi": return tx.aqi;
-        case "uv": return tx.uv;
+        case "air": return `${tx.aqi}|${tx.uv}`;
         case "fact": return `${tx.factLabel}|${tx.factValue}`;
         default: return tx.moon;
       }
@@ -613,10 +634,6 @@ export default {
       }
       cx.putImageData(img, 0, 0);
       return cv;
-    }
-    function sparkleCanvas() {
-      // white noise in alpha's place: stored in a second small texture's red channel would cost a sampler; fold it into blue's high bits instead
-      return null;
     }
     function brickCanvas() {
       const cv = document.createElement("canvas");
@@ -964,9 +981,12 @@ export default {
       const dir = env.dirRad + wob;
       const A = GRAV * 0.72 * Math.tanh(spd / 22) * (1 - 0.45 * c.wetAmt) * (c.tether ? 1.2 : 1);
       c.ax = -Math.sin(dir) * A;
-      c.az = Math.cos(dir) * A;
+      // the gusts make the wash breathe in and out, whatever the bearing
+      c.az = Math.cos(dir) * A + A * 0.55 * (pulse - 0.45) * (c.tether ? 1 : 0.6);
       c.rip = A * 1.05 + GRAV * 0.035;
-      c.damp = 1.5 + 2.2 * c.wetAmt;
+      c.damp = 1.5 + 2.2 * c.wetAmt * (1 - 0.6 * env.storm);
+      // the cords at a sheet's bottom corners give in a wind, so it can belly like a sail; in a calm it hangs plumb
+      c.slack = approach(c.slack, 0.12 * smoothstep(3, 30, spd) * (1 - 0.7 * env.frz) * (1 - 0.3 * c.wetAmt), dt, 1.5);
       c.mass = 1 + 0.35 * c.wetAmt;
       const adv = t * (0.25 + spd * 0.035);
       const ox = -env.dirX * adv;
@@ -1050,8 +1070,8 @@ export default {
           // elastic cords from the bottom corners to the lower line
           for (let s = 0; s < 2; s++) {
             const k3 = (last + (s ? cols - 1 : 0)) * 3;
-            const tx0 = c.x + L.haul + (s ? c.w : 0);
-            const ty0 = lineY(L, tx0) + c.h * 0.972;
+            const tx0 = c.x + L.haul + (s ? c.w : 0) + (c.ax / GRAV) * 26;
+            const ty0 = lineY(L, tx0) + c.h * (0.972 - c.slack);
             P[k3] += (tx0 - P[k3]) * 0.16;
             P[k3 + 1] += (ty0 - P[k3 + 1]) * 0.16;
             P[k3 + 2] += -P[k3 + 2] * 0.16;
@@ -1245,7 +1265,7 @@ export default {
       inkDay: new Float32Array(3), inkNight: new Float32Array(3), night: new Float32Array(3), wetTint: new Float32Array(3),
       fog: new Float32Array(3), sil: new Float32Array(3), cloud: new Float32Array(3), light: new Float32Array(3), lightN: new Float32Array(3),
       rope: new Float32Array(3), ropeN: new Float32Array(3), cord: new Float32Array(3), cordN: new Float32Array(3),
-      skyKey: "", inkKey: -999, lampStrength: 0, stars: 0, sunWarm: 0,
+      sunC: new Float32Array(3), skyKey: "", inkKey: -999, lampStrength: 0, stars: 0, sunWarm: 0,
     };
     const LAMP = [WALL - 6, 1236, 150];
     function relight(s) {
@@ -1287,7 +1307,10 @@ export default {
       const A = 0.93 - S * col.L[2];
       const mx = Math.max(col.mean[0], col.mean[1], col.mean[2], 0.02);
       const tintAmt = 0.16 + 0.06 * env.sunVis + 0.36 * (1 - dl);
-      const sunC = [1, lerp(0.98, 0.76, warm), lerp(0.94, 0.5, warm)];
+      const sunC = col.sunC;
+      sunC[0] = 1;
+      sunC[1] = lerp(0.98, 0.76, warm);
+      sunC[2] = lerp(0.94, 0.5, warm);
       for (let k = 0; k < 3; k++) {
         const tint = lerp(1, col.mean[k] / mx, tintAmt);
         col.amb[k] = tint * A * env.level;
@@ -1303,13 +1326,13 @@ export default {
         col.night[k] = (nb[k] + nm[k] * moon) * (1 - 0.12 * env.storm);
         col.lightN[k] = 0.07 + 0.018 * k + nm[k] * moon;
         col.fog[k] = lerp(col.mean[k], 1, 0.12 * d);
-        col.sil[k] = lerp(col.sky[1][k] * 0.42, [0.07, 0.08, 0.11][k], 0.3 * d);
-        const lit = lerp([0.09, 0.1, 0.13][k], col.amb[k] + col.sun[k] * 0.6, smoothstep(0.05, 0.45, d));
+        col.sil[k] = lerp(col.sky[1][k] * 0.42, SIL_DAY[k], 0.3 * d);
+        const lit = lerp(CLOUD_NIGHT[k], col.amb[k] + col.sun[k] * 0.6, smoothstep(0.05, 0.45, d));
         col.cloud[k] = lerp(col.mean[k], lit, 0.55);
-        col.rope[k] = [0.6, 0.52, 0.4][k] * env.level;
-        col.ropeN[k] = [0.17, 0.165, 0.17][k];
-        col.cord[k] = [0.44, 0.4, 0.34][k] * env.level;
-        col.cordN[k] = [0.12, 0.12, 0.13][k];
+        col.rope[k] = ROPE[k] * env.level;
+        col.ropeN[k] = ROPE_N[k];
+        col.cord[k] = CORD[k] * env.level;
+        col.cordN[k] = CORD_N[k];
       }
       // a short passage: every part of the wash is either sunlit or lamp-lit, never mid-grey for long
       env.front = lerp(-0.13, 1.13, clamp((0.31 - d) / 0.07));
@@ -1389,18 +1412,21 @@ export default {
       }
     }
     let spriteVerts = 0;
+    function corner(o, x, y, u, v, e) {
+      spriteBuf[o] = x; spriteBuf[o + 1] = y; spriteBuf[o + 2] = u; spriteBuf[o + 3] = v; spriteBuf[o + 4] = e;
+    }
     function quad(cx, cy, hw, hh, ang, u0, v0, u1, v1, e) {
       const ca = Math.cos(ang);
       const sa = Math.sin(ang);
       const ax = ca * hw, ay = sa * hw, bx = -sa * hh, by = ca * hh;
-      let o = spriteVerts * 5;
-      const b = spriteBuf;
-      const put = (sx, sy, u, v) => {
-        b[o++] = cx + sx * ax + sy * bx; b[o++] = cy + sx * ay + sy * by; b[o++] = u; b[o++] = v; b[o++] = e;
-      };
-      put(-1, -1, u0, v0); put(1, -1, u1, v0); put(-1, 1, u0, v1);
-      put(1, -1, u1, v0); put(1, 1, u1, v1); put(-1, 1, u0, v1);
+      const o = spriteVerts * 5;
       spriteVerts += 6;
+      corner(o, cx - ax - bx, cy - ay - by, u0, v0, e);
+      corner(o + 5, cx + ax - bx, cy + ay - by, u1, v0, e);
+      corner(o + 10, cx - ax + bx, cy - ay + by, u0, v1, e);
+      corner(o + 15, cx + ax - bx, cy + ay - by, u1, v0, e);
+      corner(o + 20, cx + ax + bx, cy + ay + by, u1, v1, e);
+      corner(o + 25, cx - ax + bx, cy - ay + by, u0, v1, e);
     }
     const PEG = [2 / 256, 2 / 256, 46 / 256, 122 / 256];
     const WHEEL = [64 / 256, 2 / 256, 168 / 256, 106 / 256];
@@ -1432,6 +1458,11 @@ export default {
       return first;
     }
 
+    function spritePointers() {
+      gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 20, 0);
+      gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 20, 8);
+      gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 20, 16);
+    }
     function set3(loc, v) {
       gl.uniform3f(loc, v[0], v[1], v[2]);
     }
@@ -1452,7 +1483,6 @@ export default {
         }
       }
       const lampW = env.lampOn;
-      const lampCol = [1.0 * 0.14, 0.6 * 0.14, 0.28 * 0.14];
 
       // sky
       let pr = res.sky;
@@ -1480,7 +1510,7 @@ export default {
       gl.uniform1f(u.u_time, s.t);
       gl.uniform1f(u.u_flash, env.flash);
       gl.uniform4f(u.u_lamp, WALL + 2, LAMP[1], 0, lampW);
-      gl.uniform3f(u.u_lampCol, lampCol[0], lampCol[1], lampCol[2]);
+      gl.uniform3f(u.u_lampCol, LAMP_COL[0], LAMP_COL[1], LAMP_COL[2]);
       gl.uniform2f(u.u_vert, lerp(0.8, 0.86, s.daylight), lerp(1.16, 1.07, s.daylight));
       gl.drawArrays(gl.TRIANGLES, 0, 3);
 
@@ -1521,7 +1551,7 @@ export default {
       set3(u.u_wetTint, col.wetTint);
       set3(u.u_inkDay, col.inkDay); set3(u.u_inkNight, col.inkNight); set3(u.u_night, col.night); set3(u.u_moonL, col.moonL);
       gl.uniform4f(u.u_lamp, LAMP[0], LAMP[1], LAMP[2], lampW);
-      gl.uniform3f(u.u_lampCol, lampCol[0], lampCol[1], lampCol[2]);
+      gl.uniform3f(u.u_lampCol, LAMP_COL[0], LAMP_COL[1], LAMP_COL[2]);
       gl.uniform1f(u.u_frost, env.frost);
       gl.uniform1f(u.u_flash, env.flash);
       for (const c of cloths) {
@@ -1545,18 +1575,13 @@ export default {
       gl.useProgram(pr.p);
       gl.bindBuffer(gl.ARRAY_BUFFER, res.sb);
       gl.bufferSubData(gl.ARRAY_BUFFER, 0, spriteBuf.subarray(0, spriteVerts * 5));
-      const spritePointers = () => {
-        gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 20, 0);
-        gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 20, 8);
-        gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 20, 16);
-      };
       spritePointers();
       gl.uniform1i(u.u_tex, 0);
       common(u, env.fog * 0.2);
       set3(u.u_light, col.light); set3(u.u_lightN, col.lightN);
       gl.uniform3f(u.u_emit, lerp(0.75, 1.0, lampW), lerp(0.76, 0.8, lampW), lerp(0.74, 0.52, lampW));
       gl.uniform4f(u.u_lamp, LAMP[0], LAMP[1], 0, lampW);
-      gl.uniform3f(u.u_lampCol, lampCol[0], lampCol[1], lampCol[2]);
+      gl.uniform3f(u.u_lampCol, LAMP_COL[0], LAMP_COL[1], LAMP_COL[2]);
       gl.uniform1f(u.u_flash, env.flash);
       gl.bindTexture(gl.TEXTURE_2D, res.atlas);
       gl.drawArrays(gl.TRIANGLES, 0, fixtures);
@@ -1724,7 +1749,7 @@ export default {
     // Finished from the first frame: let the wash find its shape before it is seen
     // ------------------------------------------------------------------
     readWeather(state, 0, true);
-    for (let i = 0; i < 170; i++) simulate(1 / 30);
+    for (let i = 0; i < 48; i++) simulate(1 / 30);
     for (const c of cloths) captureFrozen(c);
     env.warm = false;
 

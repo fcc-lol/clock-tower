@@ -27,10 +27,19 @@
 //                black water carrying thin pale films (brighter under a
 //                full moon), and stays dark.
 //
+// The page: the time fills the tray from the top margin down; above it a
+// quiet head (the date, the countdown to sunrise or sunset) and below it a
+// quiet foot (temperature, condition, moon, today's fact), where the ink
+// thins away like the margins of a print. The vermilion AM/PM seal is stamped
+// beside the minutes, with the AQI and UV seals below it down the margin.
+//
 // Layers: one fragment shader (the water and the ink; the kit's shader plus a
-// distance-field texture this file uploads itself), SVG numerals laid exactly
-// over the shader's own so their edges are sharp at 4K, a small canvas for
-// snow, and DOM type for the colophon and the seals.
+// distance-field texture this file uploads itself, run at half resolution),
+// SVG numerals laid exactly over the shader's own so their edges are sharp at
+// 4K, a canvas for snow (made only when it snows), and DOM type and SVG seals.
+// The distance field is worked out in small steps a frame at a time (the
+// first one over the first unseen frames, the next minute's ahead of time), so
+// neither mount() nor any one frame stalls.
 
 import {
   W, H, TAU, clamp, lerp, remap, smoothstep, rng,
@@ -43,7 +52,7 @@ import { zoned } from "../lib/time.js";
 // Geometry
 // ---------------------------------------------------------------------------
 
-const CELL = 4; // stage px per distance-field texel
+const CELL = 5; // stage px per distance-field texel
 const FC = W / CELL;
 const FR = H / CELL;
 const NCELL = FC * FR;
@@ -59,7 +68,7 @@ const ROW_GAP = 74; // between the hour and the minute figures
 const HEAD_Y = 290; // the quiet head (date, countdown) fades out above here
 const FOOT_Y = 1450; // and the quiet foot (weather, fact) below here
 const SEAL_X = 916; // left edge of the AM/PM seal
-const MORPH_S = 5.5; // seconds a changed numeral takes to melt into the next
+const MORPH_S = 2.6; // seconds a changed numeral takes to melt into the next
 
 const SUMI = "#16130f";
 const BONE = "#e7e0ce";
@@ -296,9 +305,9 @@ function edt1d(grid, offset, stride, n) {
     grid[offset + q * stride] = f[r] + qr * qr;
   }
 }
-function blurH(src, dst, r) {
+function blurH(src, dst, r, y0, y1) {
   const n = 2 * r + 1;
-  for (let y = 0; y < FR; y++) {
+  for (let y = y0; y < y1; y++) {
     const o = y * FC;
     let sum = 0;
     for (let x = -r; x <= r; x++) sum += src[o + (x < 0 ? 0 : x)];
@@ -309,9 +318,9 @@ function blurH(src, dst, r) {
     }
   }
 }
-function blurV(src, dst, r) {
+function blurV(src, dst, r, x0, x1) {
   const n = 2 * r + 1;
-  for (let x = 0; x < FC; x++) {
+  for (let x = x0; x < x1; x++) {
     let sum = 0;
     for (let y = -r; y <= r; y++) sum += src[x + (y < 0 ? 0 : y) * FC];
     for (let y = 0; y < FR; y++) {
@@ -322,15 +331,16 @@ function blurV(src, dst, r) {
   }
 }
 
-// The work for one set of numerals, in thirteen small steps so that it can be
-// spread over as many frames (each a few ms). step() returns true when
+// The work for one set of numerals, in 21 small steps so that it can be spread
+// over as many frames (each a couple of ms). step() returns true when
 // `target` (Uint16Array) holds the field.
-const FIELD_STEPS = 13;
+const FIELD_STEPS = 21;
+const HC = FC >> 1, HR = FR >> 1;
 function fieldJob(glyphs, target) {
   let stage = 0;
   let m = null;
   let bx0 = 0, bx1 = 0, by0 = 0, by1 = 0;
-  const third = Math.ceil(FC / 3);
+  const sixth = Math.ceil(FC / 6);
   return {
     step() {
       switch (stage) {
@@ -371,27 +381,31 @@ function fieldJob(glyphs, target) {
           bx1 = Math.min(FC - 1, bx1 + 1); by1 = Math.min(FR - 1, by1 + 1);
           m = null;
           break;
-        case 2: case 3: case 4: {
-          const x1 = Math.min(FC, (stage - 1) * third);
-          for (let x = (stage - 2) * third; x < x1; x++) edt1d(gridOut, x, FC, FR);
+        case 2: case 3: case 4: case 5: case 6: case 7: {
+          const x1 = Math.min(FC, (stage - 1) * sixth);
+          for (let x = (stage - 2) * sixth; x < x1; x++) edt1d(gridOut, x, FC, FR);
           break;
         }
-        case 5:
-          for (let y = 0; y < FR; y++) edt1d(gridOut, y * FC, 1, FC);
+        case 8: case 9:
+          for (let y = stage === 8 ? 0 : HR, y1 = stage === 8 ? HR : FR; y < y1; y++) edt1d(gridOut, y * FC, 1, FC);
           break;
-        case 6: {
+        case 10: {
           const bw = bx1 - bx0 + 1, bh = by1 - by0 + 1;
           for (let x = 0; x < bw; x++) edt1d(gridIn, by0 * FC + bx0 + x, FC, bh);
           for (let y = 0; y < bh; y++) edt1d(gridIn, (by0 + y) * FC + bx0, 1, bw);
           break;
         }
-        case 7:
+        case 11:
           for (let i = 0; i < NCELL; i++) dist[i] = (Math.sqrt(gridOut[i]) - Math.sqrt(gridIn[i])) * CELL;
           break;
-        case 8: blurH(dist, blurA, 6); break;
-        case 9: blurV(blurA, blurB, 6); break;
-        case 10: blurH(blurB, blurA, 6); break;
-        case 11: blurV(blurA, blurB, 6); break;
+        case 12: blurH(dist, blurA, 5, 0, HR); break;
+        case 13: blurH(dist, blurA, 5, HR, FR); break;
+        case 14: blurV(blurA, blurB, 5, 0, HC); break;
+        case 15: blurV(blurA, blurB, 5, HC, FC); break;
+        case 16: blurH(blurB, blurA, 5, 0, HR); break;
+        case 17: blurH(blurB, blurA, 5, HR, FR); break;
+        case 18: blurV(blurA, blurB, 5, 0, HC); break;
+        case 19: blurV(blurA, blurB, 5, HC, FC); break;
         default:
           // near the figures the exact distance; further out the blurred one,
           // so the far rings round off as surface tension would have them
@@ -469,7 +483,6 @@ export default {
   fonts: ["Shippori Mincho B1:wght@800", "Cormorant Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600"],
 
   mount(root, { state, seed }) {
-    const PT0 = performance.now(); const PT = (l) => console.warn(`PROF ${l} ${(performance.now() - PT0).toFixed(1)}`);
     addStyle(root, `
       .sm { position: absolute; inset: 0; overflow: hidden; background: var(--paper); color: var(--ink);
         font-family: "Cormorant Garamond", "Shippori Mincho B1", serif; font-weight: 600; font-kerning: normal; }
@@ -478,24 +491,23 @@ export default {
       .sm .seal text { font-family: ${NUM_FAMILY}, serif; font-weight: 800; fill: var(--sealtext); text-anchor: middle; }
       .sm .head { position: absolute; left: 94px; right: 64px; top: 72px; white-space: nowrap; line-height: 1; }
       .sm .date { font-size: 64px; font-weight: 600; letter-spacing: 0.004em; }
-      .sm .sun { display: flex; align-items: center; margin-top: 14px; font-size: 48px; letter-spacing: 0.01em; }
+      .sm .sun { display: flex; align-items: center; margin-top: 26px; font-size: 48px; letter-spacing: 0.01em; }
       .sm .sun i { font-weight: 500; margin-right: 0.24em; }
       .sm .dot { flex: none; width: 11px; height: 11px; border-radius: 50%; background: var(--seal); margin: 4px 20px 0 2px; }
       .sm .ampm { position: absolute; }
       .sm .foot { position: absolute; left: ${NUM_LEFT + 6}px; right: 64px; bottom: 60px; }
       .sm .wx { display: flex; align-items: flex-end; }
       .sm .temp { font-family: ${NUM_FAMILY}, serif; font-weight: 800; font-size: 176px; line-height: 0.74; letter-spacing: -0.03em;
-        margin-right: 30px; white-space: nowrap; }
+        margin-right: 46px; white-space: nowrap; }
       .sm .temp.none .tn { display: inline-block; font-family: "Cormorant Garamond", serif; font-weight: 700; transform: translateY(-0.3em); margin-right: 0.04em; }
       .sm .lines { padding-bottom: 1px; min-width: 0; }
-      .sm .cond { font-style: italic; font-size: 62px; line-height: 1; white-space: nowrap; margin-bottom: 12px; }
+      .sm .cond { font-style: italic; font-size: 62px; line-height: 1; white-space: nowrap; margin-bottom: 24px; }
       .sm .moon { font-weight: 500; font-size: 48px; line-height: 0.86; white-space: nowrap; letter-spacing: 0.01em; }
-      .sm .seals { margin-left: auto; display: flex; gap: 22px; padding-bottom: 2px; }
-      .sm .sealbox { display: flex; flex-direction: column; align-items: center; }
-      .sm .cap { font-weight: 700; font-size: 27px; line-height: 0.8; letter-spacing: 0.16em; margin: 12px -0.16em 0 0; }
-      .sm .fact { margin-top: 44px; }
+      .sm .seals { position: absolute; display: flex; flex-direction: column; gap: 40px; }
+      .sm .seal .cap { font-family: "Cormorant Garamond", serif; font-weight: 700; letter-spacing: 0.14em; }
+      .sm .fact { margin-top: 56px; }
       .sm .flabel { font-weight: 700; font-size: 28px; line-height: 1; letter-spacing: 0.16em; text-transform: uppercase; }
-      .sm .fvalue { font-style: italic; font-weight: 500; font-size: 50px; line-height: 1.08; margin-top: 12px; text-wrap: balance; }
+      .sm .fvalue { font-style: italic; font-weight: 500; font-size: 50px; line-height: 1.2; margin-top: 14px; text-wrap: balance; }
     `);
 
     const r = rng(seed);
@@ -503,9 +515,7 @@ export default {
     root.append(wrap);
 
     // ----- layers -----
-    PT("pre");
     const ink = shader(wrap, { frag: FRAG, maxScale: 0.5 });
-    PT("shader");
     const gl = ink.ok ? ink.canvas.getContext("webgl") || ink.canvas.getContext("experimental-webgl") : null;
     const numLayer = svg("svg", { class: "layer", viewBox: `0 0 ${W} ${H}`, width: W, height: H });
     const numNodes = [0, 1, 2, 3].map(() => svg("text", { class: "num" }));
@@ -532,24 +542,25 @@ export default {
     const tempNode = el("div", { class: "temp" }, tNum, tDeg);
     const condNode = el("div", { class: "cond" });
     const moonNode = el("div", { class: "moon" });
+    // AQI and UV: round seals stamped down the margin under the AM/PM seal,
+    // each carved with its figure and a small caption
+    const RS = 112;
     const roundSeal = (caption) => {
-      const s = makeSeal(94, 94, true, r);
-      const t = svg("text", { x: 47, y: 61, "font-size": 41 });
-      s.append(t);
-      return { box: el("div", { class: "sealbox" }, s, el("div", { class: "cap", text: caption })), text: t };
+      const s = makeSeal(RS, RS, true, r);
+      const t = svg("text", { x: RS / 2, y: 62, "font-size": 44 });
+      s.append(t, svg("text", { class: "cap", x: RS / 2 + 2, y: 90, "font-size": 24, text: caption }));
+      return { box: s, text: t };
     };
     const aqi = roundSeal("AQI");
     const uv = roundSeal("UV");
     const sealsNode = el("div", { class: "seals" }, aqi.box, uv.box);
-    const wxRow = el("div", { class: "wx" }, tempNode, el("div", { class: "lines" }, condNode, moonNode), sealsNode);
+    const wxRow = el("div", { class: "wx" }, tempNode, el("div", { class: "lines" }, condNode, moonNode));
     const fLabel = el("div", { class: "flabel" });
     const fValue = el("div", { class: "fvalue" });
     const factNode = el("div", { class: "fact" }, fLabel, fValue);
     const foot = el("div", { class: "foot" }, wxRow, factNode);
-    wrap.append(head, ampmSeal, foot);
+    wrap.append(head, ampmSeal, sealsNode, foot);
     grain(wrap, { opacity: 0.07 });
-
-    PT("dom");
     // ----- the numerals: where each figure sits -----
     const mctx = document.createElement("canvas").getContext("2d");
     mctx.font = `800 ${NUM_SIZE}px ${NUM_FAMILY}`;
@@ -579,6 +590,8 @@ export default {
     }
     ampmSeal.style.left = `${SEAL_X}px`;
     ampmSeal.style.top = `${Math.round(baseM - SEAL_H + 4)}px`;
+    sealsNode.style.left = `${SEAL_X + (SEAL_W - RS) / 2}px`;
+    sealsNode.style.top = `${Math.round(baseM + 4 + 48)}px`;
 
     // ----- the field, three buffers taking turns: this minute, the last, the next -----
     let bufCur = new Uint16Array(NCELL);
@@ -718,7 +731,7 @@ export default {
     }
 
     // ----- snow flecks -----
-    const NS = 900;
+    const NS = 680;
     const fx = new Float32Array(NS), fy = new Float32Array(NS), fr = new Float32Array(NS);
     const fb = new Float32Array(NS), fl = new Float32Array(NS);
     const placeFleck = (i, t) => {
@@ -831,7 +844,7 @@ export default {
       css("--paper", ground);
       css("--ink", dark ? SUMI : "#ddd6c5");
       css("--num", mix(SUMI, BONE, night));
-      css("--seal", mix(mix("#7a2217", "#bb3620", smoothstep(0.1, 0.5, t)), ground, dark ? 0 : 0.04));
+      css("--seal", mix(mix("#7a2217", "#a82e1a", smoothstep(0.1, 0.5, t)), ground, dark ? 0 : 0.04));
       css("--sealtext", dark ? "#f6efdd" : "#e9e1cf");
       ink.set("u_paper", vec3(ground));
       ink.set("u_num", vec3(shown["--num"]));
@@ -852,16 +865,16 @@ export default {
       toneU[2] = 0.17 + 0.06 * moonlight;
       toneU[3] = 0.62 + 0.18 * moonlight;
       pal.fleck = dark ? "#fffdf6" : "#c8d0d8";
-      pal.shade = dark ? "rgba(40,44,60,0.22)" : "rgba(0,0,0,0)";
+      pal.shade = dark ? "rgba(40,44,60,0.22)" : "rgba(52,48,42,0.2)";
     }
-
-    PT("setup");
     // ----- start: the first field is worked out a step a frame over the first
     // few (unseen) frames, so mount() stays quick; the figures show at once and
     // the water is shown as soon as its field is ready, with rain already on it
     // and the cracks placed.
     let initKey = `${state.clock.hh}:${state.clock.mm}`;
     let initJob = fieldJob(layout(state.clock.hh, state.clock.mm), bufNext);
+    initJob.step(); // the mask and the grids now; the rest in the first frames
+    initJob.step();
     setGlyphs(layout(state.clock.hh, state.clock.mm), false);
     ink.canvas.style.visibility = "hidden";
     function initStep(s) {
@@ -870,6 +883,7 @@ export default {
       if (key !== initKey) {
         initKey = key;
         initJob = fieldJob(layout(c.hh, c.mm), bufNext);
+        initJob.step();
       }
       if (!initJob.step()) return false;
       initJob = null;
@@ -917,7 +931,7 @@ export default {
         const morph = mt * mt * (3 - 2 * mt);
         ink.set("u_morph", morph);
         for (let i = 0; i < 4; i++) {
-          const o = numFresh[i] ? smoothstep(0.82, 1, mt) : 1;
+          const o = numFresh[i] ? smoothstep(0.4, 0.85, mt) : 1; // the new figure is legible within two seconds
           if (o !== numOpacity[i]) {
             numOpacity[i] = o;
             numNodes[i].style.opacity = o.toFixed(3);
@@ -950,7 +964,7 @@ export default {
         const relaid = put("cond", condNode, s.text.condition) | (shown.tempW !== s.text.temp);
         if (relaid) {
           shown.tempW = s.text.temp;
-          fitText(condNode, sealsNode.offsetLeft - condNode.parentNode.offsetLeft - 26, 56);
+          fitText(condNode, SEAL_X - 44 - foot.offsetLeft - condNode.parentNode.offsetLeft, 62);
         }
         const fact = s.text.factValue ? `${s.text.factLabel}|${s.text.factValue}` : "";
         if (fact !== lastFact) {
@@ -979,7 +993,8 @@ export default {
         ink.set("u_speed", speed);
         ink.set("u_cold", cold);
 
-        const flow = remap(temp, 14, 96, 0.012, 0.15) * (1 + 0.6 * storm) * (1 - 0.3 * cloud * (1 - storm));
+        // the water always drifts a little; warmth and wind stir it more
+        const flow = (remap(temp, 14, 96, 0.03, 0.15) + 0.0016 * wx.wind) * (1 + 0.6 * storm) * (1 - 0.3 * cloud * (1 - storm));
         swirlClock += dt * flow;
         const amp = (1 - 0.22 * cloud + 0.45 * heat + 0.7 * storm) * (1 - 0.35 * cold);
         swirlAmp[0] = 52 * amp;
@@ -1023,7 +1038,7 @@ export default {
         // ----- snow -----
         const snowing = wx.falling === "snow" ? wx.intensity : 0;
         if (snowing > 0.01) {
-          const count = Math.min(NS, Math.round(160 + 780 * snowing));
+          const count = Math.min(NS, Math.round(140 + 540 * snowing));
           const drift = 1.2 + wx.wind * 0.5;
           const vx = windU[0] * drift * dt, vy = windU[1] * drift * dt;
           if (!snow) {
@@ -1042,11 +1057,12 @@ export default {
           }
           snow.clear();
           // by day a faint shadow under each fleck, so it reads on bare paper too
-          for (let pass = pal.night > 0.5 ? 1 : 0; pass < 2; pass++) {
+          for (let pass = 0; pass < 2; pass++) {
             ctx.fillStyle = pass === 0 ? pal.shade : pal.fleck;
             ctx.globalAlpha = pass === 0 ? 1 : pal.night > 0.5 ? 0.78 : 0.96;
             ctx.beginPath();
             for (let i = 0; i < count; i++) {
+              if (pass === 0 && fr[i] < 2.4) continue; // only the bigger flecks cast a shadow
               const a = t - fb[i];
               const grow = clamp(a / 1.4);
               const melt = clamp((fl[i] - a) / 5);
@@ -1054,8 +1070,12 @@ export default {
               if (rad < 0.4) continue;
               const x = fx[i] + (pass === 0 ? 0.8 : 0);
               const y = fy[i] + (pass === 0 ? 1.4 : 0);
-              ctx.moveTo(x + rad, y);
-              ctx.arc(x, y, rad, 0, TAU);
+              if (rad < 1.3) {
+                ctx.rect(x - rad, y - rad, rad * 2, rad * 2); // too small to tell from a dot
+              } else {
+                ctx.moveTo(x + rad, y);
+                ctx.arc(x, y, rad, 0, TAU);
+              }
             }
             ctx.fill();
           }

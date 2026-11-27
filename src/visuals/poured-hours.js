@@ -1,7 +1,7 @@
 // Poured Hours
 //
 // A wall-sized falling-sand toy. Everything above the black base is one
-// cellular automaton of 6 px grains (180 x 282 cells). The time is two rows of
+// cellular automaton of 6 px grains (180 x 276 cells). The time is two rows of
 // chunky numerals made of sand packed into invisible moulds: each numeral is
 // poured from a sweeping spout in layers, so it carries wavy sand-art strata in
 // one mineral pigment, with little heaps sitting on its shoulders. When a
@@ -10,39 +10,46 @@
 // reading). The other readouts are pixel-letter ledges in the same sand world:
 // grains land on them, pile on their tops and sift through their gaps.
 //
+// A lone hour digit is centred over the minutes, right under the thread.
+//
 // How the conditions drive it:
-//   seconds       a thread of sand falls without stop down the gap between the
-//                 digits, with a denser bead every second, and builds a cone
-//                 on the dune
+//   seconds       a thread of sand falls without stop down the middle of the
+//                 frame with a short gap at every second, so the tick runs down
+//                 it; it heaps on whatever it meets, slides along the tops of the
+//                 numerals and spills off their shoulders in thin streams, and
+//                 builds a cone on the dune
 //   temperature   the pigment of the packed numerals: ultramarine in deep cold,
 //                 through teal, olive and ochre, to vermilion in heat
 //   sky colour    every loose grain has the colour the measured sky has when it
 //                 falls (west on the left, east on the right); the dune at the
 //                 bottom starts as unlabelled strata of the last 24 hours of sky
 //                 and lets its oldest sand out through slots in the base
-//   rain          water cells: they run off the numerals in little falls, sift
+//   rain          water cells, as many as it is raining, falling in short
+//                 streaks: they run off the numerals in little falls, sift
 //                 through the lettering, pool in the dune's hollows and seep away
 //   snow          slow white grains that settle on every shoulder, melt above 34 F
-//   wind          leans the thread and everything that falls, and makes the
-//                 dune's surface hop downwind so it creeps along the floor
-//   fog, bad air  slow motes hanging in the air
+//   wind          leans the thread and everything that falls, blows sand and
+//                 snow off every crest in streams, and makes the dune's surface
+//                 hop downwind so it creeps along the floor
+//   fog, bad air  a veil hanging in soft banks that slide along at their own
+//                 pace (grey fog, brown haze), with slow motes; fog greys the pigment
 //   storm         a heavy pour and, now and then, a slow two-second lift of light
 //   cloud, sun    the tone of the paper and the hard little shadows of sunlight
 //   day / night   warm paper by day, charcoal at night; inks and pigment switch
 //                 in one step while the ground is mid-grey
 // The fact sits on the base in Pixelify Sans, the same pixel voice.
 
-import { clamp, lerp, smoothstep, rng, oklch, toOklab, mix, el, addStyle, pixelCanvas, grain } from "../lib/kit.js";
+import { clamp, lerp, smoothstep, rng, toOklab, mix, el, addStyle, pixelCanvas, grain } from "../lib/kit.js";
 import { sunPosition } from "../lib/astro.js";
 
 const CELL = 6;
 const COLS = 180;
-const FLOOR = 280; // first row of the base; the simulation is rows 0..FLOOR-1
+const FLOOR = 276; // first row of the base; the simulation is rows 0..FLOOR-1
 const LEFT = 11; // 66 px
 const RIGHT = 169; // last column text may use (1014 px)
 const DATE_Y = 11;
-const HOUR_Y = 28;
-const MIN_Y = 111;
+const HOUR_Y = 31;
+const MIN_Y = 114;
 const U = 5; // cells per numeral pixel
 const GW = 13;
 const GH = 15;
@@ -51,10 +58,10 @@ const DH = GH * U;
 const SLOT_X = [11, 88];
 const CENTER_X = 49; // a lone hour digit, centred over the minutes and under the thread
 const THREAD_X = 81; // the thread is THREAD_X and THREAD_X + 1, the middle of the gap
-const TEMP_Y = 195;
-const CD_Y = 219;
-const MOON_Y = 233;
-const SCAN_Y = 246; // the dune lives below this row
+const TEMP_Y = 199;
+const CD_Y = 225;
+const MOON_Y = 239;
+const SCAN_Y = 251; // the dune lives below this row
 const LH = 9; // height of the pixel letters
 
 const T_SAND = 1; // sand that stays: the dune, heaps on shoulders
@@ -210,10 +217,10 @@ const STYLE = `
 .ph-base { position: absolute; left: 0; right: 0; top: ${FLOOR * CELL}px; bottom: 0; box-sizing: border-box;
   border-top: ${CELL}px solid #555; background: #191715; color: #e9e1d2; font-family: "Pixelify Sans", monospace; z-index: 3; }
 .ph-slot { position: absolute; top: -${CELL}px; width: ${CELL * 3}px; height: ${CELL}px; background: #0c0b0a; }
-.ph-fact { position: absolute; left: ${LEFT * CELL}px; right: 66px; top: 26px; }
+.ph-fact { position: absolute; left: ${LEFT * CELL}px; right: 66px; top: 38px; }
 .ph-fl { font-weight: 600; font-size: 28px; line-height: 32px; letter-spacing: 0.1em; text-transform: uppercase; color: #b5ab9b; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; }
-.ph-fv { margin-top: 8px; font-weight: 500; font-size: 48px; line-height: 1.1; text-wrap: balance;
+.ph-fv { margin-top: 10px; font-weight: 500; font-size: 46px; line-height: 1.2; text-wrap: balance;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .ph-base.nofact .ph-fact { display: none; }
 `;
@@ -334,13 +341,17 @@ export default {
     const CREAM = toOklab("#f5ecd9");
     const ground = [0, 0, 0];
     const pig = [0, 0, 0];
-    let lastSig = "";
+    const sig = new Float64Array(4).fill(-1);
     let shadowPx = 0;
     let ghostFill = 0;
     let ghostEdge = 0;
     let motePx = 0;
     let inkPx = 0;
+    let streakPx = 0;
+    let streakPx2 = 0;
     let spoutPx = 0;
+    let veilA = 0;
+    const veilPx = new Uint32Array(32);
     let bolt = 0; // 0..1 soft lift of the ground in a thunderstorm
     let nextBolt = 9;
     let boltAt = -99;
@@ -353,7 +364,7 @@ export default {
         skyMean = toOklab(s.sky.mean);
       }
       // The ground is kept out of mid-grey for as much of twilight as it can be.
-      const g = smoothstep(0.2, 0.48, s.daylight);
+      const g = smoothstep(0.24, 0.44, s.daylight);
       const wet = Math.max(E.rain, E.snow * 0.6);
       const storm = s.weather.falling === "storm" ? 1 : 0;
       const Lp = 0.955 - 0.08 * E.cloud - 0.05 * wet - 0.06 * storm - 0.03 * E.fog - 0.02 * E.haze;
@@ -367,9 +378,14 @@ export default {
       const Lg = ground[0];
       const gp = pack(Lg, ground[1], ground[2]);
       const fl = Lg >= 0.575 ? 1 : 0; // inks: dark on a light ground, light on a dark one, switched in one step
-      const sig = `${gp}|${Math.round(E.temp * 2)}|${skyVer}|${Math.round(E.fog * 20)}|${Math.round(E.sun * 40)}|${Math.round(E.haze * 10)}|${fl}`;
-      if (sig === lastSig) return;
-      lastSig = sig;
+      // recolour only when something that shows has changed
+      const kT = Math.round(E.temp * 2);
+      const kF = Math.round(E.fog * 20) * 4096 + Math.round(E.sun * 40) * 64 + Math.round(E.haze * 10) * 2 + fl;
+      if (gp === sig[0] && kT === sig[1] && skyVer === sig[2] && kF === sig[3]) return;
+      sig[0] = gp;
+      sig[1] = kT;
+      sig[2] = skyVer;
+      sig[3] = kF;
       wrap.style.background = css(gp);
       const fs = smoothstep(0.42, 0.72, Lg); // the sky sand moves smoothly from lighter-than-ground to darker
       const fogMix = 0.3 * E.fog;
@@ -400,7 +416,7 @@ export default {
       // the numerals' pigment, in four strata tones
       pigmentAt(E.temp, pig);
       const baseL = fl ? Math.min(pig[0], Lg - 0.43) : Math.max(0.6, Lg + 0.42);
-      const baseC = fl ? pig[1] : Math.max(0.07, pig[1] * 0.58);
+      const baseC = (fl ? pig[1] : Math.max(0.07, pig[1] * 0.58)) * (1 - 0.45 * E.fog); // fog greys it
       for (let b = 0; b < 4; b++) {
         const T = TONES[b];
         const L = baseL + T[0] * (fl ? 1 : 0.8);
@@ -431,12 +447,18 @@ export default {
       const wC = fl ? 0.11 : 0.08;
       const wOff = [0, -0.03, 0.03, fl ? 0.12 : 0.16];
       for (let j = 0; j < 4; j++) lut[P_WATER + j] = pack(wL + wOff[j], wC * Math.cos(wHue), wC * Math.sin(wHue));
-      const sL = fl ? Math.max(0.99, Lg) : 0.76;
+      streakPx = pack(wL, wC * Math.cos(wHue), wC * Math.sin(wHue), 150);
+      streakPx2 = pack(wL, wC * Math.cos(wHue), wC * Math.sin(wHue), 70);
+      const sL = fl ? Math.max(0.99, Lg) : 0.72;
       for (let j = 0; j < 4; j++) lut[P_SNOW + j] = pack(sL - j * 0.016, -0.002, -0.01 - 0.004 * (1 - g));
 
       shadowPx = E.sun * fl > 0.02 ? pack(0.22, 0.012, 0.025, Math.round(52 * E.sun * fl)) : 0;
       const mL = fl ? Lg - 0.14 : Lg + 0.17;
       motePx = pack(mL, ground[1] + 0.01 * E.haze, ground[2] + 0.035 * E.haze, 170);
+      // the veil of fog (or brown haze) hanging in banks: 32 strengths of one tint
+      veilA = Math.max(E.fog * 0.6, E.haze * 0.24);
+      veilPx[0] = 0;
+      for (let q = 1; q < 32; q++) veilPx[q] = veilA > 0.01 ? pack(mL, ground[1] + 0.012 * E.haze, ground[2] + 0.04 * E.haze, Math.round((q / 31) * veilA * 255)) : 0;
 
       // the base: always dark, a shade apart from the night ground
       base.style.background = css(pack(lerp(0.13, 0.2, g), 0.004, 0.008));
@@ -444,10 +466,8 @@ export default {
     }
 
     // ----- lettering in the simulation -----
-    const ledges = [];
     const mkLedge = (x, y, scale) => {
       const L = { x, y, scale, text: null, w: 0, bx: 0, n: 0, cells: new Int32Array(3200) };
-      ledges.push(L);
       return L;
     };
     const Ldate = mkLedge(LEFT, DATE_Y, 1);
@@ -498,14 +518,13 @@ export default {
       const cond = tx.condition.toUpperCase();
       if (tx.temp !== Ltemp.text || cond !== Lcond.text) {
         stamp(Ltemp, tx.temp);
-        Lcond.x = LEFT + Ltemp.w + 5;
+        Lcond.x = LEFT + Ltemp.w + 7;
         stamp(Lcond, cond);
       }
       const cd = `${tx.sunLabel} ${tx.sunValue}`.toUpperCase();
       if (cd !== Lcd.text) stamp(Lcd, cd);
       const moon = tx.moon.toUpperCase();
-      let air = `AQI ${tx.aqi}  UV ${tx.uv}`;
-      if (textWidth(moon, 1) + 6 + textWidth(air, 1) > RIGHT - LEFT + 1) air = `AQI ${tx.aqi} UV ${tx.uv}`;
+      const air = `AQI ${tx.aqi}  UV ${tx.uv}`; // the longest moon and readings still leave a 42 px gap
       if (moon !== Lmoon.text || air !== Lair.text) {
         stamp(Lmoon, moon);
         Lair.x = RIGHT + 1 - textWidth(air, 1);
@@ -582,9 +601,9 @@ export default {
           const ty = topY[a];
           if (ty > 3 && len >= 4 && rnd() % 100 < 90) {
             const c1 = a + (rnd() % len);
-            const h1 = 3 + (rnd() % 5);
+            const h1 = r ? 3 + (rnd() % 5) : 2 + (rnd() % 2); // low on the hours, to keep air under the date
             const c2 = len > 20 ? a + (rnd() % len) : -99;
-            const h2 = 2 + (rnd() % 5);
+            const h2 = r ? 2 + (rnd() % 5) : 2;
             for (let x = a; x < cx; x++) {
               const edge = Math.min(x - a + 1, cx - x);
               const h = Math.min(edge, Math.max(h1 - Math.abs(x - c1), h2 - Math.abs(x - c2)));
@@ -623,7 +642,7 @@ export default {
 
     const LT = 10; // rows printed per pass of the spout
     const PASSES = Math.ceil(DH / LT) + 1;
-    const mkJob = (r) => ({ r, ox0: SLOT_X[0], chg: [true, true], active: false, step0: 0, pr0: 0, n: 0, ptr: 0, keys: new Float64Array(2 * DW * DH), cr: [false, false], crumbling: false, x0: 0, x1: 0, dir0: 1, S: 40, hx: -20, stream: -1, leaving: false });
+    const mkJob = (r) => ({ r, ox0: SLOT_X[0], chg: [true, true], active: false, step0: 0, pr0: 0, n: 0, ptr: 0, keys: new Uint32Array(2 * DW * DH), cr: [false, false], crumbling: false, x0: 0, x1: 0, dir0: 1, S: 40, hx: -20, stream: -1, leaving: false });
     const jobs = [mkJob(0), mkJob(1)];
 
     // Clears whatever is left glued in a slot's box.
@@ -702,7 +721,7 @@ export default {
             const dir = p % 2 === 0 ? job.dir0 : -job.dir0;
             const u = dir > 0 ? (x - x0) / span : (x1 - x) / span;
             const time = p * job.S + u * job.S * 0.85 + rb * 0.4 + (rnd() % 3);
-            job.keys[job.n++] = Math.round(time) * 65536 + i;
+            job.keys[job.n++] = ((Math.round(time) << 16) | i) >>> 0;
           }
         }
       }
@@ -759,8 +778,8 @@ export default {
         job.hx = lerp(from, startX, 1 - (1 - f) * (1 - f) * (1 - f));
         return;
       }
-      while (job.ptr < job.n && Math.floor(job.keys[job.ptr] / 65536) <= tau) {
-        const i = job.keys[job.ptr++] % 65536;
+      while (job.ptr < job.n && job.keys[job.ptr] >>> 16 <= tau) {
+        const i = job.keys[job.ptr++] & 0xffff;
         type[i] = T_GLUE;
         col[i] = pigCol(job.r, i % COLS, (i / COLS) | 0);
         ghost[i] = 0;
@@ -788,6 +807,7 @@ export default {
       }
     }
     function syncTime(s, snap) {
+      let started = false;
       for (let r = 0; r < 2; r++) {
         const str = r ? s.text.mm : s.text.hh;
         const want = str.length === 1 ? [str, ""] : [str[0], str[1]];
@@ -800,16 +820,19 @@ export default {
           newStrata(r);
           job.chg[0] = job.chg[1] = true;
           slotX[r][0] = want[1] === "" ? CENTER_X : SLOT_X[0];
-          for (let cy = 0; cy < DH; cy++) {
+          for (let y = rowY(r) - 10; y < rowY(r) + DH; y++) {
             for (let x = 0; x < COLS; x++) {
-              const i = (rowY(r) + cy) * COLS + x;
+              const i = y * COLS + x;
               ghost[i] = 0;
-              if (type[i] === T_GLUE) type[i] = 0;
+              const t = type[i];
+              if (t === T_GLUE || t === T_SAND || t === T_CRUMB || (t === T_FRESH && (x < THREAD_X || x > THREAD_X + 1))) type[i] = 0;
             }
           }
           finishJob(job);
           continue;
         }
+        if (started) continue; // one new pour per frame; the other row starts on the next
+        started = true;
         if (job.active) finishJob(job);
         startJob(job, want);
       }
@@ -861,9 +884,9 @@ export default {
       const th = new Float32Array(HIST);
       const newest = HIST * 2 + gen * 4;
       for (let x = 0; x < COLS; x++) {
-        const h = Math.round(9 + 13 * hump(x / COLS + ph1) + 5 * hump((2 * x) / COLS + ph2) + 1.3 * Math.sin(x * 0.21 + ph3));
+        const h = Math.round(7 + 10 * hump(x / COLS + ph1) + 4 * hump((2 * x) / COLS + ph2) + 1.2 * Math.sin(x * 0.21 + ph3));
         // the cone the thread has been building
-        const cone = Math.max(0, 15 - Math.abs(x - THREAD_X - 0.5) * 0.95 + 0.7 * Math.sin(x * 1.7));
+        const cone = Math.max(0, 13 - Math.abs(x - THREAD_X - 0.5) * 0.95 + 0.7 * Math.sin(x * 1.7));
         let total = 0;
         for (let k = 0; k < HIST; k++) {
           th[k] = wk[k] * (1 + 0.5 * Math.sin(x * fk[k] + pk[k]));
@@ -992,8 +1015,8 @@ export default {
         }
         live[1] = live[2] = 2;
       }
-      if (E.rain > 0 && waterCount < 900 + 1600 * E.rain) {
-        rainAcc += E.rain * 3.4;
+      if (E.rain > 0 && waterCount < 2400 + 3000 * E.rain) {
+        rainAcc += E.rain * 9;
         while (rainAcc >= 1) {
           rainAcc--;
           const x = rnd() % COLS;
@@ -1047,7 +1070,7 @@ export default {
           }
         }
       }
-      E.seepP = waterCount > 500 + 1500 * E.rain ? 40 : 8;
+      E.seepP = waterCount > 1300 + 1100 * E.rain ? 40 : 4;
     }
 
     // Moves a loose thing at i straight down through lettering to the first free cell below it.
@@ -1117,10 +1140,11 @@ export default {
               live[yy + 1] = live[yy + 2] = 2;
               continue;
             }
-            if (tb === T_WATER) {
+            if (tb === T_WATER || (tb === T_SNOW && (r & 7) === 0)) {
+              // sand is heavier than water and snow: it sinks through them
               if (r & 1) {
                 type[below] = t;
-                type[i] = T_WATER;
+                type[i] = tb;
                 const c = col[below];
                 col[below] = col[i];
                 col[i] = c;
@@ -1161,8 +1185,24 @@ export default {
                 if (col[i] >= P_THREAD) col[i] = skyCol(x);
                 continue;
               }
-              // resting up on a numeral or a ledge: it lingers, then slips away
-              if (pr < 6) {
+              // Resting up on a numeral, a heap or a ledge, a grain slides along the
+              // top, away from where the thread lands, and spills off the edge in a
+              // stream. It moves only against the scan, so once a step; on its own
+              // kind it creeps more slowly, so a pile slumps a little below 45 degrees.
+              // Down among the readouts it does not creep, so the cone the thread
+              // builds on the dune never climbs into the type.
+              if ((y < TEMP_Y || tb === T_INK) && (tb === T_GLUE || tb === T_INK || tb === T_SAND || tb === T_SNOW || tb === T_FRESH)) {
+                const dir = x < THREAD_X ? -1 : x > THREAD_X + 1 ? 1 : r & 4 ? 1 : -1;
+                if (dir > 0 !== ltr && pr < (tb === T_FRESH ? 26 : 150) && x + dir >= 0 && x + dir < COLS && type[i + dir] === 0) {
+                  type[i + dir] = T_FRESH;
+                  col[i + dir] = col[i];
+                  type[i] = 0;
+                  live[y] = live[y + 2] = 2;
+                  continue;
+                }
+              }
+              // stuck in a corner: it lingers, then (rarely) slips away
+              if (y >= TEMP_Y ? pr < 6 : ((r >>> 16) & 1023) < 3) {
                 type[i] = 0;
                 live[y] = 2;
               }
@@ -1297,7 +1337,7 @@ export default {
     }
 
     // ----- motes: fog and bad air hanging in the frame -----
-    const MOTES = 7000;
+    const MOTES = 2600;
     const mx = new Float32Array(MOTES);
     const my = new Float32Array(MOTES);
     const mp = new Float32Array(MOTES);
@@ -1310,26 +1350,88 @@ export default {
         mp[k] = r() * 6.283;
       }
     }
+    // the veil: soft banks across the rows, wisps along them, each row sliding at its own pace
+    const rowD = new Uint8Array(FLOOR);
+    const rowOff = new Uint16Array(FLOOR);
+    const rowSp = new Float32Array(FLOOR);
+    const colD = new Uint8Array(COLS * 2);
+    const bank = new Float32Array(9); // centre, width, phase for three banks
+    {
+      const r = rng(seed + 7);
+      const a = r() * 6.28;
+      const b = r() * 6.28;
+      const c = r() * 6.28;
+      for (let x = 0; x < COLS; x++) {
+        const u = (x / COLS) * 6.2832;
+        const v = clamp(0.5 + 0.26 * Math.sin(2 * u + a) + 0.18 * Math.sin(5 * u + b) + 0.1 * Math.sin(9 * u + c)) * 255;
+        colD[x] = colD[x + COLS] = v;
+      }
+      for (let y = 0; y < FLOOR; y++) rowSp[y] = 0.45 + 0.3 * Math.sin(y * 0.071 + a) + 0.15 * Math.sin(y * 0.19 + b);
+      for (let k = 0; k < 3; k++) {
+        bank[k * 3] = r.range(0.12, 0.88) * FLOOR;
+        bank[k * 3 + 1] = r.range(16, 30);
+        bank[k * 3 + 2] = r() * 6.28;
+      }
+    }
+    function veilRows(s) {
+      const t = s.t;
+      const push = E.wdir * E.ws * 2.5;
+      for (let y = 0; y < FLOOR; y++) {
+        let d = 0.28;
+        for (let k = 0; k < 3; k++) {
+          const c = bank[k * 3] + 14 * Math.sin(t * 0.021 + bank[k * 3 + 2]);
+          const u = (y - c) / bank[k * 3 + 1];
+          d += 0.85 * Math.exp(-u * u);
+        }
+        rowD[y] = Math.min(255, d * 230);
+        const o = Math.floor(t * (rowSp[y] + push)) % COLS;
+        rowOff[y] = o < 0 ? o + COLS : o;
+      }
+    }
 
     // ----- drawing -----
     const SPOUT = [13, 11, 9, 7, 5, 3, 3];
     function render(s) {
-      for (let i = 0; i < N; i++) {
-        const t = type[i];
-        px[i] = t !== 0 ? lut[col[i]] : ghost[i] !== 0 ? (ghost[i] === 1 ? ghostFill : ghostEdge) : 0;
+      if (veilA > 0.01) {
+        veilRows(s);
+        for (let y = 0, i = 0; y < FLOOR; y++) {
+          const rd = rowD[y];
+          const off = rowOff[y];
+          for (let x = 0; x < COLS; x++, i++) {
+            const t = type[i];
+            px[i] = t !== 0 && (t >= T_GLUE || !inBand[i]) ? lut[col[i]] : ghost[i] !== 0 ? (ghost[i] === 1 ? ghostFill : ghostEdge) : veilPx[(rd * colD[x + off]) >> 11];
+          }
+        }
+      } else {
+        for (let i = 0; i < N; i++) {
+          const t = type[i];
+          // loose things inside a line of lettering pass behind it, so they never read as strokes
+          px[i] = t !== 0 && (t >= T_GLUE || !inBand[i]) ? lut[col[i]] : ghost[i] !== 0 ? (ghost[i] === 1 ? ghostFill : ghostEdge) : 0;
+        }
       }
       if (shadowPx !== 0) {
         for (let y = 2; y < FLOOR; y++) {
           const row = y * COLS;
           for (let x = 2; x < COLS; x++) {
             const i = row + x;
-            if (px[i] !== 0) continue;
+            if (type[i] !== 0 || ghost[i] !== 0) continue;
             const t1 = type[i - COLS - 1];
             if ((t1 !== 0 && t1 !== T_WATER) || type[i - 2 * COLS - 2] === T_GLUE) px[i] = shadowPx;
           }
         }
       }
-      const nm = Math.round(MOTES * clamp(E.fog * 0.95 + E.haze * 0.3));
+      if (E.rain > 0) {
+        // falling drops trail a short streak, leaning with the wind
+        const lean = E.rainDrift > 90 ? -E.wdir : 0;
+        for (let i = 3 * COLS; i < N - COLS; i++) {
+          if (type[i] !== T_WATER || type[i + COLS] !== 0) continue;
+          const a = i - COLS + lean;
+          if (type[a] === 0 && !inBand[a]) px[a] = streakPx;
+          const b = a - COLS + lean;
+          if (type[b] === 0 && !inBand[b]) px[b] = streakPx2;
+        }
+      }
+      const nm = Math.round(MOTES * clamp(E.fog * 0.9 + E.haze * 0.4));
       if (nm > 0) {
         const t = s.t;
         const dt = s.dt;
@@ -1344,7 +1446,7 @@ export default {
           mx[k] = x;
           my[k] = y;
           const i = (y | 0) * COLS + (x | 0);
-          if (type[i] === 0) px[i] = motePx;
+          if (type[i] === 0 && !inBand[i]) px[i] = motePx;
         }
       }
       for (let r = 0; r < 2; r++) {
@@ -1391,7 +1493,7 @@ export default {
         }
       }
       // rain and snow in the air
-      const nr = Math.round(E.rain * 1400);
+      const nr = Math.round(E.rain * 3600);
       for (let k = 0; k < nr; k++) {
         const i = ((r() * SCAN_Y) | 0) * COLS + ((r() * COLS) | 0);
         if (type[i] === 0) {
@@ -1480,8 +1582,8 @@ export default {
         put("fl", nFactLab, tx.factLabel);
         if (put("fv", nFact, tx.factValue)) {
           base.classList.toggle("nofact", tx.factValue === "");
-          nFact.style.fontSize = "48px";
-          if (nFact.scrollHeight > 2 * 48 * 1.1 + 4) nFact.style.fontSize = "40px";
+          nFact.style.fontSize = "46px";
+          if (nFact.scrollHeight > 2 * 46 * 1.2 + 4) nFact.style.fontSize = "40px";
         }
       },
     };

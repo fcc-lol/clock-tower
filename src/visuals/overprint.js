@@ -1,30 +1,38 @@
 // Overprint: a three-ink risograph poster that is being printed all day.
 //
-//   Ink A is the sky. Its colour is the colour measured from the tower, used as
-//   a flat spot ink; the hour stands on it. Cloud breaks the flat ink into a
-//   coarse halftone of soft shapes that drift with the wind.
+//   Ink A is the sky: the colour measured from the tower, used as a flat spot
+//   ink; the hour stands on it. Cloud breaks the flat ink into a coarse
+//   halftone of soft shapes that drift with the wind; bad air turns it dusty.
 //   Ink B is the temperature (violet, blue, teal, yellow, orange, fluorescent
 //   pink as it warms, always held 60 degrees of hue away from ink A); the
 //   minutes and the temperature stand on it. It carries the weather as print
-//   texture: flat when dry, a slanted line screen in rain (slant from the wind,
-//   weight from the rate), dropout specks in snow, fat horizontal rules in fog,
-//   a torn edge in a storm.
-//   Ink C is the black plate: the numerals and every line of text. It is
-//   pulled again each minute (a drum pass, then a wet sheen that dries).
+//   texture: three bold bars thrown across the sky on a clear day, a slanted
+//   line screen in rain (slant from the wind, weight from the rate), specks in
+//   snow, fat horizontal rules thickening down the sheet in fog, a torn edge in
+//   a storm, a slow shimmer in a heat wave.
+//   Ink C is the black plate: the numerals and every line of text. Each minute
+//   a drum pulls it again, wiping the new time down the sheet.
 //
-// Wind knocks the two colour plates out of register against the black (never
-// more than 6 px), humidity swells the dots and softens the edges, daylight
-// chooses the stock: white paper with inks that multiply by day, black paper
-// with inks that lighten at night. Where the two fields cross you see the
-// third colour, the overprint. Each showing opens with three rolling passes
-// over a pale proof: sky, temperature, black.
+// Where A and B cross (the band between the two lines of numerals, the bars,
+// the rain lines) the third colour appears: the overprint. Wind knocks the two
+// colour plates out of register against the black (never more than 6 px, a
+// gust jolts one), humidity swells the dots and softens the edges. Daylight
+// chooses the stock: warm white paper with inks that multiply by day, black
+// paper with deep, saturated inks that lighten at night and type in a dim
+// cream; the type switches ink in one step where the ground is mid-grey.
 //
-// The plates are one fragment shader (cheap: the page does almost no work per
-// frame); all type is DOM so it is drawn at the panel's full resolution.
+// The display cuts to a piece on the quarter hour. At that moment the press
+// runs the sheet again: three rollers pass down it (sky, temperature, black),
+// laying fresh, glossy ink in a new registration over the last pull, which has
+// dried a shade lighter. The poster is complete at every moment.
+//
+// The colour plates are one cheap fragment shader drawn below full resolution
+// and only when something on them has moved; all type is DOM, so it is drawn at
+// the panel's full resolution.
 
 import {
   W, H, clamp, lerp, remap, smoothstep, lerpAngle, ease, rng, createNoise,
-  mix, oklch, toOklch, toOklab, luminance, parse, toHex,
+  mix, oklch, toOklch, toOklab, parse, toHex,
   el, addStyle, shader, grain, fitText, wrapText,
 } from "../lib/kit.js";
 
@@ -38,7 +46,7 @@ const SLOT = 15 * 60 * 1000;  // the display cuts to a new piece on every quarte
 const FS = 604;               // numerals: Anton digits are 0.875 em tall, so 528 px
 const HY = 210, MY = 810;     // tops of the hour and minute digits
 const DX = 30;                // where the numerals start: left of the margin, so the plate edge cuts them
-const CX = 676, CW = 314;     // the column beside the numerals (AM/PM, temperature)
+const CX = 694, CW = 282;     // the column beside the numerals (AM/PM, temperature)
 const SIN = Math.sin((TILT * Math.PI) / 180), COS = Math.cos((TILT * Math.PI) / 180);
 const MAXREG = 6;             // px: the most a plate may sit out of register
 
@@ -83,6 +91,7 @@ const vec2 A1 = vec2(${glf(A1[0])}, ${glf(A1[1])});
 const vec2 B0 = vec2(${glf(B0[0])}, ${glf(B0[1])});
 const vec2 B1 = vec2(${glf(B1[0])}, ${glf(B1[1])});
 const float MG = ${glf(M)};
+const vec2 C0 = vec2(${glf(CX - 16)}, ${glf(MY - 24)}), C1 = vec2(${glf(CX + CW + 16)}, ${glf(MY + 470)});   // the temperature column
 
 float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 float vn(vec2 p) {
@@ -145,8 +154,11 @@ void main() {
   float cropB = smoothstep(MG - 0.7, MG + 0.7, pbx) * smoothstep(${glf(W)} - MG + 0.7, ${glf(W)} - MG - 0.7, pbx);
   float wobB = (vn(qb * 0.05 + seed + 31.7) - 0.5) * (1.6 + 3.4 * gain);
   float storm = u_mo.z;
-  float tearT = storm * ((fbm(vec2(qb.x * 0.011, seed + 3.7)) - 0.5) * 30.0 + (vn(vec2(qb.x * 0.11, seed)) - 0.5) * 9.0);
-  float tearB = storm * ((fbm(vec2(qb.x * 0.008, seed + 9.2)) - 0.5) * 70.0 + (vn(vec2(qb.x * 0.09, seed + 5.0)) - 0.5) * 12.0);
+  float tearT = 0.0, tearB = 0.0;
+  if (storm > 0.002) {
+    tearT = storm * ((fbm(vec2(qb.x * 0.011, seed + 3.7)) - 0.5) * 30.0 + (vn(vec2(qb.x * 0.11, seed)) - 0.5) * 9.0);
+    tearB = storm * ((fbm(vec2(qb.x * 0.008, seed + 9.2)) - 0.5) * 70.0 + (vn(vec2(qb.x * 0.09, seed + 5.0)) - 0.5) * 12.0);
+  }
   float sdB = max(max(B0.x - qb.x, qb.x - B1.x), max(B0.y - qb.y + tearT, qb.y - B1.y + tearB));
   float inB = smoothstep(soft, -soft, sdB + wobB);
   float inAb = smoothstep(soft, -soft, box(qb, A0, A1));   // the sky field as plate B sees it
@@ -197,6 +209,8 @@ void main() {
     vec2 fall = vec2(u_mo.y * u_wx.y, u_mo.y);
     drop = max(specks(q - fall, 27.0, snow * 0.62, seed + 1.0), specks(q - fall * 0.62 + 90.0, 17.0, snow * 0.4, seed + 5.0));
     tout = max(tout, specks(qb - fall * 0.8 + 40.0, 22.0, snow * 0.55, seed + 9.0));
+    // at night no flake falls behind the temperature column, so nothing sits behind those letters
+    drop *= mix(1.0, smoothstep(-6.0, 6.0, box(q, C0, C1)), u_c.w);
   }
 
   float cb = (inB * tin + (1.0 - inB) * inAb * tout) * cropB;
@@ -207,14 +221,17 @@ void main() {
     sp = vec2(sp.x * u_srot.y + sp.y * u_srot.x, -sp.x * u_srot.x + sp.y * u_srot.y);
     vec2 dd = abs(sp) - u_stamp.zw + 14.0;
     float sd = length(max(dd, 0.0)) + min(max(dd.x, dd.y), 0.0) - 14.0;
-    float ring = max(smoothstep(4.6, 3.4, abs(sd + 4.5)), smoothstep(1.9, 0.9, abs(sd + 16.0)));
-    float press = 0.5 + 0.5 * smoothstep(0.2, 0.62, fbm(sp * 0.012 + seed));
-    float bite = smoothstep(0.1, 0.3, vn(sp * 0.33 + seed * 3.0));
-    cb = max(cb, ring * press * bite);
+    if (abs(sd + 10.0) < 12.0) {   // only near the ring
+      float ring = max(smoothstep(4.6, 3.4, abs(sd + 4.5)), smoothstep(1.9, 0.9, abs(sd + 16.0)));
+      float press = 0.5 + 0.5 * smoothstep(0.2, 0.62, fbm(sp * 0.012 + seed));
+      float bite = smoothstep(0.1, 0.3, vn(sp * 0.33 + seed * 3.0));
+      cb = max(cb, ring * press * bite);
+    }
   }
 
   // ---- ink on paper: mottle, pinholes, roller banding (fresh with each pull) --
-  float pin = smoothstep(0.83, 0.93, vn(p * 1.9 + seed));
+  float grit = vn(p * 1.9 + seed);
+  float pin = smoothstep(0.83, 0.93, grit);
   float mot = vn(p * 0.47 + 17.0);
   float sA = seed + 2.0 + 5.3 * newA, sB = seed + 8.0 + 5.3 * newB;
   float bandA = 1.0 - 0.1 * vn(vec2(sA, (p.y - offA.y) * 0.011)) - 0.05 * mot;
@@ -224,13 +241,15 @@ void main() {
 
   vec3 col = mix(mix(u_p, u_a, ca), mix(u_b, u_ab, ca), cb);
   // fresh ink is glossy for a few seconds
-  float wet = max(u_roll.z * ca * newA, u_roll.w * cb * newB);
-  col *= 1.0 - 0.12 * wet;
-  col += 0.07 * wet * smoothstep(0.5, 0.9, vn(vec2(p.x * 0.004 + p.y * 0.002, p.y * 0.05)));
+  if (u_roll.z + u_roll.w > 0.003) {
+    float wet = max(u_roll.z * ca * newA, u_roll.w * cb * newB);
+    col *= 1.0 - 0.12 * wet;
+    col += 0.07 * wet * smoothstep(0.5, 0.9, vn(vec2(p.x * 0.004 + p.y * 0.002, p.y * 0.05)));
+  }
   // paper tooth, and a dither so dark flats never band
   // on black stock a dropout would read as a dark speck: there the snow is printed in ink C
   col = mix(col, u_c.rgb, drop * u_c.w * 0.85 * max(inA, inB * cropB));
-  col *= 0.985 + 0.03 * vn(p * 1.3 + 5.0);
+  col *= 0.985 + 0.03 * grit;
   col += (h21(p + fract(u_time)) - 0.5) / 255.0;
   gl_FragColor = vec4(col, 1.0);
 }
@@ -250,16 +269,16 @@ const CSS = `
 .op .fr { color: var(--fr); will-change: transform; }
 .op .ampm { position: absolute; left: ${CX}px; top: ${HY - 0.0485 * 206 - 0.016 * 206}px; font-size: 206px; line-height: 1em; white-space: nowrap; }
 .op .temp { position: absolute; left: ${CX}px; top: ${MY - 0.0485 * 206}px; font-size: 206px; line-height: 1em; white-space: nowrap; }
-.op .cond { position: absolute; left: ${CX + 4}px; top: ${MY + 0.875 * 206 + 30}px; width: ${CW}px; font-size: 60px; line-height: 1.04em; letter-spacing: 0.012em; }
+.op .cond { position: absolute; left: ${CX + 4}px; top: ${MY + 0.875 * 206 + 30}px; width: ${CW}px; font-size: 60px; line-height: 1.18em; letter-spacing: 0.012em; }
 .op .ft { position: absolute; left: 72px; right: 72px; bottom: 72px; }
-.op .cr { display: flex; justify-content: space-between; align-items: baseline; white-space: nowrap; line-height: 58px; height: 58px; }
+.op .cr { display: flex; justify-content: space-between; gap: 40px; align-items: baseline; white-space: nowrap; line-height: 58px; height: 58px; }
 .op .cr + .cr { margin-top: 6px; }
 .op .cr span { display: inline-block; }
 .op .cr i { font-style: normal; font-weight: 500; font-size: 25px; letter-spacing: 0.13em; margin-right: 16px; }
 .op .cr b { font-size: 42px; letter-spacing: 0.01em; }
-.op .stamp { position: relative; margin: 36px 12px 12px; padding: 24px 38px 27px; transform-origin: 50% 50%; }
+.op .stamp { position: relative; margin: 48px 12px 12px; padding: 36px 46px 30px; transform-origin: 50% 50%; }
 .op .fl { font-weight: 500; font-size: 25px; letter-spacing: 0.13em; line-height: 30px; }
-.op .fv { margin-top: 10px; text-transform: none; font-size: 40px; line-height: 1.16em; letter-spacing: -0.005em; }
+.op .fv { margin-top: 10px; text-transform: none; font-size: 40px; line-height: 1.22em; letter-spacing: -0.005em; }
 .op .bar { position: absolute; left: 0; top: 0; width: ${W}px; height: 150px; will-change: transform; pointer-events: none;
   background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.05) 18%, rgba(0,0,0,0.16) 40%, rgba(255,255,255,0.12) 47%, rgba(255,255,255,0.34) 52%, rgba(255,255,255,0.1) 58%, rgba(0,0,0,0.22) 70%, rgba(0,0,0,0.5) 75.5%, rgba(255,255,255,0.18) 77%, rgba(0,0,0,0.08) 80%, rgba(0,0,0,0) 100%); }
 .op .fb { position: absolute; }
@@ -352,7 +371,7 @@ export default {
       return true;
     };
     const measure = document.createElement("canvas").getContext("2d");
-    const FACT_W = W - 144 - 24 - 76; // the stamp's inner width
+    const FACT_W = W - 144 - 24 - 92; // the stamp's inner width
     // the largest size (76 px down to 36) at which the fact fits on two lines
     const factSize = (text) => {
       // one line may be as large as 76 px; two lines at most 50, so the billing
@@ -462,8 +481,8 @@ export default {
       // Opposite hues cancel to a drab olive-brown; there the overprint leans
       // toward a deep version of ink B (blue over orange prints as terracotta).
       const ab = toOklch(mul(PAd, Bd));
-      const lean = smoothstep(0.1, 0.035, ab.c) * 0.75;
-      const PABd = oklch(ab.l + 0.035, Math.min(0.17, ab.c * 1.6 + 0.04 + lean * 0.03), lerpAngle(ab.h, hueB, lean));
+      const lean = smoothstep(148, 160, Math.abs(((hueB - hA + 540) % 360) - 180)) * 0.85;
+      const PABd = oklch(ab.l + 0.035, Math.min(0.17, ab.c * 1.6 + 0.04 + lean * 0.03), lerpAngle(ab.h, hueB - 14, lean));
       const PAn = scr(PAPER_NIGHT, An), PBn = scr(PAPER_NIGHT, Bn), PABn = scr(PAn, Bn);
       const p = cross(PAPER_NIGHT, PAPER_DAY, g);
       if (p !== pal.p || g !== pal.g) dirty = true;

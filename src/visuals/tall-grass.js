@@ -102,17 +102,17 @@ export default {
       .tg { position: absolute; inset: 0; overflow: hidden; font-family: "Courier Prime", "Courier New", monospace; color: var(--ink); background: #1d3a22; }
       .tg-txt { position: absolute; inset: 0; }
       .tg-m { position: absolute; left: 0; top: 0; transform-origin: 50% 100%; }
-      .tg-plq { box-sizing: border-box; padding: 16px 26px 24px; white-space: nowrap; }
-      .tg-lab { font-size: 28px; line-height: 1.2; color: var(--ink2); }
-      .tg-val { font-weight: 700; font-size: 48px; line-height: 1.1; }
-      .tg-temp { font-weight: 700; font-size: 160px; line-height: .82; letter-spacing: -8px; margin: 12px 0 0 -6px; }
-      .tg-cond { font-size: 52px; line-height: 1.06; white-space: normal; max-width: 430px; margin-top: 4px; }
-      .tg-d1 { font-weight: 700; font-size: 52px; line-height: 1.12; }
-      .tg-d2 { font-size: 52px; line-height: 1.12; }
-      .tg-fact .tg-plq { width: 952px; padding: 16px 28px 26px; }
-      .tg-fv { font-size: 40px; line-height: 1.16; white-space: normal; margin-top: 4px; }
+      .tg-plq { box-sizing: border-box; padding: 14px 26px 20px; white-space: nowrap; }
+      .tg-lab { font-size: 28px; line-height: 1.15; color: var(--ink2); }
+      .tg-val { font-weight: 700; font-size: 48px; line-height: 1.1; margin-top: 8px; }
+      .tg-temp { font-weight: 700; font-size: 160px; line-height: .82; letter-spacing: -8px; margin: 14px 0 0 -6px; }
+      .tg-cond { font-size: 52px; line-height: 1.4; white-space: normal; max-width: 430px; margin-top: 12px; }
+      .tg-d1 { font-weight: 700; font-size: 52px; line-height: 1.4; }
+      .tg-d2 { font-size: 52px; line-height: 1.4; }
+      .tg-fact .tg-plq { width: 952px; padding: 14px 28px 22px; }
+      .tg-fv { font-size: 40px; line-height: 1.28; white-space: normal; margin-top: 8px; }
       .tg-fv.small { font-size: 36px; }
-      .tg-ap .tg-plq { padding: 12px 18px 10px; }
+      .tg-ap .tg-plq { padding: 12px 18px 12px; }
       .tg-apv { font-weight: 700; font-size: 52px; line-height: 1; }
     `);
 
@@ -128,15 +128,16 @@ export default {
     // ---------------------------------------------------------------------
     // The ground cache: colour, a still understory and dither, repainted only
     // when the light or the weather moves. The understory is neutral (black
-    // marks, pale marks) and painted once, at half resolution: it is soft.
+    // marks, pale marks) and painted once. Both are half resolution: soft.
     // ---------------------------------------------------------------------
-    const groundC = offscreen(W, H);
+    const groundC = offscreen(W / 2, H / 2); // soft, so half resolution is plenty
     const gctx = groundC.getContext("2d", { alpha: false });
+    gctx.scale(0.5, 0.5);
     const texDark = offscreen(W / 2, H / 2);
     const texLight = offscreen(W / 2, H / 2);
     const paintUnder = (ctx, count, dark) => {
       ctx.scale(0.5, 0.5);
-      ctx.lineCap = "round";
+      ctx.lineCap = "butt";
       if (dark) {
         for (let i = 0; i < 40; i++) {
           const x = R.range(-100, W + 100), y = R.range(0, H), rad = R.range(120, 330);
@@ -151,7 +152,7 @@ export default {
         for (let a = 0; a < 4; a++) {
           const y0 = (band / 5) * (H + 40), y1 = ((band + 1) / 5) * (H + 40);
           const depth = (band + 0.5) / 5;
-          ctx.lineWidth = lerp(2.4, 5.4, depth) * (dark ? 1.15 : 0.9);
+          ctx.lineWidth = lerp(3, 6.4, depth) * (dark ? 1.2 : 0.9);
           ctx.strokeStyle = dark ? `rgba(0,10,4,${0.12 + a * 0.07})` : `rgba(255,255,226,${0.1 + a * 0.07})`;
           ctx.beginPath();
           const n = Math.round((count / 20) * lerp(1.5, 0.6, depth));
@@ -160,14 +161,14 @@ export default {
             const len = lerp(18, 52, depth) * R.range(0.6, 1.25);
             const lean = R.range(-0.5, 0.5);
             ctx.moveTo(x, y);
-            ctx.quadraticCurveTo(x + lean * len * 0.25, y - len * 0.6, x + lean * len, y - len * 0.86);
+            ctx.lineTo(x + lean * len, y - len * 0.86);
           }
           ctx.stroke();
         }
       }
     };
-    paintUnder(texDark.getContext("2d"), 7000, true);
-    paintUnder(texLight.getContext("2d"), 5000, false);
+    paintUnder(texDark.getContext("2d"), 3000, true);
+    paintUnder(texLight.getContext("2d"), 2000, false);
     // dither: smooth dark gradients band on a big LCD
     const ditherC = offscreen(128, 128);
     {
@@ -224,7 +225,7 @@ export default {
     mTemp.rot *= 0.5;
     mAp.rot = 2.4 * Math.sign(mAp.rot);
     const allMarkers = [mTemp, mDate, mSun, mMoon, mAqi, mUv, mFact, mAp];
-    const stagger = [R.range(-14, 14), R.range(-14, 14), R.range(-14, 14), R.range(-10, 10)];
+    const stagger = [R.range(-8, 8), R.range(-10, 4), R.range(-10, 4), R.range(-10, 4)];
 
     const shown = {};
     const put = (key, node, value) => {
@@ -247,10 +248,10 @@ export default {
     let pair = 0;
     for (let dgt = 0; dgt < 10; dgt++) pair = Math.max(pair, probe.measureText(`${dgt}${dgt}`).width / 100);
     const capH = (probe.measureText("0").actualBoundingBoxAscent || 70.5) / 100;
-    const FS = Math.min(600, 742 / pair);
+    const FS = Math.min(540, 664 / pair);
     const digitH = capH * FS;
-    const TIME_TOP = 118;
-    const ROW_GAP = 70;
+    const TIME_TOP = 112;
+    const ROW_GAP = 62;
     const HOURS_BASE = TIME_TOP + digitH;
     const MINS_BASE = HOURS_BASE + ROW_GAP + digitH;
     const STALK = 38;
@@ -291,7 +292,7 @@ export default {
       PSL[i] = STALK * R.range(0.82, 1.18);
       PPH[i] = R.range(0, 6.283);
       PFQ[i] = R.range(0.7, 1.5);
-      PTH[i] = R.range(0.3, 0.47); // the daylight at which this head turns luminous
+      PTH[i] = R.range(0.148, 0.172); // how dark the field must be before this head turns luminous
       PDL[i] = R();
       PSD[i] = R.sign() * R.range(0.6, 1.2);
       PVAR[i] = R.chance(0.5) ? 0 : R.chance(0.64) ? 1 : 2;
@@ -332,6 +333,24 @@ export default {
     const FB = new Uint8Array(NF);
     const order = new Uint16Array(NF);
     const cnt = new Int32Array(NBUCKET), start = new Int32Array(NBUCKET);
+
+    // Fireflies, for warm dry summer nights.
+    const NFLY = 34;
+    const YX = new Float32Array(NFLY), YY = new Float32Array(NFLY), YP = new Float32Array(NFLY), YF = new Float32Array(NFLY), YR = new Float32Array(NFLY);
+    for (let i = 0; i < NFLY; i++) {
+      YX[i] = R.range(60, W - 60); YY[i] = R.range(160, H - 120); YP[i] = R.range(0, 6.283); YF[i] = R.range(0.7, 1.3); YR[i] = R.range(0.7, 1.2);
+    }
+    const flyC = offscreen(48, 48);
+    {
+      const fc = flyC.getContext("2d");
+      const g = fc.createRadialGradient(24, 24, 0, 24, 24, 24);
+      g.addColorStop(0, "rgba(250,255,190,1)");
+      g.addColorStop(0.12, "rgba(240,255,140,0.95)");
+      g.addColorStop(0.35, "rgba(200,240,90,0.28)");
+      g.addColorStop(1, "rgba(160,220,60,0)");
+      fc.fillStyle = g;
+      fc.fillRect(0, 0, 48, 48);
+    }
 
     // Rain and snow.
     const NQ = 340;
@@ -404,15 +423,18 @@ export default {
         c.fillStyle = wood.face;
         c.fill();
         c.clip();
-        c.lineWidth = 1.4;
-        c.strokeStyle = `rgba(60,25,0,${wood.grainD})`;
-        c.beginPath();
-        for (let yy = y0 + G.range(3, 9); yy < 0; yy += G.range(6, 14)) {
-          const a = G.range(-1.5, 1.5), b = G.range(-2, 2);
-          c.moveTo(x0, yy);
-          c.bezierCurveTo(x0 + w * 0.33, yy + a, x0 + w * 0.66, yy + b, x0 + w, yy + a * 0.5);
+        for (let pass = 0; pass < 2; pass++) {
+          c.lineWidth = pass ? 2.2 : 1.1;
+          c.strokeStyle = `rgba(60,25,0,${wood.grainD * (pass ? 0.55 : 1)})`;
+          c.beginPath();
+          for (let yy = y0 + G.range(3, 12); yy < 0; yy += G.range(7, 19)) {
+            const a = G.range(-3, 3), b = G.range(-3, 3);
+            const xa = x0 + G.range(-40, w * 0.3), xb = xa + G.range(w * 0.4, w * 1.1);
+            c.moveTo(xa, yy);
+            c.bezierCurveTo(xa + (xb - xa) * 0.33, yy + a, xa + (xb - xa) * 0.66, yy + b, xb, yy + a * 0.4);
+          }
+          c.stroke();
         }
-        c.stroke();
         c.strokeStyle = `rgba(255,250,235,${wood.grainL})`;
         c.beginPath();
         for (let yy = y0 + G.range(5, 12); yy < 0; yy += G.range(10, 22)) {
@@ -438,7 +460,12 @@ export default {
           c.globalAlpha = wood.cap;
           c.fillStyle = wood.snow;
           c.beginPath();
-          roundRect(c, x0 - 4, y0 - 11, w + 8, 19, 9);
+          roundRect(c, x0 - 3, y0 - 7, w + 6, 13, 6);
+          for (let xx = x0 + 6; xx < x0 + w - 6; xx += G.range(22, 46)) {
+            const rw = G.range(16, 30), rh = G.range(5, 10);
+            c.moveTo(xx + rw, y0 - 3);
+            c.ellipse(xx, y0 - 3, rw, rh, 0, 0, 6.2832);
+          }
           c.fill();
           c.fillStyle = "rgba(80,110,150,0.22)";
           c.fillRect(x0 + 4, y0 + 3, w - 8, 4);
@@ -448,6 +475,7 @@ export default {
       c.setTransform(1, 0, 0, 1, 0, 0);
     };
 
+    let laidFact = null;
     const layout = () => {
       const hasFact = shown.fv !== "";
       mFact.off = !hasFact;
@@ -457,16 +485,25 @@ export default {
         n.factV.classList.remove("small");
         if (n.factV.offsetHeight > 100) n.factV.classList.add("small");
       }
+      // the condition wraps rather than crowd the moon's marker
+      const moonW = mMoon.plq.offsetWidth;
+      n.cond.style.maxWidth = `${Math.round(clamp(952 - 60 - moonW - 52, 250, 430))}px`;
+      // when only a value changed and every board kept its size, nothing moves
+      let same = hasFact === laidFact;
       for (const m of allMarkers) {
-        m.w = m.plq.offsetWidth;
-        m.h = m.plq.offsetHeight;
+        const w = m.plq.offsetWidth, h = m.plq.offsetHeight;
+        if (w !== m.w || h !== m.h) same = false;
+        m.w = w;
+        m.h = h;
       }
+      if (same) return;
+      laidFact = hasFact;
       const L = 64, RT = 1016;
-      let y = 1856;
+      let y = 1862;
       if (hasFact) {
         place(mFact, L, y - mFact.h, 90);
-        y = mFact.y - 58;
-      } else y = 1790;
+        y = mFact.y - 60;
+      } else y = 1800;
       // the middle row: sun, air, UV
       const row = [mSun, mAqi, mUv];
       let total = 0;
@@ -479,11 +516,11 @@ export default {
         rowTop = Math.min(rowTop, top);
         x += m.w + gap;
       });
-      y = rowTop - 52;
+      y = rowTop - 62;
       // the top row: temperature on the left, the date over the moon on the right
       place(mTemp, L, y - mTemp.h, 60);
       place(mMoon, RT - mMoon.w, y - mMoon.h + stagger[0] * 0.5, 64);
-      const dBase = mMoon.y - 30;
+      const dBase = mMoon.y - 64;
       place(mDate, RT - mDate.w + Math.round(stagger[3]), dBase - mDate.h, mMoon.y + mMoon.h + 40 - dBase);
       place(mAp, RT - mAp.w, MINS_BASE - 50 - mAp.h, 46);
       classify();
@@ -494,7 +531,7 @@ export default {
     // Colour. Everything is recomputed only when the light or weather moves.
     // ---------------------------------------------------------------------
     const fieldCol = new Array(NBUCKET).fill("#000");
-    const pal = { head: new Array(7).fill("#000"), stalk: "#000", centre: "#000", accent: "#000", bead: "#000", rain: "#000", flake: "#000", flake2: "#000", fly: "#000", hl: 4, hw: 13, groundLum: 0 };
+    const pal = { head: new Array(7).fill("#000"), stalk: "#000", centre: "#000", accent: "#000", bead: "#000", rain: "#000", flake: "#000", flake2: "#000", hl: 4, hw: 13, groundLum: 0, bgLum: 0 };
     let season = null, seasonDay = -1;
     let sigA = -1, sigB = -1, sigSky = "";
 
@@ -526,7 +563,10 @@ export default {
         let night = mix(mix("#0d1b15", "#3d5f50", k / (NT - 1)), adjust(season.tones[k], { l: 0.18 + 0.06 * k, c: (v) => v * 0.4 }), 0.4);
         if (moon > 0.01) night = mix(night, "#5a7890", moon * 0.1 * k);
         if (snow > 0.01) night = mix(night, mix("#162030", "#4e6380", k / (NT - 1)), snow * 0.7);
-        base.push(lit(day, night, 0.05 + 0.17 * twilight));
+        let c = lit(day, night, 0.05 + 0.17 * twilight);
+        // wet blades glisten: the pale side of a bent blade catches the sky
+        if (wet > 0.01 && k >= 2) c = mix(c, mix(sky, "#d6e0e6", 0.35 + 0.3 * dk), wet * 0.16 * (k - 1));
+        base.push(c);
       }
       const hz = (b) => clamp(haze * Math.pow(1 - b / (NB - 1), 1.7) + haze * 0.05);
       for (let b = 0; b < NB; b++) for (let k = 0; k < NT; k++) fieldCol[b * NT + k] = mix(base[k], hazeCol, hz(b));
@@ -543,6 +583,10 @@ export default {
       const g0 = mix(ground, hazeCol, hz(0)), g1 = mix(ground, hazeCol, hz(1.6)), g2 = mix(ground, hazeCol, hz(3.2));
       const g3 = adjust(ground, { l: (v) => v * 0.94 });
       pal.groundLum = luminance(g2);
+      // how bright the field behind the flowers is: the flowers switch from
+      // dark to luminous where the two read equally well against it
+      pal.bgLum = 0.5 * pal.groundLum + 0.5 * luminance(fieldCol[2 * NT + 2]);
+      const lumi = smoothstep(0.2, 0.12, pal.bgLum);
       const gg = gctx.createLinearGradient(0, 0, 0, H);
       gg.addColorStop(0, g0); gg.addColorStop(0.28, g1); gg.addColorStop(0.58, g2); gg.addColorStop(1, g3);
       gctx.globalAlpha = 1;
@@ -564,16 +608,15 @@ export default {
       pal.head[0] = dayHead(season.head);
       pal.head[1] = dayHead(season.head2);
       pal.head[2] = dayHead(mix(season.head2, season.pale, 0.22));
-      const headN = mix(adjust(season.night, { l: (v) => v * 0.94 }), season.pale, smoothstep(0.1, 0.45, d) * 0.8);
+      const headN = mix(adjust(season.night, { l: (v) => v * 0.94 }), season.pale, smoothstep(0.1, 0.45, d) * 0.85);
       pal.head[3] = headN;
       pal.head[4] = mix(headN, "#0a0612", 0.2);
       pal.head[5] = mix(mix(season.pale, "#f4ff8a", season.summer), "#ffffff", season.winter * 0.6);
       pal.stalk = mix(lit(season.stalk, mix("#07100c", season.night, 0.2), 0.03), hazeCol, headHaze);
-      pal.head[6] = mix(pal.stalk, d < 0.38 ? headN : pal.head[0], 0.5);
-      pal.centre = mix(mix(season.night, "#05060a", 0.62), mix(season.centre, "#060606", dusk * 0.3), smoothstep(0.3, 0.47, d));
+      pal.head[6] = mix(pal.stalk, lumi > 0.5 ? headN : pal.head[0], 0.5);
+      pal.centre = mix(mix(season.centre, "#060606", dusk * 0.3), mix(season.night, "#05060a", 0.62), lumi);
       pal.hl = season.hl;
       pal.hw = season.hw;
-      pal.fly = "#f6ff9a";
 
       // tips: snow, frost or dust; beads of rain or dew
       const snowTip = lit("#ffffff", "#9fb3c8", 0.04);
@@ -595,8 +638,8 @@ export default {
       wood.face = mix(mix(woodNight, woodDay, wk), sky, 0.03);
       wood.stake = mix(mix("#1c140e", "#3a3a45", 0.3 * snow), mix("#b3906a", "#7d603f", 0.4 * wet), wk);
       wood.edge = rgba(mix("#5a4634", "#fff3d6", wk), 0.7);
-      wood.grainD = lerp(0.35, 0.09, wk);
-      wood.grainL = lerp(0.035, 0.07, wk);
+      wood.grainD = lerp(0.2, 0.1, wk);
+      wood.grainL = lerp(0.03, 0.08, wk);
       wood.snow = lit("#fbfdff", "#8496ae", 0.04);
       wood.cap = Math.round(smoothstep(0.15, 0.6, snow) * 20) / 20;
       wood.shadow = mix("#04180e", "#2c4468", snow);
@@ -617,6 +660,14 @@ export default {
     let fineP = R.range(0, 5000);
     let shadeP = R.range(0, 3000);
     let timeKey = "";
+    let g0 = 0, g1 = 1, gSharp = 2, gDrift = 0;
+    const LAMBDA = 6.2832 / 520; // one crest every 520 px of ground
+    const gustAt = (u, v) => {
+      const warp = 0.6 * Math.sin(v / 330 + gDrift * 9) + 0.4 * Math.sin(v / 170 - u / 640 + gDrift * 13);
+      const crest = 0.5 + 0.5 * Math.cos((u - phase) * LAMBDA + warp * 3);
+      const patch = smoothstep(g0, g1, noise.n2((u - phase * 0.6) / 1100, v / 640 - gDrift));
+      return Math.pow(crest, gSharp) * (0.25 + 0.75 * patch);
+    };
     const RN = rng(seed + 77); // raindrops on blades
 
     const frame = (s) => {
@@ -708,9 +759,13 @@ export default {
       const wobAmp = (0.035 + 0.06 * windN) * stiff + 0.035 * cond.hot + 0.012 * cold;
       const wobRate = (1 - 0.5 * cond.hot) * (1 + 2.2 * cold);
       const ripAmp = 0.05 + 0.1 * windN;
-      // the silver bands: sharper and brighter as the wind and gusts rise
-      const g0 = lerp(-0.25, 0.05, windN), g1 = lerp(0.75, 0.5, windN);
-      const toneAmp = (0.42 + 0.5 * gustN) * (1 - 0.35 * cloud);
+      // the silver bands: wave trains travelling downwind, their crests bent
+      // by slow noise and stronger in patches; sharper as the wind rises
+      g0 = lerp(-0.45, -0.1, windN);
+      g1 = lerp(0.55, 0.4, windN);
+      gSharp = lerp(1.3, 2.3, windN);
+      gDrift = t * 0.016;
+      const toneAmp = (0.5 + 0.45 * gustN) * (1 - 0.3 * cloud);
       const sag = 0.3 * cond.wet + 0.06 * cond.dew + 0.26 * cond.snow;
       const bury = cond.snow * 0.5;
       const shorten = (1 - 0.34 * cond.snow) * (1 - 0.1 * cond.wet);
@@ -740,10 +795,9 @@ export default {
         const x = FX[i], y = FY[i];
         const gy = y / KY;
         const u = x * wdx + gy * wdy, v = gy * wdx - x * wdy;
-        const band = noise.n2((u - phase) / 340, v / 900 + drift);
+        const gst = gustAt(u, v);
         const rip = noise.n2((u - fineP) / 96, v / 210 - drift);
-        const gst = smoothstep(g0, g1, band);
-        let th = baseLean * (0.7 + 0.3 * gst) + gustAmp * gst + rip * ripAmp + wobAmp * Math.sin(t * FFQ[i] * wobRate + FPH[i]);
+        let th = baseLean * (0.65 + 0.35 * gst) + gustAmp * gst + rip * ripAmp + wobAmp * Math.sin(t * FFQ[i] * wobRate + FPH[i]);
         if (nod < 1.3) th += 0.6 * Math.exp(-3.4 * nod) * Math.cos(10 * nod);
         th *= FSTF[i];
         if (th > 1.42) th = 1.42; else if (th < -0.3) th = -0.3;
@@ -756,7 +810,7 @@ export default {
         CX[i] = x + (tipx - x) * 0.18;
         CY[i] = y - len * KZ * 0.56 * (0.35 + 0.65 * cs) + len * sag * 0.2;
         FL[i] = g;
-        let tone = (FTONE[i] + toneAmp * (gst - 0.4) + rip * 0.04) * NT;
+        let tone = (FTONE[i] + toneAmp * (gst - 0.28) + rip * 0.04) * NT;
         tone = tone < 0 ? 0 : tone >= NT ? NT - 1 : tone | 0;
         const bk = FFRONT[i] ? FRONT0 + tone : FBAND[i] * NT + tone;
         FB[i] = bk;
@@ -813,7 +867,10 @@ export default {
 
       // ----- the time: stiff stalks that lean a third as far, and their flowers -----
       const lean3 = 0.34;
-      const glowOn = (1 - smoothstep(0.05, 0.2, d)) * Math.max(season.summer * (w.temp > 58 ? 1 : 0) * (1 - cond.wet), season.winter * 0.8);
+      const bgLum = pal.bgLum;
+      const night = 1 - smoothstep(0.05, 0.2, d);
+      const glints = night * season.winter * (1 - cond.wet) * 0.22; // frost glints on winter heads
+      const flies = night * season.summer * smoothstep(58, 64, w.temp) * (1 - cond.wet) * (1 - smoothstep(10, 18, w.wind));
       ctx.strokeStyle = pal.stalk;
       ctx.lineWidth = 6;
       ctx.beginPath();
@@ -831,7 +888,7 @@ export default {
         const rx = PX[i], ry = PY[i] + sl * KZ;
         const gy = ry / KY;
         const u = rx * wdx + gy * wdy, v = gy * wdx - rx * wdy;
-        const gst = smoothstep(g0, g1, noise.n2((u - phase) / 340, v / 900 + drift));
+        const gst = gustAt(u, v);
         let th = (baseLean * (0.7 + 0.3 * gst) + gustAmp * gst) * lean3 + wobAmp * 0.5 * Math.sin(t * PFQ[i] * wobRate + PPH[i]);
         let side = wdx, fall = wdy * KY;
         if (g < 1) { th += (1 - e) * 1.25; side = wdx * e + PSD[i] * (1 - e); fall = fall * e + 0.25 * (1 - e); }
@@ -847,9 +904,9 @@ export default {
         let bk;
         if (g < 0.45) bk = 255;
         else if (g < 0.8) bk = 6;
-        else if (d < PTH[i]) {
+        else if (bgLum < PTH[i]) {
           bk = PVAR[i] === 1 ? 4 : 3;
-          if (glowOn > 0.05 && PDL[i] < 0.5 * glowOn) {
+          if (glints > 0.02 && PDL[i] < glints) {
             const pulse = Math.sin(t * PFQ[i] * 0.55 + PPH[i] * 3);
             if (pulse > 0.9) bk = 5;
           }
@@ -878,6 +935,22 @@ export default {
         ctx.rect(PHX[i] - 2, PHY[i] - 2, 4, 4);
       }
       ctx.fill();
+
+      // ----- fireflies drifting low over the meadow, each glowing now and then -----
+      if (flies > 0.05) {
+        const nf = Math.round(NFLY * flies);
+        for (let i = 0; i < nf; i++) {
+          const f2 = YF[i];
+          const glow = smoothstep(0.55, 1, Math.sin(t * 0.7 * f2 + YP[i] * 5));
+          if (glow < 0.02) continue;
+          const x = YX[i] + 70 * Math.sin(t * 0.09 * f2 + YP[i]) + 25 * Math.sin(t * 0.31 * f2 + YP[i] * 2);
+          const y = YY[i] + 45 * Math.sin(t * 0.07 * f2 + YP[i] * 3) + 18 * Math.sin(t * 0.27 * f2);
+          const r = 30 * YR[i] * (0.75 + 0.25 * glow);
+          ctx.globalAlpha = glow * 0.9;
+          ctx.drawImage(flyC, x - r, y - r, 2 * r, 2 * r);
+        }
+        ctx.globalAlpha = 1;
+      }
 
       // ----- broken cloud: shadows drifting downwind -----
       const so = d * smoothstep(0.15, 0.45, cloud) * (1 - smoothstep(0.72, 0.95, cloud));
