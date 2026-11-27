@@ -138,8 +138,19 @@ await mkdir(outDir, { recursive: true });
 const browser = await chromium.launch({ args: ["--enable-precise-memory-info", "--js-flags=--expose-gc"] });
 const report = { id, out: outDir, shots: [], perf: null, ok: true };
 
+// The dev server reloads open pages when files change. A shot in progress must
+// not be reloaded because someone saved another file, so the page gets an inert
+// stand-in for Vite's client.
+const INERT_CLIENT = `const hot = { accept() {}, acceptExports() {}, dispose() {}, prune() {}, on() {}, off() {}, send() {}, invalidate() {}, data: {} };
+export const createHotContext = () => hot;
+export const updateStyle = () => {};
+export const removeStyle = () => {};
+export const injectQuery = (url) => url;
+export class ErrorOverlay {}`;
+
 async function open(query, extra = "") {
   const context = await browser.newContext({ viewport: { width: 1080, height: 1920 }, deviceScaleFactor: 1, timezoneId: "America/New_York" });
+  await context.route("**/@vite/client", (route) => route.fulfill({ contentType: "application/javascript", body: INERT_CLIENT }));
   const page = await context.newPage();
   const logs = [];
   page.on("console", (m) => {
