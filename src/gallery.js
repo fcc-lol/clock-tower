@@ -85,6 +85,9 @@ window.addEventListener("message", (e) => {
   ensureHub();
   windows.add(e.source);
   e.source.postMessage({ type: "ct:data", data: hub.data }, location.origin);
+  // A tile has its screen to itself for as long as it exists (it is removed
+  // when scrolled away), so it may judge its own frame rate from the start.
+  e.source.postMessage({ type: "ct:shown" }, location.origin);
 });
 
 const tileScale = () => (window.matchMedia("(max-width: 640px)").matches ? 0.15 : 0.25);
