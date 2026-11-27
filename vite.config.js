@@ -19,6 +19,11 @@ export default defineConfig({
   define: { __BUILD_ID__: JSON.stringify(buildId) },
   build: {
     outDir: 'dist',
-    assetsDir: 'assets'
+    assetsDir: 'assets',
+    // Three pages: the display, the page that runs one visualization (the
+    // display shows it in an iframe), and the gallery of all of them.
+    rollupOptions: {
+      input: { main: 'index.html', visual: 'visual.html', gallery: 'gallery.html' },
+    },
   }
 });

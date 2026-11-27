@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Clock Tower</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        user-select: none;
+      }
+      /* One visualization draws in here: always 1080 x 1920, scaled to fit. */
+      #stage {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 1080px;
+        height: 1920px;
+        overflow: hidden;
+        background: #000;
+        transform-origin: center center;
+        contain: strict;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stage"></div>
+    <script type="module" src="/src/runner.js"></script>
+  </body>
+</html>

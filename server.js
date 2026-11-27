@@ -3,14 +3,10 @@ import Database from "better-sqlite3";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { readFile } from "fs/promises";
-import { createVisuals, createProvider, loadDotenv } from "./visuals.js";
-import { createLayoutDesigner } from "./layout.js";
-import { mountStyles } from "./styles.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
-await loadDotenv(join(__dirname, ".env"));
+const dist = join(__dirname, "dist");
 
 const app = express();
 const port = 3118;
@@ -19,46 +15,27 @@ const port = 3118;
 const db = new Database(join(__dirname, "data.sqlite"));
 db.pragma("journal_mode = WAL");
 
-// AI-generated backdrops (see visuals.js). Without Google credentials the
-// endpoint still answers, with enabled:false, and the display shows a plain
-// background.
-const provider = await createProvider();
-// Claude designs the readout layout for each image (needs ANTHROPIC_API_KEY).
-const designer = provider ? createLayoutDesigner() : null;
-const visuals = createVisuals({
-  dir: join(__dirname, "generated"),
-  provider,
-  designer,
-  style: process.env.IMAGE_STYLE || "random",
-});
-await visuals.load();
-visuals.start();
-console.log(
-  provider
-    ? `Backdrop generation on (${provider.name}/${provider.model}, style=${process.env.IMAGE_STYLE || "random"})`
-    : "Backdrop generation off",
-);
-
-// Id of the build in dist/ at startup. Reported to the display so it can
-// reload itself after a deploy (build + server restart).
-const buildId = await readFile(join(__dirname, "dist", "build-id.txt"), "utf8").catch(() => null);
-
 app.use(express.json());
 
-// Serve static files from dist, plus generated backdrops (cache forever: the
-// filename is the slot timestamp so a given URL never changes).
-app.use(express.static(join(__dirname, "dist")));
-app.use("/generated", express.static(join(__dirname, "generated"), { maxAge: "7d", immutable: true }));
+// The whole display is static: the page, the visualizations (which are code,
+// drawn in the browser) and their data, which the browser fetches itself.
+app.use(express.static(dist));
 
-// Polled by the display. Doubles as the "someone is watching" heartbeat.
-app.get("/api/visual", (req, res) => {
+// Id of the build in dist/. The display polls this and reloads itself when it
+// changes, so a kiosk picks up a new build with no keyboard. Read per request,
+// so `npm run build` alone is enough (no server restart needed).
+const build = async (req, res) => {
   res.set("Cache-Control", "no-store");
-  res.json({ build: buildId, ...visuals.snapshot() });
-});
+  const id = await readFile(join(dist, "build-id.txt"), "utf8").catch(() => null);
+  res.json({ build: id ? id.trim() : null });
+};
+app.get("/api/build", build);
+// Displays still running a build from when the backdrops were generated images
+// poll this path; answering it is what lets them notice the new build and reload.
+app.get("/api/visual", build);
 
-// /styles: every style's preview side by side, for iterating on the prompts.
-// Generating from the page only works on localhost, because each image is billed.
-mountStyles(app, { dir: join(__dirname, "generated", "preview"), provider, designer });
+// Every visualization side by side, for looking through the library.
+app.get("/gallery", (req, res) => res.sendFile(join(dist, "gallery.html")));
 
 // API endpoint for SQLite queries
 app.post("/api/query", (req, res) => {
@@ -79,7 +56,7 @@ app.post("/api/query", (req, res) => {
 
 // SPA fallback
 app.get("*", (req, res) => {
-  res.sendFile(join(__dirname, "dist", "index.html"));
+  res.sendFile(join(dist, "index.html"));
 });
 
 app.listen(port, () => {
