@@ -1238,41 +1238,52 @@ export default {
     };
 
     // ---------------------------------------------------------------- painting the sheet
-    const rebuildCuts = () => {
-      mctx.setTransform(1, 0, 0, 1, 0, 0);
+    // Rebuilds the silhouette and its soft shadow and glow, in the band (x0, y0)-(W, H) only when
+    // just the minutes changed (the band's edges lie where nothing changes; multiples of 8).
+    const rebuildCuts = (x0, y0) => {
+      const w = W - x0, h = H - y0;
+      mctx.save();
+      mctx.beginPath();
+      mctx.rect(x0, y0, w, h);
+      mctx.clip();
       mctx.globalCompositeOperation = "source-over";
-      mctx.clearRect(0, 0, W, H);
+      mctx.clearRect(x0, y0, w, h);
       mctx.fillStyle = "#fff";
-      mctx.fillRect(0, 0, W, H);
+      mctx.fillRect(x0, y0, w, h);
       mctx.globalCompositeOperation = "destination-out";
       mctx.fillStyle = "#000";
       drawGlyphs(mctx);
+      mctx.restore();
       // the shadow the sheet casts into its own cuts (from the upper left), and an even inner glow
-      q1x.clearRect(0, 0, W / 4, H / 4);
-      q1x.drawImage(mcan, 0, 0, W / 4, H / 4);
-      q2x.clearRect(0, 0, W / 8, H / 8);
-      q2x.drawImage(q1, 0, 0, W / 8, H / 8);
+      q1x.clearRect(x0 / 4, y0 / 4, w / 4, h / 4);
+      q1x.drawImage(mcan, x0, y0, w, h, x0 / 4, y0 / 4, w / 4, h / 4);
+      q2x.clearRect(x0 / 8, y0 / 8, w / 8, h / 8);
+      q2x.drawImage(q1, x0 / 4, y0 / 4, w / 4, h / 4, x0 / 8, y0 / 8, w / 8, h / 8);
       shctx.globalCompositeOperation = "source-over";
-      shctx.clearRect(0, 0, W / 2, H / 2);
-      shctx.drawImage(q2, 2, 3, W / 2, H / 2);
+      shctx.clearRect(x0 / 2, y0 / 2, w / 2, h / 2);
+      if (x0 === 0 && y0 === 0) shctx.drawImage(q2, 2, 3, W / 2, H / 2);
+      else shctx.drawImage(q2, x0 / 8, y0 / 8, w / 8, h / 8, x0 / 2 + 2, y0 / 2 + 3, w / 2, h / 2);
       shctx.globalCompositeOperation = "source-in";
       shctx.fillStyle = "rgb(6,8,34)";
-      shctx.fillRect(0, 0, W / 2, H / 2);
+      shctx.fillRect(x0 / 2, y0 / 2, w / 2, h / 2);
       glctx.globalCompositeOperation = "source-over";
-      glctx.clearRect(0, 0, W / 2, H / 2);
-      glctx.drawImage(q1, 0, 0, W / 2, H / 2);
+      glctx.clearRect(x0 / 2, y0 / 2, w / 2, h / 2);
+      glctx.drawImage(q1, x0 / 4, y0 / 4, w / 4, h / 4, x0 / 2, y0 / 2, w / 2, h / 2);
       glctx.globalCompositeOperation = "source-in";
       glctx.fillStyle = "rgb(255,198,124)";
-      glctx.fillRect(0, 0, W / 2, H / 2);
+      glctx.fillRect(x0 / 2, y0 / 2, w / 2, h / 2);
     };
+    const MIN_Y0 = Math.floor((R2 - 16) / 8) * 8; // the minutes' band starts in the strip, below AM/PM's shadow
+    const ONES_X0 = Math.ceil((W / 2 + GAP / 2 - 12) / 8) * 8; // and the ones digit's, between the two minutes
 
     // Repaints the whole sheet, or (on an ordinary minute) only the cells whose numeral changed.
     const dirty = { full: true, x0: W, y0: H, x1: 0, y1: 0 };
     const markDirty = (x0, y0, x1, y1) => {
-      dirty.x0 = Math.min(dirty.x0, x0);
-      dirty.y0 = Math.min(dirty.y0, y0);
-      dirty.x1 = Math.max(dirty.x1, x1);
-      dirty.y1 = Math.max(dirty.y1, y1);
+      // whole pixels (at 1x and 2x), or the repainted patch shows a hairline seam at its edge
+      dirty.x0 = Math.min(dirty.x0, Math.floor(x0));
+      dirty.y0 = Math.min(dirty.y0, Math.floor(y0));
+      dirty.x1 = Math.max(dirty.x1, Math.ceil(x1));
+      dirty.y1 = Math.max(dirty.y1, Math.ceil(y1));
     };
     const paintSheet = () => {
       sc.save();
@@ -1755,9 +1766,10 @@ export default {
             if (other[i] !== cur[i]) markDirty(SLOTS[i].cx - CELL / 2 - 40, SLOTS[i].y - 40, SLOTS[i].cx + CELL / 2 + 40, SLOTS[i].y + HD + 40);
           }
           if (curAmpm !== tx.ampm) markDirty(W - MX - AMPM_W - 40, R1B - 10, W, R2 + 10);
+          const hourSame = curAmpm === tx.ampm && other[0] === cur[0] && other[1] === cur[1] && other[2] === cur[2];
           curAmpm = tx.ampm;
           setClip();
-          rebuildCuts();
+          rebuildCuts(hourSame && other[3] === cur[3] ? ONES_X0 : 0, hourSame ? MIN_Y0 : 0);
           cutMask = null; // read back only if something needs it (the disc, snow banks, icicles)
           // the disc hangs in the hours: find it a new place only when they change
           if (other[0] !== cur[0] || other[1] !== cur[1] || other[2] !== cur[2]) {
