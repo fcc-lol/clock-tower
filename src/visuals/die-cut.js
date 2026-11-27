@@ -1575,7 +1575,7 @@ export default {
       const v3a = vA > 0.01 ? vA * VEL_A[3] : 0;
       const v3off = v3a > 0 ? Math.round(-wrapX(v3.x0 - drift * v3.speed, VW)) : 0;
       const tw = lit >= 0.01 ? Math.floor(t / 2) : 0; // windows switch on and off: a two-second clock is plenty
-      if (cityPf !== pf || cityPm !== pm || cityPb !== pb || cityV3 !== v3off || cityTw !== tw || cityVer !== cityB.ver || cityV3a !== v3a) {
+      if (true) {
         cityPf = pf; cityPm = pm; cityPb = pb; cityV3 = v3off; cityTw = tw; cityVer = cityB.ver; cityV3a = v3a;
         const x = cityB.x;
         x.setTransform(1, 0, 0, 1, 0, 0);
@@ -1602,7 +1602,7 @@ export default {
         }
         x.drawImage(bridgeB.can, pb - PAD, bridge.top);
       }
-      ctx.drawImage(cityB.can, 0, CITY_TOP);
+      ctx.drawImage(farB.can, pf - PAD, far.top); ctx.drawImage(midB.can, pm - PAD, mid.top); ctx.drawImage(bridgeB.can, pb - PAD, bridge.top);
 
       // the train on its rod
       const px = pb;
