@@ -105,14 +105,14 @@ export default {
       .tg-m { position: absolute; left: 0; top: 0; transform-origin: 50% 100%; }
       .tg-plq { box-sizing: border-box; padding: 14px 26px 20px; white-space: nowrap; }
       .tg-lab { font-size: 28px; line-height: 1.15; color: var(--ink2); }
-      .tg-val { font-weight: 700; font-size: 48px; line-height: 1.1; margin-top: 8px; }
+      .tg-val { font-weight: 700; font-size: 48px; line-height: 1.1; margin-top: 16px; }
       .tg-temp { font-weight: 700; font-size: 160px; line-height: .82; letter-spacing: -8px; margin: 14px 0 0 -6px; }
-      .tg-cond { font-size: 52px; line-height: 1.4; white-space: normal; max-width: 430px; margin-top: 12px; }
+      .tg-cond { font-size: 52px; line-height: 1.75; white-space: normal; max-width: 430px; margin-top: 8px; }
       .tg-d1 { font-weight: 700; font-size: 52px; line-height: 1.4; }
-      .tg-d2 { font-size: 52px; line-height: 1.4; }
-      .tg-fact .tg-plq { width: 952px; padding: 14px 28px 22px; }
-      .tg-fv { font-size: 40px; line-height: 1.28; white-space: normal; margin-top: 8px; }
-      .tg-fv.small { font-size: 36px; }
+      .tg-d2 { font-size: 52px; line-height: 1.4; margin-top: 16px; }
+      .tg-fact .tg-plq { width: 952px; padding: 14px 28px 6px; }
+      .tg-fv { font-size: 40px; line-height: 2; white-space: normal; }
+      .tg-fv.small { font-size: 36px; line-height: 2.15; }
       .tg-ap .tg-plq { padding: 12px 18px 12px; }
       .tg-apv { font-weight: 700; font-size: 52px; line-height: 1; }
     `);
@@ -484,7 +484,7 @@ export default {
       if (hasFact) {
         // a long fact steps down a size rather than taking a third line
         n.factV.classList.remove("small");
-        if (n.factV.offsetHeight > 100) n.factV.classList.add("small");
+        if (n.factV.offsetHeight > 120) n.factV.classList.add("small");
       }
       // the condition wraps rather than crowd the moon's marker
       const moonW = mMoon.plq.offsetWidth;
@@ -500,29 +500,38 @@ export default {
       if (same) return;
       laidFact = hasFact;
       const L = 64, RT = 1016;
-      let y = 1862;
-      if (hasFact) {
-        place(mFact, L, y - mFact.h, 90);
-        y = mFact.y - 60;
-      } else y = 1800;
-      // the middle row: sun, air, UV
-      const row = [mSun, mAqi, mUv];
-      let total = 0;
-      for (const m of row) total += m.w;
-      const gap = (RT - L - total) / 2;
-      let x = L, rowTop = 1e4;
-      row.forEach((m, i) => {
-        const top = y - m.h + stagger[i + 1];
-        place(m, x, top, y + 70 - (top + m.h));
-        rowTop = Math.min(rowTop, top);
-        x += m.w + gap;
-      });
-      y = rowTop - 62;
-      // the top row: temperature on the left, the date over the moon on the right
-      place(mTemp, L, y - mTemp.h, 60);
-      place(mMoon, RT - mMoon.w, y - mMoon.h + stagger[0] * 0.5, 64);
-      const dBase = mMoon.y - 64;
-      place(mDate, RT - mDate.w + Math.round(stagger[3]), dBase - mDate.h, mMoon.y + mMoon.h + 40 - dBase);
+      // The gaps between the rows of markers. When a tall day (a wrapped
+      // condition, a two-line fact) would push the top row toward the time,
+      // these close up, never below their floors, so the time keeps its air.
+      const TOP_MIN = MINS_BASE + 110;
+      const stack = (sq) => {
+        const gFact = lerp(60, 36, sq), gRow = lerp(62, 38, sq), gDate = lerp(64, 40, sq);
+        let y = 1800;
+        if (hasFact) {
+          place(mFact, L, 1870 - mFact.h, 90);
+          y = mFact.y - gFact;
+        }
+        // the middle row: sun, air, UV
+        const row = [mSun, mAqi, mUv];
+        let total = 0;
+        for (const m of row) total += m.w;
+        const gap = (RT - L - total) / 2;
+        let x = L, rowTop = 1e4;
+        row.forEach((m, i) => {
+          const top = y - m.h + stagger[i + 1];
+          place(m, x, top, y + 70 - (top + m.h));
+          rowTop = Math.min(rowTop, top);
+          x += m.w + gap;
+        });
+        y = rowTop - gRow;
+        // the top row: temperature on the left, the date over the moon on the right
+        place(mTemp, L, y - mTemp.h, 60);
+        place(mMoon, RT - mMoon.w, y - mMoon.h + stagger[0] * 0.5, 64);
+        const dBase = mMoon.y - gDate;
+        place(mDate, RT - mDate.w + Math.round(stagger[3]), dBase - mDate.h, mMoon.y + mMoon.h + 40 - dBase);
+        return Math.min(mTemp.y, mDate.y);
+      };
+      for (let sq = 0; sq <= 1 && stack(sq) < TOP_MIN; sq += 0.125);
       place(mAp, RT - mAp.w, MINS_BASE - 50 - mAp.h, 46);
       classify();
       paintMarkers();

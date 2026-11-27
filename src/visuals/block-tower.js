@@ -49,7 +49,7 @@ import { W, H, TAU, clamp, lerp, smoothstep, approach, ease, rng, createNoise, m
 
 const KX = 0.2; // oblique projection: a unit of depth moves this far right...
 const KY = 0.16; // ...and this far up
-const GROUND = 1820;
+const GROUND = 1834; // the table: low enough that the base plank is tall enough to give the fact's two lines room
 const CUBE = 430;
 const TIP = 0.62; // seconds a cube takes to roll over
 
@@ -127,18 +127,18 @@ const CSS = `
 .bt .dg.nxt{transform-origin:50% 0;transform:scaleY(0)}
 .bt .tsh{position:absolute;inset:0;background:var(--t);transform-origin:50% 0;transform:scaleY(0);opacity:0}
 .bt .ted{position:absolute;left:0;right:0;top:-3px;height:6px;background:var(--s);opacity:0}
-.bt .row{flex-direction:row;justify-content:flex-start;padding:0 30px 0 44px;gap:40px}
+.bt .row{flex-direction:row;justify-content:flex-start;padding:0 30px 0 44px;gap:52px}
 .bt .chip{font-size:46px;line-height:1;padding:11px 18px 13px;border-radius:14px;background:var(--chip);color:var(--chipink);text-shadow:none;box-shadow:inset 0 -3px 0 rgba(0,0,0,.18),inset 0 2px 0 rgba(255,255,255,.14)}
 .bt .date{font-size:58px;line-height:1;letter-spacing:.035em}
 .bt .temp{font-size:138px;line-height:1;letter-spacing:-.01em;padding-left:.12em}
-.bt .cond{font-size:58px;line-height:1.18}
-.bt .lab{font-size:30px;line-height:1;letter-spacing:.1em;font-weight:600;margin-bottom:7px}
+.bt .cond{font-size:58px;line-height:1.56}
+.bt .lab{font-size:30px;line-height:1;letter-spacing:.1em;font-weight:600;margin-bottom:12px}
 .bt .val{font-size:58px;line-height:1}
 .bt .valb{font-size:76px;line-height:.98}
 .bt .moon{font-size:56px;line-height:1;letter-spacing:.03em}
-.bt .fact{padding:0 40px 4px;text-shadow:0 1px 0 var(--hi),0 0 5px var(--scorch)}
-.bt .flab{font-size:28px;line-height:1;letter-spacing:.14em;font-weight:700;margin-bottom:12px}
-.bt .fval{font-size:46px;line-height:1.25;font-weight:600;white-space:normal;text-transform:none;letter-spacing:.005em;max-width:826px;text-wrap:balance}
+.bt .fact{padding:14px 40px 0;text-shadow:0 1px 0 var(--hi),0 0 5px var(--scorch)}
+.bt .flab{font-size:28px;line-height:1;letter-spacing:.14em;font-weight:700;margin-bottom:-4px}
+.bt .fval{font-size:44px;line-height:1.95;font-weight:600;white-space:normal;text-transform:none;letter-spacing:.005em;max-width:826px;text-wrap:balance}
 .bt .marble{position:absolute;left:0;top:0;width:44px;height:44px;margin:-22px 0 0 -22px;will-change:transform}
 .bt .marble b{position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle at 50% 50%,var(--m1) 0 46%,var(--m2) 47% 100%);overflow:hidden}
 .bt .marble b:before{content:"";position:absolute;left:-20%;top:38%;width:140%;height:26%;border-radius:50%;background:var(--m3)}
@@ -579,7 +579,7 @@ export default {
     const cubeSchemes = r.shuffle([{ ink: "red" }, { ink: "cobalt" }, { ink: "green" }, { face: "yellow", ink: "yellow" }]);
     const cubeO = (x, y, i) => ({ x, y, w: CUBE, h: CUBE, D: CUBE, scheme: cubeSchemes[i], grain: r() < 0.5 ? "v" : "h", cath: true, course: i < 2 ? 2 : 1, ratio: 3.25, cls: "cube" });
 
-    const base = mk(tower, { x: 44, y: 1600, w: 906, h: 220, D: 470, scheme: { ink: "burn" }, grain: "h", rings: true, course: 0, cls: "fact", capT: 16 });
+    const base = mk(tower, { x: 44, y: 1600, w: 906, h: GROUND - 1600, D: 470, scheme: { ink: "burn" }, grain: "h", rings: true, course: 0, cls: "fact", capT: 16 });
     const C1 = group(tower);
     const j2 = jit(6);
     const hourX = [64 + j2, 500 + j2, 282 + j2];
@@ -657,7 +657,11 @@ export default {
     const moundEl = el("div", { class: "mound" });
     {
       let d = `M-10 ${H + 10}V${GROUND + 6}`;
-      for (let x = -10; x <= W + 40; x += 36) d += `Q${x + 18} ${f1(GROUND - 4 - r.range(0, 1) * (x > 30 && x < 1000 ? 20 : 34))} ${x + 36} ${f1(GROUND + 2 - r.range(0, 9))}`;
+      // In front of the tower the drift stays on the floor (it must not climb the base plank, where the fact is lettered); it heaps up only beside it.
+      for (let x = -10; x <= W + 40; x += 36) {
+        const front = x > 30 && x < 1000;
+        d += `Q${x + 18} ${f1(front ? GROUND + 14 - r.range(0, 1) * 4 : GROUND - 4 - r.range(0, 1) * 34)} ${x + 36} ${f1(front ? GROUND + 16 - r.range(0, 4) : GROUND + 2 - r.range(0, 9))}`;
+      }
       d += `V${H + 10}Z`;
       moundEl.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="position:absolute;left:0;top:0"><path style="fill:var(--sn)" d="${d}"/></svg>`;
     }
@@ -893,7 +897,7 @@ export default {
         }
       }
       put("ampm", T.ampm, tx.ampm);
-      if (put("date", T.date, tx.date)) fit(T.date, 900 - 44 - 36 - T.ampm.offsetWidth - 40, 58, 44);
+      if (put("date", T.date, tx.date)) fit(T.date, 900 - 44 - 36 - T.ampm.offsetWidth - 52, 58, 44);
       if (put("temp", T.temp, tx.temp)) fit(T.temp, 244 - 44, 138, 90);
       if (shown.cond !== tx.condition) {
         shown.cond = tx.condition;
@@ -938,13 +942,14 @@ export default {
           const st = T.factValue.style;
           st.fontStretch = "100%";
           let ok = false;
-          for (let fs = 46; fs >= 36 && !ok; fs -= 2) {
+          // two lines at most (line height 1.95: the lines stand well apart)
+          for (let fs = 44; fs >= 36 && !ok; fs -= 2) {
             st.fontSize = `${fs}px`;
-            ok = T.factValue.offsetHeight <= fs * 2.6;
+            ok = T.factValue.offsetHeight <= fs * 1.95 * 2.4;
           }
           for (let fsr = 94; fsr >= 76 && !ok; fsr -= 6) {
             st.fontStretch = `${fsr}%`;
-            ok = T.factValue.offsetHeight <= 36 * 2.6;
+            ok = T.factValue.offsetHeight <= 36 * 1.95 * 2.4;
           }
         }
       }
