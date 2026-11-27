@@ -246,7 +246,7 @@ export default {
 
     // ----- palette (rebuilt when the light or the sky changes) ---------------
     const P = {
-      stand: "#05060a", eye: "#17181c", snow: "#f5f7fb", flake: "#f5f7fb", rain: "#dfe7f5", straw: "#e6cd8a",
+      stand: "#05060a", eye: "#17181c", snow: "#f5f7fb", flake: "#f5f7fb", rain: "#dfe7f5", loose: "#e9e3d4", straw: "#e6cd8a",
       sky: new Array(COLS * 3), cloud: new Array(COLS * 3), core: new Array(COLS * 3), lap: new Array(COLS),
       lit: new Array(4), litSeam: "#000", ink: new Array(4), inkSeam: "#000", umbHi: new Array(6), skin: new Array(6), skinLit: new Array(6), skinMoat: new Array(6), hair: new Array(8), shirt: new Array(8),
       beanie: new Array(6), umb: new Array(6), umbDark: new Array(6), veil: new Array(ROWS), veilNum: new Array(ROWS),
@@ -346,11 +346,16 @@ export default {
       P.snow = mix(P.stand, "#f5f7fb", 0.3 + 0.7 * pl);
       P.flake = mix(P.stand, "#f8f9fc", 0.8 + 0.2 * pl); // falling flakes catch the stadium lights
       P.rain = mix(P.stand, "#dfe7f5", 0.75 + 0.25 * dayK);
+      P.loose = mix(P.stand, "#e9e3d4", 0.42 + 0.58 * dayK); // a card on the loose catches the light
 
       // Fog and haze take the back rows (the top of the stand) first.
-      const fogCol = mix(s.sky.mean, mix("#0a0b10", "#ffffff", dayK), 0.3);
+      // Heat does the same in a warm shimmer of haze.
+      const hz = env.heat * 0.5;
+      let fogCol = mix(s.sky.mean, mix("#0a0b10", "#ffffff", dayK), 0.3);
+      if (hz > 0.01) fogCol = mix(fogCol, "#f4cf93", hz / (hz + env.fog));
+      const thick = clamp(env.fog + hz);
       for (let row = 0; row < ROWS; row++) {
-        const a = env.fog * 0.92 * Math.pow(1 - row / ROWS, 1.15);
+        const a = thick * 0.92 * Math.pow(1 - row / ROWS, 1.15);
         P.veil[row] = a > 0.012 ? rgba(fogCol, +a.toFixed(3)) : "";
         P.veilNum[row] = a > 0.08 ? rgba(fogCol, +(a * 0.15).toFixed(3)) : "";
       }
@@ -975,7 +980,7 @@ export default {
     }
     let wetClean = true;
     // In a strong wind a few cards get away and tumble across the stand.
-    const LOOSE = 9;
+    const LOOSE = 12;
     const lx = new Float32Array(LOOSE);
     const ly = new Float32Array(LOOSE);
     const lsp = new Float32Array(LOOSE);
@@ -1009,7 +1014,7 @@ export default {
         const c = Math.cos(a);
         const sn = Math.sin(a);
         g.setTransform(c, sn, -sn * q, c * q, lx[k], ly[k]);
-        g.fillStyle = (k & 1) ? P.cloud[((k * 7) % COLS) * 3 + 2] : P.sky[((k * 11) % COLS) * 3 + 2];
+        g.fillStyle = (k & 1) ? P.loose : P.sky[((k * 11) % COLS) * 3 + 2];
         g.fillRect(-13, -9.5, 26, 19);
       }
       g.setTransform(1, 0, 0, 1, 0, 0);
@@ -1086,7 +1091,7 @@ export default {
       updateEnv(s);
       if (jump || s.frame % 8 === 0) {
         // Coarse steps: a change repaints the whole crowd over the next second or two.
-        const key = `${s.sky.west}${s.sky.northWest}${s.sky.northEast}${s.sky.east}${Math.round(s.daylight * 200)}|${Math.round(env.gloomLight * 200)}|${Math.round(s.weather.cloud / 4)}|${Math.round(env.fog * 25)}|${Math.round(s.moon.alt / 2)}|${env.lean}`;
+        const key = `${s.sky.west}${s.sky.northWest}${s.sky.northEast}${s.sky.east}${Math.round(s.daylight * 200)}|${Math.round(env.gloomLight * 200)}|${Math.round(s.weather.cloud / 4)}|${Math.round(env.fog * 25)}|${Math.round(env.heat * 20)}|${Math.round(env.snow * 20)}|${Math.round(s.moon.alt / 2)}|${env.lean}`;
         if (key !== paletteKey) {
           computePalette(s);
           paletteKey = key;

@@ -1297,7 +1297,7 @@ export default {
             // two lines at most: step the size down for a long one
             let size = 38;
             factVl.style.fontSize = "38px";
-            while (factVl.scrollHeight > 90 && size > 32) factVl.style.fontSize = `${--size}px`;
+            while (factVl.scrollHeight > 90 && size > 36) factVl.style.fontSize = `${--size}px`;
           }
         }
         first = false;

@@ -89,7 +89,7 @@ const SR = 56;
 export default {
   title: "Murmuration",
   description: "Three thousand starlings wheel in the real colour of the sky, and the densest part of the flock is the time; the real wind tears at it.",
-  fps: 24, // the flock reads as smooth at film rate, and the Pi is spared a fifth of the drawing
+  fps: 20, // the flock reads as smooth at this rate, and it divides the panel's 60 Hz evenly (24 would land on 20 anyway, unevenly)
   fonts: ["Big Shoulders Display:wght@900", "Instrument Sans:wdth,wght@75..100,400..700", "Newsreader:ital,opsz,wght@1,6..72,500"],
 
   mount(root, { state, seed }) {

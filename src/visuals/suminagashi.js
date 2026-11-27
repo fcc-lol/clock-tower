@@ -42,7 +42,7 @@
 // neither mount() nor any one frame stalls.
 
 import {
-  W, H, TAU, clamp, lerp, remap, smoothstep, rng,
+  W, H, TAU, clamp, lerp, lerpAngle, remap, smoothstep, rng,
   mix, adjust, toOklch, oklch, ramp, luminance, vec3,
   el, svg, addStyle, canvas2d, shader, mask, grain, fitText,
 } from "../lib/kit.js";
@@ -233,7 +233,7 @@ void main() {
   float gapAt = c0 + w * mix(0.3, 0.7, h);
   float hair = step(0.62, k2) * step(13.0, w * pairPx) * (1.0 - u_feather);
   cov *= 1.0 - hair * (1.0 - smoothstep(0.5 * u_px, 1.3 * u_px + 0.6, abs(f - gapAt) * pairPx));
-  float isSky = step(0.68, h);
+  float isSky = step(0.6, h);
   float dens = mix(mix(0.36, 0.96, hsh(id + 13.1)), 0.9, isSky);
 
   float age = dd * (1.0 + dd / CURVE) / max(u_speed, 1.0);
@@ -871,7 +871,6 @@ export default {
     const RAIN_INK = oklch(0.55, 0.06, 318);
     const STORM_INK = oklch(0.46, 0.11, 292);
     const ICE_INK = oklch(0.66, 0.07, 236);
-    let steep = "#888888";
     function dayInk(s) {
       const wx = s.weather;
       let c = mix(TEMP_INK(clamp((wx.temp - 10) / 90)), SEASON_INK(s.clock.yearFrac), 0.38);
@@ -882,7 +881,14 @@ export default {
       const k = (wx.fog ? 0.55 : 1) * (1 - 0.25 * (wx.cloud / 100));
       return adjust(c, { c: (v) => v * k });
     }
-    const steeped = (c) => mix(steep, c, 0.22 + 0.68 * smoothstep(0.012, 0.075, toOklch(c).c));
+    // Hue is carried round the wheel rather than blended, so a blue sky steeped
+    // with a warm day turns violet or teal, never mud.
+    let steepL = { l: 0.6, c: 0.08, h: 250 };
+    const steeped = (raw) => {
+      const k = toOklch(raw);
+      const w = 0.9 * smoothstep(0.025, 0.13, k.c);
+      return oklch(lerp(steepL.l, k.l, w), Math.max(k.c, steepL.c * (1 - 0.5 * w)), lerpAngle(steepL.h, k.h, w));
+    };
 
     function palette(s) {
       const wx = s.weather;
@@ -912,7 +918,7 @@ export default {
       ink.set("u_sumi", vec3(mix("#1b1814", ground, 0.04)));
       ink.set("u_film", vec3(mix("#c9ccd0", "#e4e6ea", moonlight)));
       ink.set("u_night", night);
-      steep = dayInk(s);
+      steepL = toOklch(dayInk(s));
       const skyInk = (raw) => {
         const c = steeped(raw);
         return dark

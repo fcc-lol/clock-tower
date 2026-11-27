@@ -1,23 +1,27 @@
 // Poured Hours
 //
-// A wall-sized falling-sand toy. Everything above the black base is one
-// cellular automaton of 6 px grains (180 x 276 cells). The time is two rows of
-// chunky numerals made of sand packed into invisible moulds: each numeral is
-// poured from a sweeping spout in layers, so it carries wavy sand-art strata in
-// one mineral pigment, with little heaps sitting on its shoulders. When a
-// minute passes the old numeral comes unglued and avalanches away, and the new
-// one is poured inside a faint outline of its shape (so the time never stops
-// reading). The other readouts are pixel-letter ledges in the same sand world:
-// grains land on them, pile on their tops and sift through their gaps.
+// A wall-sized falling-sand toy. Everything above the bedrock is one cellular
+// automaton of 6 px grains (180 x 263 cells). The time is two rows of chunky
+// numerals made of sand packed into invisible moulds: each numeral is poured
+// from a sweeping spout in layers, so it carries wavy sand-art strata in one
+// mineral pigment, with little heaps sitting on its shoulders. When a minute
+// passes the old numeral comes unglued and avalanches away, and the new one is
+// poured inside a faint outline of its shape (so the time never stops
+// reading). AM/PM is poured in the same pigment, one mark under the minutes.
+// The other readouts are pixel-letter ledges in the same sand world: grains
+// land on them, pile on their tops and sift through their gaps. The dune sits
+// on dark bedrock, and the moon, the air, the UV and the day's fact are cut
+// into the rock.
 //
-// A lone hour digit is centred over the minutes, right under the thread.
+// Layout: type keeps to the left; the seconds thread has its own lane down the
+// right-hand side, clear of every line, like the stream in an hourglass, and
+// heaps a mound under itself at the bottom.
 //
 // How the conditions drive it:
-//   seconds       a thread of sand falls without stop down the middle of the
-//                 frame with a short gap at every second, so the tick runs down
-//                 it; it heaps on whatever it meets, slides along the tops of the
-//                 numerals and spills off their shoulders in thin streams, and
-//                 builds a cone on the dune
+//   seconds       a plumb thread of sand falls without stop down its lane with
+//                 a short gap at every second, so the tick runs down it, and
+//                 feeds the mound on the dune (which drains through a slot in
+//                 the rock beneath it)
 //   temperature   the pigment of the packed numerals: ultramarine in deep cold,
 //                 through teal, olive and ochre, to vermilion in heat
 //   sky colour    every loose grain has the colour the measured sky has when it
@@ -28,7 +32,7 @@
 //                 streaks: they run off the numerals in little falls, sift
 //                 through the lettering, pool in the dune's hollows and seep away
 //   snow          slow white grains that settle on every shoulder, melt above 34 F
-//   wind          leans the thread and everything that falls, blows sand and
+//   wind          leans the rain and snow (the thread stays plumb), blows sand and
 //                 snow off every crest in streams, and makes the dune's surface
 //                 hop downwind so it creeps along the floor
 //   fog, bad air  a veil hanging in soft banks that slide along at their own
@@ -37,32 +41,36 @@
 //   cloud, sun    the tone of the paper and the hard little shadows of sunlight
 //   day / night   warm paper by day, charcoal at night; inks and pigment switch
 //                 in one step while the ground is mid-grey
-// The fact sits on the base in Pixelify Sans, the same pixel voice.
+// The fact is set in Space Grotesk, engraved into the bedrock.
 
 import { clamp, lerp, smoothstep, rng, toOklab, mix, el, addStyle, pixelCanvas, grain } from "../lib/kit.js";
 import { sunPosition } from "../lib/astro.js";
 
 const CELL = 6;
 const COLS = 180;
-const FLOOR = 276; // first row of the base; the simulation is rows 0..FLOOR-1
+const FLOOR = 263; // first row of the bedrock; the simulation is rows 0..FLOOR-1
+const ROWS = 320; // the whole stage in cells
+const BR = ROWS - FLOOR; // rows of bedrock
 const LEFT = 11; // 66 px
 const RIGHT = 169; // last column text may use (1014 px)
 const DATE_Y = 11;
-const HOUR_Y = 31;
-const MIN_Y = 114;
+const HOUR_Y = 29;
+const MIN_Y = 112;
 const U = 5; // cells per numeral pixel
 const GW = 13;
 const GH = 15;
 const DW = GW * U;
 const DH = GH * U;
 const SLOT_X = [11, 88];
-const CENTER_X = 49; // a lone hour digit, centred over the minutes and under the thread
-const THREAD_X = 81; // the thread is THREAD_X and THREAD_X + 1, the middle of the gap
-const TEMP_Y = 199;
-const CD_Y = 225;
-const MOON_Y = 239;
-const SCAN_Y = 251; // the dune lives below this row
+const CENTER_X = 49; // a lone hour digit, centred over the minutes
+const THREAD_X = 162; // the thread is THREAD_X and THREAD_X + 1: its own lane, right of every line of type
+const TEMP_Y = 196; // temperature (and AM/PM) row
+const COND_Y = 218;
+const CD_Y = 235;
+const MOON_R = 5; // the engraved line, in bedrock rows
+const SCAN_Y = 222; // the dune lives below this row
 const LH = 9; // height of the pixel letters
+const TEXT_END = 112; // no readout below the minutes reaches past this column
 const SNOW_TOP = DATE_Y + LH + 5; // drifts on the hours stop short of the date
 const GAP_Y = HOUR_Y + GH * U; // and drifts on the minutes stop short of the hours
 const noDrift = (y) => y < SNOW_TOP || (y >= GAP_Y && y < GAP_Y + 3);
@@ -87,7 +95,8 @@ const P_INK = P_LOOSE + 2;
 const P_WATER = P_INK + 2;
 const P_SNOW = P_WATER + 4;
 const P_SSPK = P_SNOW + 4; // dark and light grains in the sky sand
-const P_THREAD = P_SSPK + 2; // the seconds thread: the sky's colour, pushed to a glint
+const P_DIM = P_SSPK + 2; // the quieter ink of labels
+const P_THREAD = P_DIM + 1; // the seconds thread: the sky's colour, pushed to a glint (always the last index)
 const JIT = [-0.04, -0.013, 0.013, 0.04];
 
 // ----- the numerals: 13 x 15, each pixel 5 x 5 grains, corners cut at 45 degrees -----
@@ -217,13 +226,12 @@ const tri = (u) => {
 
 const STYLE = `
 .ph { position: absolute; inset: 0; overflow: hidden; background: #2a2724; }
-.ph-base { position: absolute; left: 0; right: 0; top: ${FLOOR * CELL}px; bottom: 0; box-sizing: border-box;
-  border-top: ${CELL}px solid #555; background: #191715; color: #e9e1d2; font-family: "Pixelify Sans", monospace; z-index: 3; }
-.ph-slot { position: absolute; top: -${CELL}px; width: ${CELL * 3}px; height: ${CELL}px; background: #0c0b0a; }
-.ph-fact { position: absolute; left: ${LEFT * CELL}px; right: 66px; top: 38px; }
-.ph-fl { font-weight: 600; font-size: 28px; line-height: 32px; letter-spacing: 0.1em; text-transform: uppercase; color: #b5ab9b; white-space: nowrap;
+.ph-base { position: absolute; left: 0; right: 0; top: ${FLOOR * CELL}px; bottom: 0; color: #eee7da;
+  font-family: "Space Grotesk", sans-serif; z-index: 3; text-shadow: 0 -2px 0 rgba(0,0,0,0.55); }
+.ph-fact { position: absolute; left: ${LEFT * CELL}px; right: 66px; top: ${(MOON_R + LH) * CELL + 48}px; }
+.ph-fl { font-weight: 700; font-size: 26px; line-height: 30px; letter-spacing: 0.16em; text-transform: uppercase; color: #aaa192; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; }
-.ph-fv { margin-top: 10px; font-weight: 500; font-size: 46px; line-height: 1.2; text-wrap: balance;
+.ph-fv { margin-top: 12px; font-weight: 500; font-size: 46px; line-height: 1.2; letter-spacing: -0.005em; text-wrap: balance;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .ph-base.nofact .ph-fact { display: none; }
 `;
@@ -231,7 +239,7 @@ const STYLE = `
 export default {
   title: "Poured Hours",
   description: "A wall-sized falling-sand toy: the time is poured in sand, and the weather is poured on top of it.",
-  fonts: ["Pixelify Sans:wght@500;600"],
+  fonts: ["Space Grotesk:wght@500;700"],
   fps: 30,
 
   mount(root, { state, seed }) {
@@ -242,6 +250,28 @@ export default {
     const ctx = layer.ctx;
     const img = ctx.createImageData(COLS, FLOOR);
     const px = new Uint32Array(img.data.buffer);
+    // the bedrock under the dune: drawn only when its colours or lettering change
+    const bedImg = ctx.createImageData(COLS, BR);
+    const bedPx = new Uint32Array(bedImg.data.buffer);
+    const bedBand = new Uint8Array(COLS * BR); // stratum 0..4, +8 for a pebble, +16 for a dark pebble
+    const bedMark = new Uint8Array(COLS * BR); // 1 value letter, 2 label letter, 3 the cut's shadow, 4 a slot
+    const bedCol = new Uint32Array(32);
+    let bedDirty = true;
+    {
+      const r = rng(seed + 31);
+      const bounds = [1, 7, 15, 24, 33, 44];
+      const fr = bounds.map(() => r.range(0.04, 0.12));
+      const ph = bounds.map(() => r.range(0, 6.28));
+      const am = bounds.map(() => r.range(0.6, 2.2));
+      for (let x = 0; x < COLS; x++) {
+        for (let y = 0; y < BR; y++) {
+          let b = 0;
+          for (let k = 1; k < bounds.length; k++) if (y > bounds[k] + am[k] * Math.sin(x * fr[k] + ph[k]) + 0.6 * Math.sin(x * 0.53 + k)) b = k;
+          const q = r();
+          bedBand[y * COLS + x] = (b % 5) + (y > 0 && q < 0.035 ? 8 : y > 0 && q < 0.06 ? 16 : 0);
+        }
+      }
+    }
 
     const nFactLab = el("div", { class: "ph-fl" });
     const nFact = el("div", { class: "ph-fv" });
@@ -444,6 +474,8 @@ export default {
       lut[P_INK] = pack(inkL, 0.003, 0.012);
       lut[P_INK + 1] = pack(inkL + (fl ? 0.03 : -0.03), 0.003, 0.012);
       inkPx = lut[P_INK];
+      // labels: a quieter ink, but never closer than 0.45 to the ground
+      lut[P_DIM] = pack(fl ? Math.min(0.42, Lg - 0.45) : Math.max(0.74, Lg + 0.45), 0.004, 0.014);
 
       const wHue = (240 * Math.PI) / 180;
       const wL = fl ? Lg - 0.27 : Lg + 0.3;
@@ -463,24 +495,62 @@ export default {
       veilPx[0] = 0;
       for (let q = 1; q < 32; q++) veilPx[q] = veilA > 0.01 ? pack(mL, ground[1] + 0.012 * E.haze, ground[2] + 0.04 * E.haze, Math.round((q / 31) * veilA * 255)) : 0;
 
-      // the base: always dark, a shade apart from the night ground
-      base.style.background = css(pack(lerp(0.13, 0.2, g), 0.004, 0.008));
-      base.style.borderTopColor = css(fl ? pack(Lg - 0.42, 0.006, 0.014) : pack(Lg + 0.16, 0.004, 0.01));
+      // the bedrock: always dark, a shade apart from the night ground, in five strata
+      const rL = lerp(0.125, 0.185, g);
+      const BAND = [0, 0.022, -0.012, 0.034, 0.008];
+      for (let b = 0; b < 5; b++) {
+        bedCol[b] = pack(rL + BAND[b], 0.005 + b * 0.0015, 0.012 - b * 0.002);
+        bedCol[b + 8] = pack(rL + BAND[b] + 0.06, 0.006, 0.016);
+        bedCol[b + 16] = pack(rL + BAND[b] - 0.045, 0.004, 0.008);
+      }
+      bedCol[5] = pack(rL + (fl ? 0.1 : 0.13), 0.006, 0.016); // the lip the dune rests on
+      bedCol[24] = pack(0.885, 0.004, 0.014); // engraved values
+      bedCol[25] = pack(0.67, 0.006, 0.018); // engraved labels
+      bedCol[26] = pack(rL - 0.075, 0.003, 0.006); // the shadow inside the cut
+      bedCol[27] = pack(0.06, 0.002, 0.004); // the slots
+      bedDirty = true;
+    }
+    function drawBed() {
+      for (let i = 0; i < COLS * BR; i++) {
+        const m = bedMark[i];
+        bedPx[i] = m ? bedCol[23 + m] : i < COLS ? bedCol[5] : bedCol[bedBand[i]];
+      }
+      ctx.putImageData(bedImg, 0, FLOOR);
+      bedDirty = false;
+    }
+    // Cuts a line of pixel letters into the bedrock: kind 1 values, 2 labels.
+    function bedText(text, x, y, kind) {
+      for (const ch of text) {
+        const g = FONT[ch] || FONT[" "];
+        for (let r = 0; r < g.rows.length; r++) {
+          for (let c = 0; c < g.w; c++) {
+            if (!g.rows[r][c]) continue;
+            const cx = x + c;
+            const cy = y + r;
+            if (cx < 0 || cx >= COLS || cy >= BR) continue;
+            bedMark[cy * COLS + cx] = kind;
+            const a = (cy - 1) * COLS + cx;
+            if (bedMark[a] === 0) bedMark[a] = 3;
+          }
+        }
+        x += g.w + 1;
+      }
+      bedDirty = true;
     }
 
     // ----- lettering in the simulation -----
-    const mkLedge = (x, y, scale) => {
-      const L = { x, y, scale, text: null, w: 0, bx: 0, n: 0, cells: new Int32Array(3200) };
+    // pal: 0 ink, 1 the quieter label ink, 2 the numerals' pigment, in strata
+    const mkLedge = (x, y, scale, pal = 0) => {
+      const L = { x, y, scale, pal, text: null, w: 0, bx: 0, n: 0, cells: new Int32Array(3200) };
       return L;
     };
     const Ldate = mkLedge(LEFT, DATE_Y, 1);
     const Ltemp = mkLedge(LEFT, TEMP_Y, 2);
-    const Lcond = mkLedge(LEFT, TEMP_Y + LH, 1);
-    const Lcd = mkLedge(LEFT, CD_Y, 1);
-    const Lmoon = mkLedge(LEFT, MOON_Y, 1);
-    const Lair = mkLedge(LEFT, MOON_Y, 1);
-    const Lap1 = mkLedge(158, MIN_Y + DH - 2 * LH * 2 - 3, 2);
-    const Lap2 = mkLedge(158, MIN_Y + DH - LH * 2, 2);
+    const Lcond = mkLedge(LEFT, COND_Y, 1);
+    const Lcdl = mkLedge(LEFT, CD_Y, 1, 1);
+    const Lcdv = mkLedge(LEFT, CD_Y, 1);
+    const Lap = mkLedge(LEFT, TEMP_Y, 2, 2); // one mark, under the minutes' right edge
+    const shownBed = { moon: null, air: null };
     function stamp(L, text) {
       for (let k = 0; k < L.n; k++) if (type[L.cells[k]] === T_INK) type[L.cells[k]] = 0;
       const y1 = Math.min(FLOOR, L.y + LH * L.scale);
@@ -501,7 +571,10 @@ export default {
                 if (cx < 0 || cx >= COLS || cy >= FLOOR || L.n >= L.cells.length) continue;
                 const i = cy * COLS + cx;
                 type[i] = T_INK;
-                col[i] = P_INK + ((cx * 7 + cy * 13) % 5 === 0 ? 1 : 0);
+                if (L.pal === 2) {
+                  const band = ((cy - L.y + 1.6 * Math.sin(cx * 0.45 + L.y)) / 5) | 0;
+                  col[i] = (cx * 5 + cy * 11) % 23 === 0 ? P_SPK + (cx & 1) : P_PIG + ((band + 1) & 3) * 4 + ((cx * 7 + cy * 13) & 3);
+                } else col[i] = L.pal === 1 ? P_DIM : P_INK + ((cx * 7 + cy * 13) % 5 === 0 ? 1 : 0);
                 L.cells[L.n++] = i;
               }
             }
