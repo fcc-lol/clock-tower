@@ -406,6 +406,34 @@ export default {
       x.restore();
       x.textAlign = "center";
     }
+    // The ink box of a line of type in the current font: [ascent, descent] above and below the baseline.
+    function inkOf(x, text) {
+      const m = x.measureText(text);
+      return [m.actualBoundingBoxAscent, m.actualBoundingBoxDescent];
+    }
+    // Lines of type stacked down a cloth by their real ink, centred between top and bottom. Each row is
+    // [text, weight, size, minSize, gap above it (ink to ink)]. Called only when a print changes.
+    function stack(x, w, rows, top, bottom, maxW) {
+      let total = 0;
+      const set = rows.map(([text, weight, size, min, gap], k) => {
+        const s = fit(x, text, weight, size, maxW, false, min);
+        const [a, d] = inkOf(x, text);
+        total += a + d + (k ? gap : 0);
+        return [text, font(weight, s), a, d, k ? gap : 0];
+      });
+      let y = top + (bottom - top - total) / 2;
+      const edges = []; // where the ink of each row ends, then where the next begins
+      for (const [text, f, a, d, gap] of set) {
+        y += gap;
+        if (edges.length) edges.push(y);
+        y += a;
+        x.font = f;
+        x.fillText(text, w / 2, y);
+        y += d;
+        edges.push(y);
+      }
+      return edges;
+    }
     function printSheet(c, digit, word) {
       const x = begin(c);
       const { w, h } = c;
@@ -413,13 +441,16 @@ export default {
       x.fillRect(0, 33, w, 2.5);
       x.fillRect(0, 40, w, 2.5);
       x.fillRect(0, h - 30, w, 8);
-      x.fillRect(0, h - 104, w, 2.5);
-      x.fillRect(0, h - 111, w, 2.5);
+      x.fillRect(0, h - 118, w, 2.5);
+      x.fillRect(0, h - 125, w, 2.5);
       if (word) {
-        fit(x, word, 800, 50, w - 56, false, 44);
-        x.fillText(word, w / 2, h - 48);
+        // centred in the hem band on fixed metrics, so the words on neighbouring sheets share a baseline
+        fit(x, word, 800, 48, w - 56, false, 44);
+        const cap = inkOf(x, "H")[0];
+        const desc = inkOf(x, "y")[1];
+        x.fillText(word, w / 2, (h - 115.5 + h - 30) / 2 + (cap - desc) / 2);
       }
-      bigDigit(x, digit, w / 2, 66, h - 132, w - 70);
+      bigDigit(x, digit, w / 2, 66, h - 146, w - 70);
     }
     function printPillow(c, text) {
       const x = begin(c);
@@ -447,10 +478,7 @@ export default {
       x.fillRect(0, 14, w, 2.5);
       x.fillRect(0, h - 33, w, 2.5);
       x.fillRect(0, h - 25, w, 6);
-      fit(x, label, 500, 28, w - 36, false, 24);
-      x.fillText(label, w / 2, 62);
-      fit(x, value, 900, 56, w - 36, false, 36);
-      x.fillText(value, w / 2, 128);
+      stack(x, w, [[label, 500, 28, 24, 0], [value, 900, 56, 36, 20]], 16.5, h - 33, w - 36);
     }
     function printAir(c, aqi, uv) {
       // a flannel with two numbers knitted into it, one above the other
@@ -460,23 +488,18 @@ export default {
       x.fillRect(0, 22, w, 2);
       x.fillRect(0, h - 18, w, 6);
       x.fillRect(0, h - 24, w, 2);
+      // two pairs, each a label over its number, with a row of stitches between them
+      const ys = stack(x, w, [["Air quality", 500, 26, 24, 0], [aqi, 900, 54, 36, 18], ["UV index", 500, 26, 24, 50], [uv, 900, 54, 36, 18]], 24, h - 24, w - 30);
+      const mid = (ys[1] + ys[2]) / 2;
       x.save();
       x.globalAlpha = 0.6;
       x.setLineDash([6, 5]);
       x.lineWidth = 1.6;
       x.beginPath();
-      x.moveTo(26, 132);
-      x.lineTo(w - 26, 132);
+      x.moveTo(26, mid);
+      x.lineTo(w - 26, mid);
       x.stroke();
       x.restore();
-      fit(x, "Air quality", 500, 26, w - 30, false, 24);
-      x.fillText("Air quality", w / 2, 54);
-      fit(x, aqi, 900, 60, w - 34, false, 36);
-      x.fillText(aqi, w / 2, 112);
-      fit(x, "UV index", 500, 26, w - 30, false, 24);
-      x.fillText("UV index", w / 2, 170);
-      fit(x, uv, 900, 60, w - 34, false, 36);
-      x.fillText(uv, w / 2, 226);
     }
     function printMoon(c, name) {
       const x = begin(c);
