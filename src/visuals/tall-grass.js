@@ -23,7 +23,8 @@
 //                         darker wet wood
 //   snow                  white ground, short blades buried, the rest bowed and
 //                         capped with snow, flakes, caps on the markers
-//   fog, haze, AQI        far rows fade into the measured sky colour
+//   fog, haze, AQI        far rows fade into the measured sky colour; fog (or a
+//                         whiteout) also veils the near rows
 //   frost, heat           frost-tipped and stiff with tremor in deep cold;
 //                         bleached, dusty and slow in heat
 //   storm                 violent wave trains and a rare, slow brightening
@@ -52,7 +53,7 @@ const INK_LIGHT = "#f6ecd2";
 // One field family (dark to pale underside) and one flower per season, as they
 // look in full sun. `night` is the flower once it has turned luminous.
 const SEASONS = {
-  winter: { tones: ["#93876a", "#b0a27e", "#c8ba96", "#ddd2b2", "#f1ead6"], ground: "#a39672", stalk: "#7d6045", head: "#22150d", head2: "#3a2617", night: "#93adc4", pale: "#dde9f3", centre: "#6b5037", hl: 11, hw: 9.5 },
+  winter: { tones: ["#93876a", "#b0a27e", "#c8ba96", "#ddd2b2", "#f1ead6"], ground: "#a39672", stalk: "#7d6045", head: "#22150d", head2: "#3a2617", night: "#b2c9de", pale: "#e4eef7", centre: "#6b5037", hl: 11, hw: 9.5 },
   spring: { tones: ["#4c9c37", "#72bb3c", "#95d247", "#b8e35f", "#e3f5ba"], ground: "#62ab3a", stalk: "#15432b", head: "#b30d6e", head2: "#d2318a", night: "#ff5fae", pale: "#ffb7d8", centre: "#ffe7a0", hl: 7, hw: 13 },
   summer: { tones: ["#439534", "#64b035", "#88c83f", "#aedd57", "#ddf0b0"], ground: "#55a235", stalk: "#103821", head: "#a50f19", head2: "#c4221d", night: "#f0452e", pale: "#ffa089", centre: "#1a0c0c", hl: 2, hw: 14.5 },
   autumn: { tones: ["#a67a2e", "#c59a40", "#dab455", "#ebcf7c", "#f7e9bd"], ground: "#b58c38", stalk: "#4a3a22", head: "#4a27b4", head2: "#6843d8", night: "#9a7dff", pale: "#d0c1ff", centre: "#ffc93a", hl: 2, hw: 13.5 },
@@ -95,7 +96,7 @@ export default {
   title: "Tall Grass",
   description: "A meadow bends in the real wind, and the time is planted in it as a taller species in flower.",
   fonts: ["Nunito:wght@900", "Courier Prime:wght@400;700"],
-  fps: 30,
+  fps: 24, // a meadow in the wind is slow motion: 24 is smooth, and a fifth less drawing than 30
 
   mount(root, { seed }) {
     addStyle(root, `
@@ -535,12 +536,12 @@ export default {
     let season = null, seasonDay = -1;
     let sigA = -1, sigB = -1, sigSky = "";
 
-    const cond = { snow: 0, wet: 0, frost: 0, hot: 0, haze: 0, warm: 0, moon: 0, dew: 0, cloud: 0 };
+    const cond = { snow: 0, wet: 0, frost: 0, hot: 0, haze: 0, fog: 0, warm: 0, moon: 0, dew: 0, cloud: 0 };
 
     const recolour = (s) => {
       const d = s.daylight;
       const dk = Math.pow(d, 1.1);
-      const { snow, wet, frost, hot, haze, warm, moon, cloud } = cond;
+      const { snow, wet, frost, hot, haze, fog, warm, moon, cloud } = cond;
       const sky = s.sky.mean;
       const twilight = 4 * d * (1 - d);
       const dim = 1 - 0.13 * cloud - 0.07 * wet;
@@ -568,7 +569,8 @@ export default {
         if (wet > 0.01 && k >= 2) c = mix(c, mix(sky, "#d6e0e6", 0.35 + 0.3 * dk), wet * 0.16 * (k - 1));
         base.push(c);
       }
-      const hz = (b) => clamp(haze * Math.pow(1 - b / (NB - 1), 1.7) + haze * 0.05);
+      // haze fades the far rows; fog also lays a veil over the near ones
+      const hz = (b) => clamp(haze * Math.pow(1 - b / (NB - 1), 1.7) + haze * 0.05 + fog * (0.42 - 0.2 * (b / (NB - 1))));
       for (let b = 0; b < NB; b++) for (let k = 0; k < NT; k++) fieldCol[b * NT + k] = mix(base[k], hazeCol, hz(b));
       for (let k = 0; k < NT; k++) fieldCol[FRONT0 + k] = mix(base[k], hazeCol, hz(NB - 1));
 
@@ -581,7 +583,7 @@ export default {
       if (moon > 0.01) gNight = mix(gNight, "#1c2a36", moon * 0.35);
       const ground = lit(gDay, gNight, 0.06 + 0.18 * twilight);
       const g0 = mix(ground, hazeCol, hz(0)), g1 = mix(ground, hazeCol, hz(1.6)), g2 = mix(ground, hazeCol, hz(3.2));
-      const g3 = adjust(ground, { l: (v) => v * 0.94 });
+      const g3 = mix(adjust(ground, { l: (v) => v * 0.94 }), hazeCol, hz(NB - 1));
       pal.groundLum = luminance(g2);
       // how bright the field behind the flowers is: the flowers switch from
       // dark to luminous where the two read equally well against it
@@ -602,7 +604,7 @@ export default {
       gctx.globalAlpha = 1;
 
       // the time's plants
-      const headHaze = haze * 0.16;
+      const headHaze = haze * 0.16 + fog * 0.06;
       const dusk = 1 - dk;
       const dayHead = (c) => mix(mix(adjust(c, { l: (v) => v * (1 - 0.06 * cloud) }), "#060606", dusk * 0.45), hazeCol, headHaze);
       pal.head[0] = dayHead(season.head);
@@ -614,7 +616,8 @@ export default {
       pal.head[5] = mix(mix(season.pale, "#f4ff8a", season.summer), "#ffffff", season.winter * 0.6);
       pal.stalk = mix(lit(season.stalk, mix("#07100c", season.night, 0.2), 0.03), hazeCol, headHaze);
       pal.head[6] = mix(pal.stalk, lumi > 0.5 ? headN : pal.head[0], 0.5);
-      pal.centre = mix(mix(season.centre, "#060606", dusk * 0.3), mix(season.night, "#05060a", 0.62), lumi);
+      // a luminous head has a pale heart, not a dark one: dark hearts mottle the numerals at night
+      pal.centre = mix(mix(season.centre, "#060606", dusk * 0.3), mix(headN, season.pale, 0.55), lumi);
       pal.hl = season.hl;
       pal.hw = season.hw;
 
@@ -726,6 +729,7 @@ export default {
       cond.hot = clamp((w.temp - 84) / 12);
       cond.cloud = cloud;
       const fogness = w.fog ? 1 : clamp((5 - w.visibility) / 5);
+      cond.fog = fogness;
       cond.haze = clamp(0.1 + 0.72 * fogness + clamp((w.aqi - 60) / 260) + 0.22 * cond.hot + 0.3 * snowing + 0.12 * raining);
       cond.warm = d * (1 - 0.75 * cloud) * (1 - smoothstep(3, 24, s.sun.alt));
       cond.moon = s.moon.up ? s.moon.illumination * clamp(s.moon.alt / 25) * (1 - 0.8 * cloud) * (1 - d) : 0;
@@ -738,7 +742,7 @@ export default {
       }
       if (moved) layout();
       const a = Math.round(d * 250) + 251 * (Math.round(cloud * 40) + 41 * (Math.round(cond.wet * 30) + 31 * (Math.round(cond.snow * 40) + 41 * Math.round(cond.haze * 60))));
-      const b = Math.round(cond.warm * 40) + 41 * (Math.round(cond.moon * 20) + 21 * (Math.round(cond.frost * 20) + 21 * Math.round(cond.hot * 20)));
+      const b = 400000 * Math.round(cond.fog * 20) + Math.round(cond.warm * 40) + 41 * (Math.round(cond.moon * 20) + 21 * (Math.round(cond.frost * 20) + 21 * Math.round(cond.hot * 20)));
       if (a !== sigA || b !== sigB || s.sky.mean !== sigSky) {
         sigA = a; sigB = b; sigSky = s.sky.mean;
         recolour(s);
@@ -872,6 +876,7 @@ export default {
       const glints = night * season.winter * (1 - cond.wet) * 0.22; // frost glints on winter heads
       const flies = night * season.summer * smoothstep(58, 64, w.temp) * (1 - cond.wet) * (1 - smoothstep(10, 18, w.wind));
       ctx.strokeStyle = pal.stalk;
+      ctx.lineCap = "butt"; // the heads hide the ends; round caps only cost
       ctx.lineWidth = 6;
       ctx.beginPath();
       for (let i = 0; i < NP; i++) {
@@ -915,6 +920,7 @@ export default {
       }
       ctx.stroke();
 
+      ctx.lineCap = "round";
       const hl = pal.hl * 0.5;
       for (let k = 0; k < 7; k++) {
         ctx.strokeStyle = pal.head[k];

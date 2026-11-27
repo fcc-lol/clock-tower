@@ -331,93 +331,99 @@ function blurV(src, dst, r, x0, x1) {
   }
 }
 
-// The work for one set of numerals, in 21 small steps so that it can be spread
-// over as many frames (each a couple of ms). step() returns true when
-// `target` (Uint16Array) holds the field.
-const FIELD_STEPS = 21;
-const HC = FC >> 1, HR = FR >> 1;
+// The work for one set of numerals, cut into some forty small steps (each
+// about a millisecond) so that it can be spread over as many frames. The plan
+// is the same every time: [kind, from, to].
+const PLAN = [];
+{
+  const split = (kind, n, parts) => {
+    for (let k = 0; k < parts; k++) PLAN.push([kind, Math.floor((n * k) / parts), Math.floor((n * (k + 1)) / parts)]);
+  };
+  PLAN.push([0, 0, 0]); //       the figures, drawn into a coverage mask
+  split(1, FR, 2); //            mask -> the two grids (rows)
+  split(2, FC, 12); //           outside distance, down the columns
+  split(3, FR, 4); //            and along the rows
+  PLAN.push([4, 0, 0], [5, 0, 0]); // inside distance (within the figures' box)
+  split(6, NCELL, 2); //         signed distance
+  for (let pass = 0; pass < 2; pass++) {
+    split(7, FR, 4); //          box blur, rows
+    split(8, FC, 4); //          and columns (twice: nearly a gaussian)
+  }
+  split(9, NCELL, 2); //         blend and quantize into the target
+}
 function fieldJob(glyphs, target) {
   let stage = 0;
   let m = null;
-  let bx0 = 0, bx1 = 0, by0 = 0, by1 = 0;
-  const sixth = Math.ceil(FC / 6);
+  let pass = 0;
+  let bx0 = FC, bx1 = 0, by0 = FR, by1 = 0;
   return {
     step() {
-      switch (stage) {
-        case 0:
-          m = mask(FC, FR, (ctx) => {
-            ctx.scale(1 / CELL, 1 / CELL);
-            ctx.font = `800 ${NUM_SIZE}px ${NUM_FAMILY}`;
-            ctx.textBaseline = "alphabetic";
-            for (const g of glyphs) ctx.fillText(g.ch, g.x, g.y);
-          }).data;
-          break;
-        case 1:
-          bx0 = FC; bx1 = 0; by0 = FR; by1 = 0;
-          for (let y = 0, i = 0; y < FR; y++) {
-            for (let x = 0; x < FC; x++, i++) {
-              const a = m[i];
-              if (a === 0) {
-                gridOut[i] = INF;
-                gridIn[i] = 0;
+      const [kind, from, to] = PLAN[stage];
+      if (kind === 0) {
+        m = mask(FC, FR, (ctx) => {
+          ctx.scale(1 / CELL, 1 / CELL);
+          ctx.font = `800 ${NUM_SIZE}px ${NUM_FAMILY}`;
+          ctx.textBaseline = "alphabetic";
+          for (const g of glyphs) ctx.fillText(g.ch, g.x, g.y);
+        }).data;
+      } else if (kind === 1) {
+        for (let y = from, i = from * FC; y < to; y++) {
+          for (let x = 0; x < FC; x++, i++) {
+            const a = m[i];
+            if (a === 0) {
+              gridOut[i] = INF;
+              gridIn[i] = 0;
+            } else {
+              if (x < bx0) bx0 = x;
+              if (x > bx1) bx1 = x;
+              if (y < by0) by0 = y;
+              if (y > by1) by1 = y;
+              if (a === 255) {
+                gridOut[i] = 0;
+                gridIn[i] = INF;
               } else {
-                if (x < bx0) bx0 = x;
-                if (x > bx1) bx1 = x;
-                if (y < by0) by0 = y;
-                if (y > by1) by1 = y;
-                if (a === 255) {
-                  gridOut[i] = 0;
-                  gridIn[i] = INF;
-                } else {
-                  const dd = 0.5 - a / 255;
-                  gridOut[i] = dd > 0 ? dd * dd : 0;
-                  gridIn[i] = dd < 0 ? dd * dd : 0;
-                }
+                const dd = 0.5 - a / 255;
+                gridOut[i] = dd > 0 ? dd * dd : 0;
+                gridIn[i] = dd < 0 ? dd * dd : 0;
               }
             }
           }
+        }
+        if (to === FR) {
           if (bx1 < bx0) { bx0 = 0; bx1 = 1; by0 = 0; by1 = 1; }
           bx0 = Math.max(0, bx0 - 1); by0 = Math.max(0, by0 - 1);
           bx1 = Math.min(FC - 1, bx1 + 1); by1 = Math.min(FR - 1, by1 + 1);
           m = null;
-          break;
-        case 2: case 3: case 4: case 5: case 6: case 7: {
-          const x1 = Math.min(FC, (stage - 1) * sixth);
-          for (let x = (stage - 2) * sixth; x < x1; x++) edt1d(gridOut, x, FC, FR);
-          break;
         }
-        case 8: case 9:
-          for (let y = stage === 8 ? 0 : HR, y1 = stage === 8 ? HR : FR; y < y1; y++) edt1d(gridOut, y * FC, 1, FC);
-          break;
-        case 10: {
-          const bw = bx1 - bx0 + 1, bh = by1 - by0 + 1;
-          for (let x = 0; x < bw; x++) edt1d(gridIn, by0 * FC + bx0 + x, FC, bh);
-          for (let y = 0; y < bh; y++) edt1d(gridIn, (by0 + y) * FC + bx0, 1, bw);
-          break;
+      } else if (kind === 2) {
+        for (let x = from; x < to; x++) edt1d(gridOut, x, FC, FR);
+      } else if (kind === 3) {
+        for (let y = from; y < to; y++) edt1d(gridOut, y * FC, 1, FC);
+      } else if (kind === 4) {
+        const bh = by1 - by0 + 1;
+        for (let x = bx0; x <= bx1; x++) edt1d(gridIn, by0 * FC + x, FC, bh);
+      } else if (kind === 5) {
+        const bw = bx1 - bx0 + 1;
+        for (let y = by0; y <= by1; y++) edt1d(gridIn, y * FC + bx0, 1, bw);
+      } else if (kind === 6) {
+        for (let i = from; i < to; i++) dist[i] = (Math.sqrt(gridOut[i]) - Math.sqrt(gridIn[i])) * CELL;
+      } else if (kind === 7) {
+        blurH(pass === 0 ? dist : blurB, blurA, 5, from, to);
+      } else if (kind === 8) {
+        blurV(blurA, blurB, 5, from, to);
+        if (to === FC) pass++;
+      } else {
+        // near the figures the exact distance; further out the blurred one,
+        // so the far rings round off as surface tension would have them
+        for (let i = from; i < to; i++) {
+          const d = dist[i];
+          let k = (d - 14) / 170;
+          k = k < 0 ? 0 : k > 1 ? 1 : k * k * (3 - 2 * k);
+          const v = Math.round((d + (blurB[i] - d) * k + D_OFF) * D_Q);
+          target[i] = v < 0 ? 0 : v > 65535 ? 65535 : v;
         }
-        case 11:
-          for (let i = 0; i < NCELL; i++) dist[i] = (Math.sqrt(gridOut[i]) - Math.sqrt(gridIn[i])) * CELL;
-          break;
-        case 12: blurH(dist, blurA, 5, 0, HR); break;
-        case 13: blurH(dist, blurA, 5, HR, FR); break;
-        case 14: blurV(blurA, blurB, 5, 0, HC); break;
-        case 15: blurV(blurA, blurB, 5, HC, FC); break;
-        case 16: blurH(blurB, blurA, 5, 0, HR); break;
-        case 17: blurH(blurB, blurA, 5, HR, FR); break;
-        case 18: blurV(blurA, blurB, 5, 0, HC); break;
-        case 19: blurV(blurA, blurB, 5, HC, FC); break;
-        default:
-          // near the figures the exact distance; further out the blurred one,
-          // so the far rings round off as surface tension would have them
-          for (let i = 0; i < NCELL; i++) {
-            const d = dist[i];
-            let k = (d - 14) / 170;
-            k = k < 0 ? 0 : k > 1 ? 1 : k * k * (3 - 2 * k);
-            const v = Math.round((d + (blurB[i] - d) * k + D_OFF) * D_Q);
-            target[i] = v < 0 ? 0 : v > 65535 ? 65535 : v;
-          }
       }
-      return ++stage >= FIELD_STEPS;
+      return ++stage >= PLAN.length;
     },
   };
 }
@@ -660,7 +666,8 @@ export default {
       const key = `${hh}:${mm}`;
       const list = layout(hh, mm);
       if (!ready && (snap || !nextDone || nextKey !== key)) {
-        const job = fieldJob(list, bufNext);
+        // finish the job already under way for this minute, or do it all now
+        const job = !snap && nextJob && !nextDone && nextKey === key ? nextJob : fieldJob(list, bufNext);
         while (!job.step());
       }
       const spare = bufOld; // next becomes current, current becomes previous
@@ -862,7 +869,7 @@ export default {
       ink.set("u_skyOld", vec3(skyInk(skyAgo(s, 30))));
       toneU[0] = 1 - 0.22 * (wx.fog ? 1 : 0);
       toneU[1] = 0.45;
-      toneU[2] = 0.17 + 0.06 * moonlight;
+      toneU[2] = 0.17 + 0.06 * moonlight + (wx.fog ? 0.12 : 0); // fog hangs a milky film over dark water
       toneU[3] = 0.62 + 0.18 * moonlight;
       pal.fleck = dark ? "#fffdf6" : "#c8d0d8";
       pal.shade = dark ? "rgba(40,44,60,0.22)" : "rgba(52,48,42,0.2)";

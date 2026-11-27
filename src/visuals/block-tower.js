@@ -75,7 +75,7 @@ const CSS = `
 .bt{position:absolute;inset:0;overflow:hidden;background:#05060a;font-family:"Fredoka","Arial Rounded MT Bold","Helvetica Rounded",system-ui,sans-serif;font-weight:700}
 .bt div{box-sizing:border-box}
 .bt .sky,.bt .swell,.bt .haze{position:absolute;inset:0}
-.bt .swell{background:radial-gradient(ellipse 90% 60% at 50% 8%,rgba(196,208,255,.95),rgba(196,208,255,0) 72%);opacity:0;display:none}
+.bt .swell{background:radial-gradient(ellipse 90% 60% at 50% 8%,rgba(196,208,255,.95),rgba(196,208,255,0) 72%);opacity:0;display:none;will-change:opacity}
 .bt .stars{position:absolute;left:0;top:0;width:2px;height:2px;border-radius:50%}
 .bt .hg{position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0;will-change:transform}
 .bt .hg>svg{position:absolute;overflow:visible}
@@ -612,7 +612,9 @@ export default {
       moundEl.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="position:absolute;left:0;top:0"><path style="fill:var(--sn)" d="${d}"/></svg>`;
     }
     wrap.append(moundEl, fogFront);
-    const fx = canvas2d(wrap, { adaptive: true });
+    const fx = canvas2d(wrap, { adaptive: true, maxScale: 0.6 });
+    // its own compositor layer, so redrawing it never repaints what lies under it
+    fx.canvas.style.willChange = "transform";
     grain(wrap, { opacity: 0.05 });
 
     // ----- snow caps ----------------------------------------------------------

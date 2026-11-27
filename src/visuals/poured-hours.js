@@ -63,6 +63,9 @@ const CD_Y = 225;
 const MOON_Y = 239;
 const SCAN_Y = 251; // the dune lives below this row
 const LH = 9; // height of the pixel letters
+const SNOW_TOP = DATE_Y + LH + 5; // drifts on the hours stop short of the date
+const GAP_Y = HOUR_Y + GH * U; // and drifts on the minutes stop short of the hours
+const noDrift = (y) => y < SNOW_TOP || (y >= GAP_Y && y < GAP_Y + 3);
 
 const T_SAND = 1; // sand that stays: the dune, heaps on shoulders
 const T_FRESH = 2; // the thread and spills: becomes dune sand when it lands there
@@ -449,14 +452,14 @@ export default {
       for (let j = 0; j < 4; j++) lut[P_WATER + j] = pack(wL + wOff[j], wC * Math.cos(wHue), wC * Math.sin(wHue));
       streakPx = pack(wL, wC * Math.cos(wHue), wC * Math.sin(wHue), 150);
       streakPx2 = pack(wL, wC * Math.cos(wHue), wC * Math.sin(wHue), 70);
-      const sL = fl ? Math.max(0.99, Lg) : 0.72;
+      const sL = fl ? Math.max(0.99, Lg) : lerp(0.7, 0.76, g); // a little dimmer at night
       for (let j = 0; j < 4; j++) lut[P_SNOW + j] = pack(sL - j * 0.016, -0.002, -0.01 - 0.004 * (1 - g));
 
       shadowPx = E.sun * fl > 0.02 ? pack(0.22, 0.012, 0.025, Math.round(52 * E.sun * fl)) : 0;
       const mL = fl ? Lg - 0.14 : Lg + 0.17;
       motePx = pack(mL, ground[1] + 0.01 * E.haze, ground[2] + 0.035 * E.haze, 170);
       // the veil of fog (or brown haze) hanging in banks: 32 strengths of one tint
-      veilA = Math.max(E.fog * 0.6, E.haze * 0.24);
+      veilA = Math.max(E.fog * 0.6, E.haze * 0.24) * lerp(0.55, 1, g); // thinner at night, so it does not light the room
       veilPx[0] = 0;
       for (let q = 1; q < 32; q++) veilPx[q] = veilA > 0.01 ? pack(mL, ground[1] + 0.012 * E.haze, ground[2] + 0.04 * E.haze, Math.round((q / 31) * veilA * 255)) : 0;
 
@@ -601,9 +604,9 @@ export default {
           const ty = topY[a];
           if (ty > 3 && len >= 4 && rnd() % 100 < 90) {
             const c1 = a + (rnd() % len);
-            const h1 = r ? 3 + (rnd() % 5) : 2 + (rnd() % 2); // low on the hours, to keep air under the date
+            const h1 = r ? 3 + (rnd() % 3) : 2 + (rnd() % 2); // low on the hours, to keep air under the date
             const c2 = len > 20 ? a + (rnd() % len) : -99;
-            const h2 = r ? 2 + (rnd() % 5) : 2;
+            const h2 = r ? 2 + (rnd() % 3) : 2;
             for (let x = a; x < cx; x++) {
               const edge = Math.min(x - a + 1, cx - x);
               const h = Math.min(edge, Math.max(h1 - Math.abs(x - c1), h2 - Math.abs(x - c2)));
@@ -1328,7 +1331,7 @@ export default {
           }
           const under = q < N ? type[q] : T_WALL;
           const cap = under === T_INK ? 1 : under === T_GLUE ? E.snowCap : E.snowCap + 2;
-          if (depth >= cap && ((r >>> 8) & 7) === 0) {
+          if ((depth >= cap || noDrift(y)) && ((r >>> 8) & 7) === 0) {
             type[i] = 0;
             live[y] = 2;
           }
@@ -1525,8 +1528,10 @@ export default {
           const tb = type[i + COLS];
           if (tb === 0 || tb === T_SNOW || tb === T_WATER || clear < 4) continue;
           if (inBand[i]) continue;
+          const room = noDrift(y) ? 0 : y < GAP_Y ? y - SNOW_TOP + 1 : y - GAP_Y - 2;
+          if (room < 1) continue;
           const cap = tb === T_INK ? 1 : tb === T_GLUE ? E.snowCap : E.snowCap + 2;
-          const d = Math.min(clear - 1, Math.max(1, Math.round(cap * (0.55 + (rnd() % 100) / 220))));
+          const d = Math.min(clear - 1, room, Math.max(1, Math.round(cap * (0.55 + (rnd() % 100) / 220))));
           for (let k = 0; k < d; k++) {
             type[i - k * COLS] = T_SNOW;
             col[i - k * COLS] = P_SNOW + (rnd() & 3);

@@ -99,7 +99,7 @@ export default {
       .mu .glow { position: absolute; left: 0; top: 0; width: 1500px; height: 1300px; opacity: 0; will-change: opacity;
         background: radial-gradient(closest-side, rgba(226,224,255,0.9), rgba(200,205,255,0.35) 45%, rgba(190,200,255,0) 100%); }
       .mu .band { position: absolute; left: 0; overflow: visible; z-index: 6; will-change: transform; }
-      .mu .band text { font-family: ${SANS}; fill: currentColor; font-kerning: normal; }
+      .mu .band text { font-family: ${SANS}; fill: currentColor; font-kerning: normal; paint-order: stroke fill; stroke-width: 8px; stroke-linejoin: round; }
       .mu .wire { fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; opacity: 0.7; }
       .mu .rime { fill: none; stroke: #f4f6f8; stroke-width: 3; stroke-linecap: round; }
       .mu .band .temp { font-size: 140px; font-weight: 700; letter-spacing: -0.005em; }
@@ -109,7 +109,7 @@ export default {
       .mu .lab { font-size: 28px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; }
       .mu .soft { font-size: 34px; font-weight: 400; }
       .mu .ampmBox { position: absolute; overflow: visible; z-index: 6; will-change: transform; }
-      .mu .ampm { font-family: ${DISPLAY}; font-size: 108px; font-weight: 900; fill: currentColor; letter-spacing: 0.01em; }
+      .mu .ampm { font-family: ${DISPLAY}; font-size: 108px; font-weight: 900; fill: currentColor; letter-spacing: 0.01em; paint-order: stroke fill; stroke-width: 12px; stroke-linejoin: round; }
       .mu .fact { position: absolute; left: ${MARGIN}px; top: 1738px; width: ${W - 2 * MARGIN}px; z-index: 6; will-change: transform;
         font-family: ${SERIF}; font-style: italic; font-size: 46px; line-height: 56px; max-height: 112px; overflow: hidden;
         text-wrap: balance; letter-spacing: 0.003em; }
@@ -163,6 +163,10 @@ export default {
       const mist = smoothstep(3.5, 0.3, s.weather.visibility); // fog, or driving snow
       const murk = smoothstep(9, 4, s.weather.visibility) * (1 - mist) * day; // summer haze
       const dim = smoothstep(0.02, 0.14, day) * (1 - smoothstep(0.4, 0.85, day)); // twilight: the low air darkens first
+      // late twilight: a sky still bright from the camera is brought down, so
+      // the room is dark once the day has gone (and the ground spends as little
+      // of dusk in mid-grey as it can); an already dark sky is left alone
+      const nightDim = 0.5 * smoothstep(0.3, 0.08, day);
       const px = skyImg.data;
       for (let j = 0; j < SR; j++) {
         const v = j / (SR - 1);
@@ -199,6 +203,7 @@ export default {
           ca += hz * (0.004 - ca);
           cb += hz * (0.03 - cb);
           // the city under a night sky: a low warm lift along the bottom
+          L *= 1 - nightDim * smoothstep(0.2, 0.45, L);
           L += 0.035 * glow;
           ca += 0.008 * glow;
           cb += 0.014 * glow;
@@ -553,7 +558,7 @@ export default {
       const tp = svg("textPath", { href: `#mu-w${w}` }, kids);
       const text = svg("text", { class: cls, "text-anchor": anchor, dy: -17 }, tp);
       bands[w].append(text);
-      return { text, tp, w };
+      return { text, tp, w, right: anchor === "end", width: 0 };
     };
     const place = (item, x) => {
       const f = (x - WX0) / 8;
@@ -691,9 +696,9 @@ export default {
     const INK_DAY = "#0b0d12";
     const INK_NIGHT = "#d2c8b2"; // birds lit from below by the city
     const INK_DUSK = "#ece6d6"; // the same birds catching the last light on a mid-toned sky
-    const TYPE_DAY = "#07080b";
-    const TYPE_NIGHT = "#e2dccd";
-    const FLIP = 0.15; // sky luminance where dark and pale type read equally well
+    const TYPE_DAY = "#050608";
+    const TYPE_NIGHT = "#f5f1e8"; // near-white: at the switch even this only just reads
+    const FLIP = 0.168; // sky luminance where dark and pale type read equally well
     let birdFlip = 0.1; // the same for birds, which stay silhouettes for as long as there is daylight
     const ALPHA = [0.86, 0.95, 1];
     const WIDTH = [1.8, 2.2, 2.6];
@@ -726,6 +731,8 @@ export default {
           ampmInk = side;
           ampmBox.style.color = side;
         }
+        // a halo of the sky's own colour behind the type, so a bird passing
+        // behind a letter never merges with it
         const mean = lumRegion(60, 1020, 100, 1400);
         birdFlip = lerp(0.155, 0.085, s.daylight);
         pale = mix(INK_NIGHT, INK_DUSK, smoothstep(0.012, 0.08, mean));
@@ -735,6 +742,12 @@ export default {
         const heavy = s.weather.kind === "storm" || s.weather.kind === "rain";
         const tint = heavy ? mix(sk.mean, "#05060a", 0.35) : mix(sk.mean, s.daylight > 0.5 ? "#ffffff" : "#8a7d74", 0.2 + 0.4 * s.daylight);
         cloudTint = tint;
+        // a halo of the sky's own colour behind the type, so a bird passing
+        // behind a letter never merges with it (AM/PM sits where the cloud
+        // bands thin out, so its halo takes a share of their tint)
+        const cop = clamp(s.weather.cloud / 100) * (0.5 - 0.2 * (1 - s.daylight)) + 0.25 * smoothstep(3.5, 0.3, s.weather.visibility);
+        ampm.style.stroke = mix(skyHexAt(950, MIN_BASE - 50), tint, 0.3 * clamp(cop));
+        for (const t of caps) t.text.style.stroke = skyHexAt(t.right ? 840 : 240, wireY(t.w, t.right ? 840 : 240) - 40);
         // ghosts take the ink that reads on their own patch of sky
         for (let k = 0; k < 4; k++) drawGhost(k);
       }
@@ -1105,7 +1118,7 @@ export default {
         if (cj < 0) cj = 0; else if (cj >= SR) cj = SR - 1;
         dbk[i] = (skyLum[cj * SC + ci] < birdFlip ? 1 : 0) + 2;
       }
-      for (let b = 0; b < 4; b++) {
+      for (let b = 0; b < 0; b++) {
         ctx.fillStyle = dotStyles[b];
         ctx.beginPath();
         for (let i = b < 2 ? 0 : NDG; i < ND; i++) {

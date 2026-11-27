@@ -100,7 +100,7 @@ export default {
       .wt .date { position: absolute; left: 64px; top: 60px; font-size: 48px; line-height: 56px; font-weight: 700;
                   font-stretch: 112%; white-space: nowrap; letter-spacing: -0.005em; }
       .wt .hdr { position: absolute; left: 64px; right: 64px; top: 150px; display: flex; align-items: center; gap: 44px; }
-      .wt .temp { flex: none; margin-left: -6px; font-size: 156px; line-height: 150px; font-weight: 800; font-stretch: 125%;
+      .wt .temp { flex: none; font-size: 156px; line-height: 150px; font-weight: 800; font-stretch: 125%;
                   letter-spacing: -0.03em; white-space: nowrap; }
       .wt .cw { min-width: 0; display: flex; flex-direction: column; gap: 18px; padding-top: 6px; }
       .wt .cond { font-size: 48px; line-height: 56px; font-weight: 500; font-stretch: 100%; white-space: nowrap; }

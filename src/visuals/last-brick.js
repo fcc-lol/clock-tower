@@ -86,6 +86,7 @@ const AMPM_ROW = 18;
 const MIN_ROW = 24;
 const SLOT_A = 1;
 const SLOT_B = 10;
+const SLOT_H = 5;
 
 function stampDigit(map, d, c0, r0) {
   for (const [x, y, w, h] of DIGITS[d] || []) for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) map[(r0 + y + r) * COLS + c0 + x + c] = 1;
@@ -100,9 +101,10 @@ function buildSteel(map, hh, mm, ampm) {
   if (hh.length > 1) {
     stampDigit(map, +hh[0], SLOT_A, HOUR_ROW);
     stampDigit(map, +hh[1], SLOT_B, HOUR_ROW);
-  } else stampDigit(map, +hh, SLOT_A, HOUR_ROW);
-  stampLetter(map, ampm[0], SLOT_A, AMPM_ROW);
-  stampLetter(map, "M", SLOT_A + 4, AMPM_ROW);
+  } else stampDigit(map, +hh, SLOT_H, HOUR_ROW); // a lone hour stands in the middle, over the minutes
+  const a0 = hh.length > 1 ? SLOT_A : SLOT_H; // AM/PM lines up under the hour
+  stampLetter(map, ampm[0], a0, AMPM_ROW);
+  stampLetter(map, "M", a0 + 4, AMPM_ROW);
   stampDigit(map, +mm[0], SLOT_A, MIN_ROW);
   stampDigit(map, +mm[1], SLOT_B, MIN_ROW);
 }
@@ -139,7 +141,7 @@ const CSS = `
 .lb-a { display: flex; align-items: flex-end; height: 136px; }
 .lb-temp { font-size: 228px; line-height: 136px; height: 136px; white-space: nowrap; letter-spacing: 0.01em; }
 .lb-cw { margin-left: 44px; min-width: 0; height: 136px; }
-.lb-temp.nd { font-family: "Silkscreen", monospace; font-size: 150px; line-height: 136px; }
+.lb-temp .nd { position: relative; top: -64px; font-family: "Silkscreen", monospace; font-size: 132px; margin-right: 0.08em; }
 .lb-cond { font-size: 84px; line-height: 70px; height: 70px; white-space: nowrap; }
 .lb-au { display: flex; align-items: baseline; margin-top: 24px; height: 42px; white-space: nowrap; }
 .lb-au .lb-v { margin: 0 44px 0 14px; line-height: 42px; font-size: 64px; }
@@ -1112,14 +1114,6 @@ export default {
       node.textContent = value;
       return true;
     };
-    // the region of the effects layer drawn this frame (cleared next frame)
-    let dX0 = 0, dY0 = 0, dX1 = W, dY1 = H;
-    const ext = (x0, y0, x1, y1) => {
-      if (x0 - 2 < dX0) dX0 = Math.max(0, x0 - 2);
-      if (y0 - 2 < dY0) dY0 = Math.max(0, y0 - 2);
-      if (x1 + 2 > dX1) dX1 = Math.min(W, x1 + 2);
-      if (y1 + 2 > dY1) dY1 = Math.min(H, y1 + 2);
-    };
     let lastMs = null;
     let lastQ = null;
     let ink = STEEL_DAY;
@@ -1348,10 +1342,10 @@ export default {
 
       // ----- everything that moves -----
       const fc = fx.ctx;
-      // clear only what was drawn last frame: a whole-stage clear would also
-      // make the browser recomposite the whole stage every frame
-      if (dX1 > dX0) fc.clearRect(dX0, dY0, dX1 - dX0, dY1 - dY0);
-      dX0 = W; dY0 = H; dX1 = 0; dY1 = 0;
+      // a whole-canvas clear: the browser then drops last frame's drawing
+      // instead of keeping it queued (a partial clear lets thousands of
+      // queued lantern fills pile up and stall a frame for a second)
+      fc.clearRect(0, 0, W, H);
       const dark = 1 - (unlit - U0) / (1 - U0); // 1 at night
       if (dark > 0.03) {
         // the ball is a lantern: the glaze near it shows its daylight colour,
@@ -1376,7 +1370,6 @@ export default {
             fc.fillStyle = kind[i] === 1 ? colLit[i] : STEEL_DAY;
             fc.fillRect(x + 3, y + 3, BW - 6, BH - 7);
           }
-          ext(b.x - LAMP, b.y - LAMP, b.x + LAMP, b.y + LAMP);
         }
         if (flash > 0.01) {
           // far lightning: the whole glaze, softly, for a moment
@@ -1386,7 +1379,6 @@ export default {
             fc.fillStyle = colLit[i];
             fc.fillRect(WX + (i % COLS) * BW + 1, WY + ((i / COLS) | 0) * BH + 1, BW - 2, BH - 2);
           }
-          ext(WX, WY, WR, WB);
         }
         fc.globalAlpha = 1;
       }
@@ -1409,7 +1401,6 @@ export default {
           const y = WY + ((i / COLS) | 0) * BH;
           fc.globalAlpha = a;
           fc.fillRect(x + 1, y + 1, BW - 2, BH - 2);
-          ext(x, y, x + BW, y + BH);
         }
       }
       fc.globalAlpha = 1;
@@ -1439,7 +1430,6 @@ export default {
         fc.globalAlpha = Math.min(1, shL[j] * 2.2);
         fc.fillStyle = colLit[shI[j]];
         fc.fillRect(-w / 2, -BH * 0.22, w, BH * 0.44);
-        ext(shX[j] - 36, shY[j] - 36, shX[j] + 36, shY[j] + 36);
       }
       fc.setTransform(1, 0, 0, 1, 0, 0);
       fc.globalAlpha = 1;
@@ -1462,7 +1452,6 @@ export default {
           if (z < 0.5) continue;
           any = true;
           fc.rect(ptX[i] - z / 2, ptY[i] - z / 2, z, z);
-          ext(ptX[i] - z, ptY[i] - z, ptX[i] + z, ptY[i] + z);
         }
         if (any) {
           fc.fillStyle = kd === 0 ? ink : kd === 1 ? snowCol : rainCol;
@@ -1482,7 +1471,6 @@ export default {
           fc.rect(k * 12, FLOOR - h, 12, h + 1);
         }
         fc.fill();
-        ext(0, FLOOR - 16, W, FLOOR + 2);
       }
 
       // the paddle
@@ -1495,7 +1483,6 @@ export default {
         fc.fillRect(x0 + 4, PAD_Y, PAD_W - 8, 2);
         fc.fillStyle = "rgba(74,60,36,0.3)";
         fc.fillRect(x0 + 4, PAD_Y + PAD_H - 3, PAD_W - 8, 3);
-        ext(x0, PAD_Y, x0 + PAD_W, PAD_Y + PAD_H);
       }
 
       // the balls and their trails: long and molten in heat, short and icy in cold
@@ -1524,7 +1511,6 @@ export default {
               px = b.trail[j];
               py = b.trail[j + 1];
               fc.lineTo(px, py);
-              ext(px - BR, py - BR, px + BR, py + BR);
             }
             fc.stroke();
           }
@@ -1532,7 +1518,6 @@ export default {
         const hs = Math.min(190, 64 * (1.1 + glow * 1.6));
         fc.globalAlpha = Math.min(1, 0.1 + glow * 0.6);
         fc.drawImage(haloCanvas, b.x - hs, b.y - hs, hs * 2, hs * 2);
-        ext(b.x - hs, b.y - hs, b.x + hs, b.y + hs);
         fc.globalAlpha = b.state === 1 ? 0.85 : 1;
         fc.fillStyle = "#fffaf0";
         fc.beginPath();
@@ -1545,7 +1530,12 @@ export default {
       const tx = s.text;
       if (put("date", dateEl, tx.date)) fitText(dateEl, 928);
       const tch = put("temp", tempEl, tx.temp);
-      if (tch) tempEl.classList.toggle("nd", !/\d/.test(tx.temp)); // the no-data dash sits better in the title face
+      if (tch && !/\d/.test(tx.temp)) {
+        // no reading: the dash is set in the title face (Jersey's sits on the
+        // floor), the degree sign stays the same as ever
+        tempEl.textContent = "";
+        tempEl.append(el("span", { class: "nd", text: tx.temp.slice(0, -1) }), tx.temp.slice(-1));
+      }
       if (put("cond", condEl, tx.condition) || tch) fitText(condEl, 928 - 44 - tempEl.offsetWidth);
       put("sunK", sunC.k, tx.sunLabel);
       put("sunV", sunC.v, tx.sunValue);

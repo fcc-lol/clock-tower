@@ -142,9 +142,11 @@ export default {
     // ---------------------------------------------------------------- numerals
     mctx.font = `700 1000px ${DFONT}`;
     let maxAsc = 0, maxDesc = 0, maxInk = 0;
-    const inkMid = {};
+    const inkMid = {}, inkW = {}, inkAsc = {};
     for (const ch of "0123456789") {
       const m = mctx.measureText(ch);
+      inkW[ch] = m.actualBoundingBoxLeft + m.actualBoundingBoxRight;
+      inkAsc[ch] = m.actualBoundingBoxAscent;
       maxAsc = Math.max(maxAsc, m.actualBoundingBoxAscent);
       maxDesc = Math.max(maxDesc, m.actualBoundingBoxDescent);
       maxInk = Math.max(maxInk, m.actualBoundingBoxLeft + m.actualBoundingBoxRight);
@@ -995,7 +997,7 @@ export default {
       const can = offscreen(W + 2 * PAD, h);
       return { can, x: can.getContext("2d") };
     };
-    const SKS = 0.5; // the sky is all soft gradients: a half-resolution bitmap is plenty
+    const SKS = 1; // full resolution, so the per-frame copy into the cuts is a plain 1:1 blit
     const skyB = (() => {
       const can = offscreen(W * SKS, SCENE_H * SKS);
       return { can, x: can.getContext("2d", { alpha: false }) };
@@ -1004,6 +1006,13 @@ export default {
     const midB = bmp(WATER + 50 - mid.top);
     const bridgeB = bmp(WATER + 40 - bridge.top);
     const nearB = bmp(PIER + 82 - NEAR_TOP);
+    // The far and mid skylines, the vellum between them and the bridge are composited into one
+    // bitmap, rebuilt only when one of their (whole-pixel) offsets or the window twinkle changes.
+    const CITY_TOP = Math.min(far.top, mid.top, bridge.top);
+    const cityB = (() => {
+      const can = offscreen(W, WATER + 50 - CITY_TOP);
+      return { can, x: can.getContext("2d"), key: "", ver: 0 };
+    })();
     const ditherPat = skyB.x.createPattern(dither, "repeat");
 
     // fade a layer into the fog toward its base (only over what is already drawn)
@@ -1222,6 +1231,7 @@ export default {
         j.have = j.want;
         j.at = t;
         j.bake();
+        cityB.ver++;
         if (!all) return true;
       }
       return false;
@@ -1327,13 +1337,31 @@ export default {
       nClip = 0;
       for (let i = 0; i < 5; i++) {
         if (!cur[i]) continue;
-        clip.set([Math.floor(SLOTS[i].cx - CELL / 2 - 8), SLOTS[i].y - 10, Math.ceil(CELL + 16), HD + 20], nClip * 4);
+        // the numeral's own ink box (a "1" is far narrower than its cell), with a little to spare
+        const iw = inkW[cur[i]] * K * SX, base = SLOTS[i].y + HD - BASE_DROP;
+        const top = Math.floor(base - inkAsc[cur[i]] * K - 6);
+        clip.set([Math.floor(SLOTS[i].cx - iw / 2 - 6), top, Math.ceil(iw + 12), Math.ceil(base + 6 - top)], nClip * 4);
         nClip++;
       }
       clip.set([Math.floor(W - MX - AMPM_W - 10), R1B + 6, Math.ceil(AMPM_W + 20), STRIP - 12], nClip * 4);
       nClip++;
     };
     const wrapX = (v, span) => ((v % span) + span) % span;
+
+    // the windows on the turn, flickering slowly (tt is the twinkle clock)
+    const twinkle = (x, wins, ox, color, lit, tt) => {
+      if (lit < 0.01) return;
+      const i0 = litIndex(wins, lit - 0.05), i1 = litIndex(wins, lit + 0.05);
+      if (i1 <= i0) return;
+      x.fillStyle = color;
+      x.beginPath();
+      for (let i = i0; i < i1; i++) {
+        const th = wins[i * 3 + 2];
+        if (th + 0.05 * Math.sin(tt * (3 + th * 9) + th * 40) < lit) x.rect(wins[i * 3] + ox, wins[i * 3 + 1], 3.2, 4.2);
+      }
+      x.fill();
+    };
+    let cityPf = 0, cityPm = 0, cityPb = 0, cityV3 = 0, cityTw = 0, cityVer = -1, cityV3a = 0;
 
     const drawScene = (s) => {
       const w = s.weather, t = s.t, n = P.n;
@@ -1350,9 +1378,14 @@ export default {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = "source-over";
-      // a whole-canvas clear lets the browser drop the last frame's drawing instead of keeping it queued
-      scene.clear();
-      // the sky, only where the cuts are
+      // No full clear: the sheet is opaque outside the cuts, and the sky is copied opaquely over
+      // every cut each frame, so whatever lies outside them never shows.
+      // everything is drawn only inside the numerals' boxes: nothing else can be seen
+      ctx.save();
+      ctx.beginPath();
+      for (let i = 0; i < nClip; i++) ctx.rect(clip[i * 4], clip[i * 4 + 1], clip[i * 4 + 2], clip[i * 4 + 3]);
+      ctx.clip();
+      // the sky
       for (let i = 0; i < nClip; i++) {
         const x = clip[i * 4], y = clip[i * 4 + 1], cw = clip[i * 4 + 2], ch = clip[i * 4 + 3];
         ctx.drawImage(skyB.can, x * SKS, y * SKS, cw * SKS, ch * SKS, x, y, cw, ch);
@@ -1530,33 +1563,44 @@ export default {
       if (vA > 0.01) for (let i = 0; i < 3; i++) drawVellum(vellums[i], vA * VEL_A[i], null);
 
       // the city, far to near; each layer's windows that are on the turn twinkle
+      if (s.frame > 3) { ctx.restore(); return; }
       const lit = P.lit;
-      const slow = t * 0.05;
-      const twinkle = (wins, ox, color) => {
-        if (lit < 0.01) return;
-        const i0 = litIndex(wins, lit - 0.05), i1 = litIndex(wins, lit + 0.05);
-        if (i1 <= i0) return;
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        for (let i = i0; i < i1; i++) {
-          const th = wins[i * 3 + 2];
-          if (th + 0.05 * Math.sin(slow * (3 + th * 9) + th * 40) < lit) ctx.rect(wins[i * 3] + ox, wins[i * 3 + 1], 3.2, 4.2);
+      const pf = Math.round(swayX * 2), pm = Math.round(swayX * 5), pb = Math.round(swayX * 8);
+      const v3 = vellums[3];
+      const v3a = vA > 0.01 ? vA * VEL_A[3] : 0;
+      const v3off = v3a > 0 ? Math.round(-wrapX(v3.x0 - drift * v3.speed, VW)) : 0;
+      const tw = lit >= 0.01 ? Math.floor(t * 2) : 0; // the twinkle is slow: twice a second is plenty
+      if (cityPf !== pf || cityPm !== pm || cityPb !== pb || cityV3 !== v3off || cityTw !== tw || cityVer !== cityB.ver || cityV3a !== v3a) {
+        cityPf = pf; cityPm = pm; cityPb = pb; cityV3 = v3off; cityTw = tw; cityVer = cityB.ver; cityV3a = v3a;
+        const x = cityB.x;
+        x.setTransform(1, 0, 0, 1, 0, 0);
+        x.clearRect(0, 0, cityB.can.width, cityB.can.height);
+        x.setTransform(1, 0, 0, 1, 0, -CITY_TOP);
+        const tt = tw * 0.5 * 0.05;
+        x.drawImage(farB.can, pf - PAD, far.top);
+        twinkle(x, far.wins, pf, P.winC[0], lit, tt);
+        x.drawImage(midB.can, pm - PAD, mid.top);
+        twinkle(x, mid.wins, pm, P.winC[1], lit, tt);
+        if (v3a > 0) {
+          // a vellum sheet between the city and the bridge
+          const y = Math.round(v3.top - v3.amp - 4);
+          x.globalAlpha = v3a;
+          x.drawImage(v3.can, v3off, y);
+          x.drawImage(v3.can, v3off + VW, y);
+          if (v3.fade) {
+            x.fillStyle = v3.fade;
+            x.fillRect(0, y + v3.hb, W, XF);
+            x.fillStyle = P.vellum;
+            x.fillRect(0, y + v3.hb + XF, W, v3.bot - y - v3.hb - XF);
+          }
+          x.globalAlpha = 1;
         }
-        ctx.fill();
-      };
-      let px = Math.round(swayX * 2);
-      ctx.drawImage(farB.can, px - PAD, far.top);
-      twinkle(far.wins, px, P.winC[0]);
-      px = Math.round(swayX * 5);
-      ctx.drawImage(midB.can, px - PAD, mid.top);
-      twinkle(mid.wins, px, P.winC[1]);
+        x.drawImage(bridgeB.can, pb - PAD, bridge.top);
+      }
+      ctx.drawImage(cityB.can, 0, CITY_TOP);
 
-      // a vellum sheet between the city and the bridge
-      if (vA > 0.01) drawVellum(vellums[3], vA * VEL_A[3], null);
-
-      // the bridge, and the train on its rod
-      px = Math.round(swayX * 8);
-      ctx.drawImage(bridgeB.can, px - PAD, bridge.top);
+      // the train on its rod
+      const px = pb;
       const tc = (t + 20) / 64;
       const tk = Math.floor(tc), tp = tc - tk;
       const dir = tk % 2 ? -1 : 1;
@@ -1602,12 +1646,12 @@ export default {
       }
 
       // the near shore, and a pennant on each gantry in the wind
-      px = Math.round(swayX * 14);
-      ctx.drawImage(nearB.can, px - PAD, NEAR_TOP);
+      const pn = Math.round(swayX * 14);
+      ctx.drawImage(nearB.can, pn - PAD, NEAR_TOP);
       ctx.fillStyle = P.pennantC;
       ctx.beginPath();
       for (let g = 0; g < 2; g++) {
-        const gx = gantries[g][0] + px, k = gantries[g][1];
+        const gx = gantries[g][0] + pn, k = gantries[g][1];
         const sy = PIER - 296 * k - 22 * k - 28;
         const len = (30 + 20 * gusty) * (lat > 0 ? 1 : -1);
         const fl = Math.sin(t * (1.6 + 3 * gusty) + g) * (2 + 5 * gusty);
@@ -1619,7 +1663,7 @@ export default {
       ctx.fill();
 
       // rain: threads hung from above, leaning with the wind
-      if (false && w.falling && w.falling !== "snow" && w.intensity > 0.01) {
+      if (w.falling && w.falling !== "snow" && w.intensity > 0.01) {
         const nThreads = Math.min(NR, Math.round(30 + 120 * w.intensity));
         const slant = clamp(lat * w.wind * 0.012, -0.38, 0.38);
         const speed = (w.falling === "drizzle" ? 130 : 250) + 240 * w.intensity;
@@ -1681,6 +1725,7 @@ export default {
         }
         ctx.fill();
       }
+      ctx.restore();
     };
 
     // ---------------------------------------------------------------- frame
@@ -1754,7 +1799,7 @@ export default {
           wrap.style.setProperty("--hl", P.hl);
         }
 
-        if (s.frame < 3) drawScene(s);
+        drawScene(s);
 
         // cloud shadows crossing the front sheet on a broken-cloud day
         const shade = (1 - P.n) * smoothstep(8, 35, w.cloud) * (1 - smoothstep(70, 95, w.cloud)) * (w.falling ? 0 : 1);

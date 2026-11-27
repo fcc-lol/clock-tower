@@ -176,7 +176,7 @@ export default {
         --paper: #f3ead6; --ink: #1b2030; --ink2: #4a4f5c; --string: #efe6d2; --stk: #ffb060; --stkink: #1b2030;
         --hole: #223; --base: #fbf5e6; --accent: #ffd; --emb: rgba(0,0,0,.3); --tsh: .2; --shx: 6px; --shy: 9px; }
       .rh .ground, .rh .flash { position: absolute; inset: 0; }
-      .rh .flash { background: #cdd3ff; opacity: 0; }
+      .rh .flash { background: #cdd3ff; opacity: 0; will-change: opacity; } /* its own layer: a rumble must not repaint the ground */
       .rh .tag { position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 3; will-change: transform; }
       .rh .str { position: absolute; left: -1.5px; top: 0; width: 3px; background: var(--string); border-radius: 2px; }
       .rh .knot { position: absolute; left: -5px; top: -6px; width: 10px; height: 10px; border-radius: 50%; background: var(--string); }
@@ -277,7 +277,7 @@ export default {
       comp: f32(NN), compA: f32(NN), compB: f32(NN), px: f32(NP), py: f32(NP),
       morph: 1, twist: 1, cx: 0, cy: 0, wax: 0, way: 0,
       tie: 0, low: 0, ice: new Int16Array(3), iceLen: f32(3), iceN: 0, iceGrow: 1,
-      dripJ: 0, tieAX: 0, tieAY: 0, glint: R.range(0, 30), frostF: f32(72), frostL: f32(72), frostS: f32(72),
+      dripJ: 0, dripW: 34, tieAX: 0, tieAY: 0, glint: R.range(0, 30), frostF: f32(72), frostL: f32(72), frostS: f32(72),
     });
     const slots = [makeSlot(0, 0), makeSlot(0, 1), makeSlot(1, 2), makeSlot(1, 3)];
     for (const sl of slots) {
@@ -356,14 +356,29 @@ export default {
         }
       }
       sl.tie = sl.low;
-      // where the heat makes it drip: low on the numeral, toward the gap between the tags
+      // where the heat makes it drip: low on the numeral, toward the gap between the tags,
+      // and only from the underside of a level run of tube (a wide neck) or from a
+      // downward-pointing end (a narrow one), so the neck never sticks out into the air
       let bd = -1e9;
+      sl.dripW = 0;
       for (const st of def.strokes) {
-        for (let j = st[0] * SUB + 1; j < st[1] * SUB; j++) {
+        const a0 = st[0] * SUB, b0 = st[1] * SUB;
+        for (let j = a0; j <= b0; j++) {
           if (tmpY[j] < maxY - 70) continue;
+          const a = Math.max(a0, j - 2), b = Math.min(b0, j + 2);
+          const tx = tmpX[b] - tmpX[a], ty = tmpY[b] - tmpY[a];
+          const inner = j > a0 + SUB / 2 && j < b0 - SUB / 2;
+          const level = inner && Math.abs(ty) < 0.22 * Math.hypot(tx, ty);
+          const downEnd = !st[2] && (j === a0 || j === b0) && Math.abs(tx) < 0.5 * Math.abs(ty) &&
+            tmpY[j] > tmpY[j === a0 ? a0 + 1 : b0 - 1];
+          if (!level && !downEnd) continue;
           const sc = tmpY[j] + 0.9 * tmpX[j];
-          if (sc > bd) { bd = sc; sl.dripJ = j; }
+          if (sc > bd) { bd = sc; sl.dripJ = j; sl.dripW = level ? 34 : 10; }
         }
+      }
+      if (!sl.dripW) { // nothing suitable: the lowest point, with a narrow neck
+        for (const st of def.strokes) for (let j = st[0] * SUB + 1; j < st[1] * SUB; j++) if (tmpY[j] > bd) { bd = tmpY[j]; sl.dripJ = j; }
+        sl.dripW = 10;
       }
       sl.iceN = 0;
       const pick = rng(seed + d * 31 + sl.index * 7);
@@ -604,7 +619,7 @@ export default {
       if (P.fog > 0.02) {
         // fog veils the toy: every tone drifts toward the colour of the fog
         const fogC = mix(gTop, "#f2f4f6", lerp(0.35, 0.6, day));
-        const v = 0.24 * P.fog;
+        const v = 0.32 * P.fog;
         pal.body = mix(pal.body, fogC, v); pal.light = mix(pal.light, fogC, v); pal.shade = mix(pal.shade, fogC, v);
         pal.rim = mix(pal.rim, fogC, v); pal.spec = mix(pal.spec, fogC, v * 0.5);
       }
@@ -636,10 +651,12 @@ export default {
         const acc = 12 * Math.pow(mph, 1.45);
         sl.wax = P.wx * acc;
         sl.way = P.wy * acc * 0.3;
+        // the hours slump onto the minutes but are not let sink into them, so the time stays crisp
+        const sagF = ((sl.row ? P.sag : Math.min(P.sag, 30)) * P.w2) / 1.82;
         for (let i = 0; i < NN; i++) {
           // still air is never quite still: a slow breathing
           sl.fx[i] = sl.wax * (0.75 + 0.5 * noise.n2(i * 0.31 + sl.index * 5.1, t * 0.9)) + 150 * noise.n2(i * 0.23 + sl.index * 9.7, t * 0.21);
-          sl.fy[i] = sl.way + 120 * noise.n2(i * 0.23 + sl.index * 3.3 + 40, t * 0.17) + (P.sag * P.w2) / 1.82;
+          sl.fy[i] = sl.way + 120 * noise.n2(i * 0.23 + sl.index * 3.3 + 40, t * 0.17) + sagF;
         }
       }
     }
@@ -743,8 +760,12 @@ export default {
       // the two tags under the minutes keep clear of each other and of the frame: when their
       // knots are close, each card slides along its string (the hole sits off centre)
       {
+        // The cards also make room for the way the wind will swing them: in a steady
+        // wind each one rests leaning downwind, its foot moved by about D px.
         const A = tags[1], B = tags[2];
-        const L2 = A.x - A.w / 2, R2 = A.x + A.w / 2, L3 = B.x - B.w / 2, R3 = B.x + B.w / 2;
+        const leanM = Math.sin(Math.atan(Math.tan(clamp(P.wind * 0.011, 0, 0.6))));
+        const DA = P.wx * leanM * (A.len + A.h), DB = P.wx * leanM * (B.len + B.h);
+        const L2 = A.x - A.w / 2 + Math.min(0, DA), R2 = A.x + A.w / 2, L3 = B.x - B.w / 2, R3 = B.x + B.w / 2 + Math.max(0, DB);
         let a = Math.max(0, 60 - L2), b = -Math.max(0, R3 - 1020);
         const need = Math.max(0, 48 - (L3 + b - (R2 + a)));
         const roomA = Math.max(0, L2 + a - 60), roomB = Math.max(0, 1020 - (R3 + b));
@@ -777,14 +798,15 @@ export default {
         const g = 2300;
         const w0 = g / arm;
         const flutter = noise.n2(s.t * 2.3 + k * 13, 3.3) * mph * 0.01 + noise.n2(s.t * 0.3 + k * 7, 8.8) * 0.02;
-        const acc = -w0 * Math.sin(tg.th) + w0 * (P.wx * lean + flutter) * Math.cos(tg.th) - ((pvx - tg.pvx) / Math.max(dt, 0.008)) / arm * 0.5;
+        // (a positive angle swings the foot to the left, so an eastward wind is a negative push)
+        const acc = -w0 * Math.sin(tg.th) - w0 * (P.wx * lean + flutter) * Math.cos(tg.th) - ((pvx - tg.pvx) / Math.max(dt, 0.008)) / arm * 0.5;
         tg.pvx = pvx;
         tg.om = (tg.om + acc * dt) / (1 + 0.55 * dt);
         tg.th += tg.om * dt;
         // keep the card inside the frame (and off the numerals) however hard it blows
         const cx = tx + tg.shift;
-        let roomR = 1030 - (cx + tg.w / 2);
-        let roomL = k === 0 ? cx - tg.w / 2 - (zoneL - 10) : cx - tg.w / 2 - 50;
+        let roomR = (k === 0 ? 1040 : 1030) - (cx + tg.w / 2);
+        let roomL = k === 0 ? cx - tg.w / 2 - (zoneL + 4) : cx - tg.w / 2 - 50;
         if (k === 1) roomR = Math.min(roomR, tags[2].x + tags[2].shift - tags[2].w / 2 - (cx + tg.w / 2) - 30);
         if (k === 2) roomL = Math.min(roomL, cx - tg.w / 2 - (tags[1].x + tags[1].shift + tags[1].w / 2) - 30);
         const full = tg.len + tg.h;
@@ -1150,16 +1172,17 @@ export default {
         const tipY = ay + 22 + drip.len;
         const k = clamp(drip.len / 150);
         const r = drip.state === 0 ? lerp(14, 27, k) : 9;
-        const neck = drip.state === 0 ? lerp(30, 8, k) : 5;
+        const neck = drip.state === 0 ? lerp(sl.dripW > 20 ? 30 : 20, 8, k) : 5;
+        const sw = sl.dripW;
         for (let pass = 0; pass < 2; pass++) {
           const o = pass ? 3 : 0;
           const nk = neck - (pass ? 2.4 : 0);
           ctx.fillStyle = pass ? pal.body : pal.shade;
           ctx.beginPath();
-          ctx.moveTo(ax - 34 - nk + o * LX, ay);
+          ctx.moveTo(ax - sw - nk + o * LX, ay);
           ctx.quadraticCurveTo(ax - nk + o * LX, ay + 18, ax - nk + o * LX, tipY - 4);
           ctx.lineTo(ax + nk + o * LX, tipY - 4);
-          ctx.quadraticCurveTo(ax + nk + o * LX, ay + 18, ax + 34 + nk + o * LX, ay);
+          ctx.quadraticCurveTo(ax + nk + o * LX, ay + 18, ax + sw + nk + o * LX, ay);
           ctx.fill();
         }
         if (drip.state === 0) bead(ax, tipY, r, 1.12);

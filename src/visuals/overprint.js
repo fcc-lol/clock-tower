@@ -83,6 +83,7 @@ uniform vec2 u_dry;   // during the print-in: how much lighter the last pull's d
 uniform vec4 u_stamp; // xy centre, zw half size of the stamped box (z = 0: none)
 uniform vec2 u_srot;  // its angle: sin, cos
 uniform vec4 u_c;     // ink C (rgb) and how much of the night it is: on black stock snow is printed in it
+uniform vec2 u_gale;  // x: how far the wind staggers the clear-sky bars (px, signed), y: their slow sway
 
 const vec2 PIV = vec2(${glf(PX)}, ${glf(PY)});
 const vec2 RS = vec2(${SIN.toFixed(6)}, ${COS.toFixed(6)});
@@ -103,13 +104,13 @@ float fbm(vec2 p) { return 0.5 * vn(p) + 0.3 * vn(p * 2.03 + 7.1) + 0.2 * vn(p *
 float box(vec2 q, vec2 lo, vec2 hi) { return max(max(lo.x - q.x, q.x - hi.x), max(lo.y - q.y, q.y - hi.y)); }
 
 // Scattered round specks, one per cell at most. dens is the share of cells that hold one.
-float specks(vec2 x, float cell, float dens, float sd) {
+float specks(vec2 x, float cell, float dens, float sd, float px) {
   vec2 g = x / cell;
   vec2 i = floor(g), f = fract(g);
   float h = h21(i + sd);
   vec2 c = vec2(h21(i + sd + 3.1), h21(i + sd + 7.7)) * 0.56 + 0.22;
   float r = 0.09 + 0.15 * h21(i + sd + 11.3);
-  float aa = 0.8 / cell;
+  float aa = px / cell;
   return step(h, dens) * smoothstep(r + aa, r - aa, length(f - c));
 }
 
@@ -119,7 +120,8 @@ void main() {
   vec2 q = PIV + vec2(d.x * RS.y - d.y * RS.x, d.x * RS.x + d.y * RS.y);   // block coordinates
   float seed = u_mo.w;
   float gain = u_sky.y;
-  float soft = 0.75 + 0.9 * gain;
+  float pxs = ${glf(W)} / u_res.x;           // stage px per drawn pixel: edges never get sharper than one pixel
+  float soft = max(0.75 + 0.9 * gain, 0.8 * pxs);
   // a roller re-inking a plate: above it the new pull, below it the last one
   float newA = smoothstep(u_roll.x + 6.0, u_roll.x - 6.0, p.y);
   float newB = smoothstep(u_roll.y + 6.0, u_roll.y - 6.0, p.y);
@@ -141,10 +143,10 @@ void main() {
   float rr = length(fract(hp) - 0.5);
   float rad = mix(sqrt(tone / 3.14159), 0.74, smoothstep(0.62, 1.0, tone)) + 0.035 * gain * (1.0 - tone)
     + 0.016 * sin(u_time * 0.7 + n * 21.0) * (1.0 - tone);
-  float haa = (0.9 + 0.8 * gain) / 14.0;
+  float haa = max(0.9 + 0.8 * gain, 0.8 * pxs) / 14.0;
   float dotA = max(smoothstep(rad + haa, rad - haa, rr), step(0.992, tone));
   // bad air: the sky ink goes dusty, a fine stipple of paper showing through
-  if (u_fx.z > 0.002) dotA *= 1.0 - specks(qa + u_sky.zw * 0.3, 8.0, u_fx.z, seed + 21.0) * 0.85;
+  if (u_fx.z > 0.002) dotA *= 1.0 - specks(qa + u_sky.zw * 0.3, 8.0, u_fx.z, seed + 21.0, 0.8 * pxs) * 0.85;
 
   // ---- plate B: the temperature field, carrying the weather ---------------
   vec2 qb = q - offB;
@@ -165,12 +167,14 @@ void main() {
   float tin = 1.0;    // coverage inside the field
   float tout = 0.0;   // what the plate throws across the sky field
 
-  // clear sky: three bold flat bars thrown across the sky field, beside the hour
+  // clear sky: three bold flat bars thrown across the sky field, beside the hour;
+  // a strong wind staggers them downwind, each one swaying slowly on its own
   if (u_fx.x > 0.002) {
     float yb = qb.y - 452.0;
     float kk = floor(yb / 96.0);
     float fy = yb - kk * 96.0;
-    float bar = step(0.0, kk) * step(kk, 2.0) * smoothstep(soft, -soft, max(max(612.0 - qb.x, qb.x - B1.x), max(-fy, fy - 52.0)) + wobB);
+    float bx = qb.x - u_gale.x * (kk - 1.0 + 0.4 * sin(u_gale.y + kk * 2.1));
+    float bar = step(0.0, kk) * step(kk, 2.0) * smoothstep(soft, -soft, max(max(612.0 - bx, bx - B1.x), max(-fy, fy - 52.0)) + wobB);
     tout = max(tout, bar * u_fx.x);
   }
 
@@ -183,7 +187,7 @@ void main() {
     float li = floor(u);
     float fu = abs(fract(u) - 0.5);
     float m = vn(vec2(li * 3.17, v * 0.0042 + li * 0.37));
-    float aa = (0.8 + 0.7 * gain) / 15.0;
+    float aa = max(0.8 + 0.7 * gain, 0.8 * pxs) / 15.0;
     float win = (0.15 + 0.2 * rain) * (0.5 + 1.0 * m);
     float wout = (0.07 + 0.15 * rain) * (0.3 + 1.0 * m) * smoothstep(0.3, 0.5, m);
     float on = smoothstep(0.0, 0.06, rain);
@@ -198,7 +202,8 @@ void main() {
     float fr = fract(yy);
     float th = (qb.y - 300.0) / (B1.y - 380.0);   // rules thicken down the sheet
     th = th * th * 1.15 + 0.22 * (vn(vec2(qb.x * 0.0032 + u_sky.z * 0.004, li * 0.71 + seed)) - 0.5);
-    float ln = smoothstep(th + 0.05, th - 0.05, fr) * step(0.03, th);
+    float fw = max(0.05, 0.6 * pxs / 26.0);
+    float ln = smoothstep(th + fw, th - fw, fr) * step(0.03, th);
     tin = mix(tin, ln, fog);
     tout = max(tout, ln * fog);
   }
@@ -207,8 +212,9 @@ void main() {
   float drop = 0.0;
   if (snow > 0.002) {
     vec2 fall = vec2(u_mo.y * u_wx.y, u_mo.y);
-    drop = max(specks(q - fall, 27.0, snow * 0.62, seed + 1.0), specks(q - fall * 0.62 + 90.0, 17.0, snow * 0.4, seed + 5.0));
-    tout = max(tout, specks(qb - fall * 0.8 + 40.0, 22.0, snow * 0.55, seed + 9.0));
+    float spx = 0.8 * pxs;
+    drop = max(specks(q - fall, 27.0, snow * 0.62, seed + 1.0, spx), specks(q - fall * 0.62 + 90.0, 17.0, snow * 0.4, seed + 5.0, spx));
+    tout = max(tout, specks(qb - fall * 0.8 + 40.0, 22.0, snow * 0.55, seed + 9.0, spx));
     // at night no flake falls behind the temperature column, so nothing sits behind those letters
     drop *= mix(1.0, smoothstep(-6.0, 6.0, box(q, C0, C1)), u_c.w);
   }

@@ -178,7 +178,7 @@ export default {
       const padT = Math.ceil(dz + capMax + 12);
       const bw = Math.ceil(cellW + padX * 2);
       const bh = Math.ceil(padT + inkH + 3);
-      return { kind, px, font: `${px}px ${SLAB}`, dz, capMax, k, cellW, inkH, padX, padT, bw, bh, oy: bh - 3 };
+      return { kind, px, font: `${px}px ${SLAB}`, dz, capMax, k, cellW, inkH, padX, padT, bw, bh, oy: bh - 3, cache: new Map() };
     };
     const MPX = 540;
     const HPX = 470;
@@ -410,39 +410,49 @@ export default {
       const c = sl.cls;
       if (!str) { sl.chains = []; sl.nrv = 0; sl.mask = null; return; }
       sl.oy = c.oy;
-      if (c.kind === 0) {
-        meas.font = sl.font;
-        const m = meas.measureText(str);
-        sl.ox = c.bw / 2 - (m.actualBoundingBoxRight - m.actualBoundingBoxLeft) / 2;
-      } else if (c.kind === 1) {
-        meas.font = sl.font;
-        const m = meas.measureText("M");
-        sl.ox = c.bw / 2 - (m.actualBoundingBoxRight - m.actualBoundingBoxLeft) / 2;
-        const p = meas.measureText(str[0]);
-        sl.ox2 = c.bw / 2 - (p.actualBoundingBoxRight - p.actualBoundingBoxLeft) / 2;
-        sl.oy2 = sl.oy - Math.round(m.actualBoundingBoxAscent) - Math.round(c.dz * 0.5) - 1;
+      // a digit's shape (its mask and traced edges) is the same every time it
+      // comes round: kept, so a fast-running clock does not re-trace it each frame
+      const hit = c.kind !== 2 ? c.cache.get(str) : null;
+      if (hit) {
+        sl.ox = hit.ox; sl.ox2 = hit.ox2; sl.oy2 = hit.oy2; sl.mask = hit.mask;
+        sl.chains = hit.chains; sl.side = hit.side;
+        sl.inkL = hit.inkL; sl.inkR = hit.inkR; sl.inkT = hit.inkT; sl.inkB = hit.inkB;
       } else {
-        const [a, b] = str.split("|");
-        const room = W - MX * 2 - 56;
-        const w100 = advance(`100px ${SLAB}`, a, DATE_LS * 100) + advance(`100px ${SLAB}`, b, DATE_LS * 100);
-        sl.px = Math.max(46, Math.min(DPX, Math.floor((100 * room) / w100)));
-        sl.font = `${sl.px}px ${SLAB}`;
-        const ls = DATE_LS * sl.px;
-        sl.chars = [];
-        sl.cx = [];
-        meas.font = sl.font;
-        let x = c.padX;
-        for (const ch of a) { sl.chars.push(ch); sl.cx.push(x); x += meas.measureText(ch).width + ls; }
-        x = c.padX + (W - MX * 2) - advance(sl.font, b, ls);
-        for (const ch of b) { sl.chars.push(ch); sl.cx.push(x); x += meas.measureText(ch).width + ls; }
+        if (c.kind === 0) {
+          meas.font = sl.font;
+          const m = meas.measureText(str);
+          sl.ox = c.bw / 2 - (m.actualBoundingBoxRight - m.actualBoundingBoxLeft) / 2;
+        } else if (c.kind === 1) {
+          meas.font = sl.font;
+          const m = meas.measureText("M");
+          sl.ox = c.bw / 2 - (m.actualBoundingBoxRight - m.actualBoundingBoxLeft) / 2;
+          const p = meas.measureText(str[0]);
+          sl.ox2 = c.bw / 2 - (p.actualBoundingBoxRight - p.actualBoundingBoxLeft) / 2;
+          sl.oy2 = sl.oy - Math.round(m.actualBoundingBoxAscent) - Math.round(c.dz * 0.5) - 1;
+        } else {
+          const [a, b] = str.split("|");
+          const room = W - MX * 2 - 56;
+          const w100 = advance(`100px ${SLAB}`, a, DATE_LS * 100) + advance(`100px ${SLAB}`, b, DATE_LS * 100);
+          sl.px = Math.max(46, Math.min(DPX, Math.floor((100 * room) / w100)));
+          sl.font = `${sl.px}px ${SLAB}`;
+          const ls = DATE_LS * sl.px;
+          sl.chars = [];
+          sl.cx = [];
+          meas.font = sl.font;
+          let x = c.padX;
+          for (const ch of a) { sl.chars.push(ch); sl.cx.push(x); x += meas.measureText(ch).width + ls; }
+          x = c.padX + (W - MX * 2) - advance(sl.font, b, ls);
+          for (const ch of b) { sl.chars.push(ch); sl.cx.push(x); x += meas.measureText(ch).width + ls; }
+        }
+        const cols = Math.ceil(c.bw / MS);
+        const rows = Math.ceil(c.bh / MS);
+        sl.mask = mask(cols, rows, (ctx) => {
+          ctx.scale(1 / MS, 1 / MS);
+          drawShape(ctx, sl, 0, 0);
+        }).data;
+        analyse(sl, cols, rows);
+        if (c.kind !== 2) c.cache.set(str, { ox: sl.ox, ox2: sl.ox2, oy2: sl.oy2, mask: sl.mask, chains: sl.chains, side: sl.side, inkL: sl.inkL, inkR: sl.inkR, inkT: sl.inkT, inkB: sl.inkB });
       }
-      const cols = Math.ceil(c.bw / MS);
-      const rows = Math.ceil(c.bh / MS);
-      sl.mask = mask(cols, rows, (ctx) => {
-        ctx.scale(1 / MS, 1 / MS);
-        drawShape(ctx, sl, 0, 0);
-      }).data;
-      analyse(sl, cols, rows);
       // the same figure put up at the same instant always weathers the same way
       sl.seed = (Math.floor((s.ms - sl.age * 1000) / 1000 + 0.5) % 100000) + sl.id * 7919;
       seedRivulets(sl);
@@ -1850,11 +1860,12 @@ export default {
       // ---- text
       const tx = s.text;
       if (put("temp", n.temp, tx.temp)) {
-        // Alfa Slab's dash sits on the baseline: lift it to the middle of the figures
+        // Alfa Slab's dash is a low, heavy block that reads as an icon next to
+        // the degree ring: lift it to the middle of the figures and slim it
         const di = tx.temp.indexOf("–");
         if (di >= 0) {
           n.temp.textContent = tx.temp.slice(0, di);
-          n.temp.append(el("span", { style: { display: "inline-block", transform: "translateY(-0.3em)" } }, "–"), tx.temp.slice(di + 1));
+          n.temp.append(el("span", { style: { display: "inline-block", transform: "translateY(-0.3em) scale(0.72, 0.6)" } }, "–"), tx.temp.slice(di + 1));
         }
       }
       if (shown.tempFor !== tx.temp) {

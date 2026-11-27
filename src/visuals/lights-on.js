@@ -51,8 +51,8 @@ const SHOP = 1378, FASCIA = 1394, FRONT = 1518, WALK = 1800;
 const NWIN = 90;
 const colX = (c) => GX + c * CW + (CW - WW) / 2;
 const rowY = (r) => (r < 5 ? HOURS_Y + r * CH : MINS_Y + (r - 5) * CH) + 12;
-const BOARD_X = 236, BOARD_Y = 50, BOARD_W = 780, BOARD_H = 146;
-const AWN_X0 = 336, AWN_X1 = 744, AWN_T = FRONT + 2, AWN_B = 1690;
+const BOARD_X = 236, BOARD_Y = 44, BOARD_W = 780, BOARD_H = 160;
+const AWN_X0 = 336, AWN_X1 = 744, AWN_T = FRONT + 2, AWN_B = 1700;
 
 // ---- palette ------------------------------------------------------------------
 const BRICK = "#84402e", MORTAR = "#9b6c5a", BRICK_AVG = "#874736";
@@ -206,19 +206,18 @@ export default {
       .lo .sky::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,10,0.16), rgba(255,255,255,0.05)); }
       .lo .tx { position: absolute; white-space: nowrap; text-align: center; line-height: 1; }
       .lo .date { left: 64px; width: 952px; top: 254px; height: 68px; font: 600 46px/68px "Cinzel", serif; letter-spacing: 0.13em; padding-left: 0.13em; box-sizing: border-box; text-transform: uppercase; color: var(--date); text-shadow: 0 2px 0 rgba(0,0,0,0.55); }
-      .lo .fact { position: absolute; left: ${BOARD_X + 22}px; top: ${BOARD_Y + 12}px; width: ${BOARD_W - 44}px; height: ${BOARD_H - 24}px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; }
-      .lo .factL { font-weight: 500; font-size: 25px; line-height: 30px; letter-spacing: 0.22em; padding-left: 0.22em; text-transform: uppercase; color: var(--gilt); white-space: nowrap; }
-      .lo .factV { font-weight: 500; font-size: 38px; line-height: 43px; letter-spacing: 0.01em; color: var(--bill); margin-top: 3px; max-width: 100%; }
-      .lo .moonL { left: 64px; width: 236px; top: 1403px; font-weight: 500; font-size: 24px; letter-spacing: 0.42em; padding-left: 0.42em; box-sizing: border-box; color: var(--giltDim); }
-      .lo .moonN { left: 64px; width: 236px; font-weight: 600; font-size: 43px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--gilt); }
+      .lo .fact { position: absolute; left: ${BOARD_X + 22}px; top: 62px; width: ${BOARD_W - 44}px; height: 136px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; }
+      .lo .factL { font-weight: 500; font-size: 24px; line-height: 28px; letter-spacing: 0.22em; padding-left: 0.22em; text-transform: uppercase; color: var(--gilt); white-space: nowrap; }
+      .lo .factV { font-weight: 500; font-size: 38px; line-height: 43px; letter-spacing: 0.01em; color: var(--bill); margin-top: 8px; max-width: 100%; }
+      .lo .moonN { left: 64px; width: 236px; font-weight: 600; font-size: 38px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--gilt); }
       .lo .ampm { left: 348px; width: 384px; top: ${FASCIA}px; height: 124px; font-weight: 700; font-size: 100px; line-height: 124px; letter-spacing: 0.08em; padding-left: 0.08em; box-sizing: border-box; color: var(--chan); text-shadow: 3px 4px 0 rgba(0,0,0,0.6), 0 0 26px var(--chanGlow); }
       .lo .sideL { top: ${FASCIA}px; width: 108px; height: 124px; font-weight: 600; font-size: 44px; line-height: 124px; letter-spacing: 0.06em; color: var(--gilt); }
       .lo .led { top: 1566px; width: 108px; height: 140px; font-weight: 600; font-size: 64px; line-height: 140px; color: ${LED}; text-shadow: 0 0 14px rgba(255,80,40,0.55); }
       .lo .neonBox { position: absolute; left: 72px; top: 1554px; width: 220px; height: 164px; box-sizing: border-box; border: 3px solid ${NEON}; border-radius: 18px; box-shadow: 0 0 12px ${NEON_GLOW}, inset 0 0 12px ${NEON_GLOW}; opacity: 0.9; }
       .lo .sunL { left: 64px; width: 236px; top: 1576px; font-weight: 400; font-size: 34px; letter-spacing: 0.07em; color: ${NEON}; text-shadow: 0 0 8px ${NEON_GLOW}, 0 0 20px ${NEON_GLOW}; }
       .lo .sunV { left: 64px; width: 236px; top: 1622px; font-weight: 300; font-size: 74px; letter-spacing: 0.01em; color: ${NEON}; text-shadow: 0 0 9px ${NEON_GLOW}, 0 0 26px ${NEON_GLOW}; }
-      .lo .temp { left: 348px; width: 384px; top: 1522px; font-weight: 600; font-size: 112px; padding-left: 0.22em; box-sizing: border-box; color: var(--cream); }
-      .lo .cond { left: 348px; width: 384px; top: 1638px; font-weight: 500; font-size: 44px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--cream); }
+      .lo .temp { left: 348px; width: 384px; top: 1522px; font-weight: 600; font-size: 100px; padding-left: 0.22em; box-sizing: border-box; color: var(--cream); }
+      .lo .cond { left: 348px; width: 384px; top: 1641px; font-weight: 500; font-size: 44px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--cream); }
     `);
 
     const wrap = el("div", { class: "lo" });
@@ -258,9 +257,9 @@ export default {
     const factV = el("div", { class: "factV" });
     const factEl = el("div", { class: "fact" }, factL, factV);
     wrap.append(factEl);
-    tx("moonL", null, "MOON");
-    const moonA = tx("moonN", { top: "1431px" });
-    const moonB = tx("moonN", { top: "1473px" });
+    // the bar is named for tonight's moon, on two lines
+    const moonA = tx("moonN", { top: "1407px" });
+    const moonB = tx("moonN", { top: "1463px" });
     const ampmEl = tx("ampm");
     tx("sideL", { left: "782px" }, "AIR");
     tx("sideL", { left: "906px" }, "UV");
@@ -443,8 +442,9 @@ export default {
       for (const x of [34, W - 34]) { ctx.beginPath(); ctx.moveTo(x, 280); ctx.lineTo(x + 8, 288); ctx.lineTo(x, 296); ctx.lineTo(x - 8, 288); ctx.fill(); }
       R(STONE, 0, 322, W, 7); R(STONE_DK, 0, 329, W, 3);
 
-      // every window asleep: blind down in the recess
-      const blinds = ["#4a3029", "#46302a", "#4b3328", "#432f2b"];
+      // every window asleep: a shade drawn in a tone close to the brick, so by
+      // day the wall is one quiet field and the awake windows are the only figure
+      const blinds = ["#61392e", "#5d3a30", "#633d2f", "#5a3832"];
       for (let i = 0; i < NWIN; i++) {
         const x = colX(i % 9), y = rowY((i / 9) | 0);
         // flat arch of soldier bricks
@@ -453,7 +453,7 @@ export default {
         R("#1d1310", x - 2, y - 2, WW + 4, WH + 3);
         const b = blinds[(r() * blinds.length) | 0];
         R(b, x, y, WW, WH);
-        ctx.fillStyle = "rgba(0,0,0,0.2)";
+        ctx.fillStyle = "rgba(0,0,0,0.13)";
         for (let yy = y + 5; yy < y + WH - 3; yy += 5.4) ctx.fillRect(x, yy, WW, 1.2);
         R("rgba(255,235,210,0.07)", x, y, WW, 2);
         R("rgba(0,0,0,0.3)", x, y + WH - 5, WW, 5);
@@ -608,6 +608,11 @@ export default {
     const rain = new Float32Array(NR * 3), snow = new Float32Array(NS * 4);
     for (let i = 0; i < NR; i++) rain.set([r.range(-300, W + 300), r.range(0, H), r()], i * 3);
     for (let i = 0; i < NS; i++) snow.set([r.range(0, W), r.range(0, H), r(), r.range(0, TAU)], i * 4);
+    // leaves and scraps of paper the wind carries across the front: x, y, phase, size, depth
+    // (kept to the brick, between the frieze and the shopfronts, so nothing moving passes behind type)
+    const LEAF_T = 350, LEAF_B = SHOP - 12;
+    const NL = 56, leaves = new Float32Array(NL * 5);
+    for (let i = 0; i < NL; i++) leaves.set([r.range(-40, W + 40), r.range(LEAF_T, LEAF_B), r.range(0, TAU), r.range(6, 13), r()], i * 5);
     const stars = new Float32Array(40 * 3);
     for (let i = 0; i < 40; i++) stars.set([r.range(8, W - 8), r.range(6, ROOF - 14), r.range(1.2, 2.6)], i * 3);
 
@@ -718,6 +723,10 @@ export default {
       PAL.umbrella = under("#d9a531");
       PAL.steam = blend("#f2f3f6", "#7d849c", 1 - dl);
       PAL.star = "#dfe6ff";
+      // what the wind carries stays faintly visible after dark, as silhouettes on the lit rooms
+      const autumn = s.clock.monthIndex >= 9 && s.clock.monthIndex <= 11;
+      PAL.leaf = fogged(blend(autumn ? "#c9873a" : "#a99a6a", VEIL, va * 0.8), 0.5);
+      PAL.paper = fogged(blend("#ece6d8", VEIL, va * 0.8), 0.5);
       PAL.drip = blend("#e6eef6", "#93a2b6", 1 - dl);
 
       // signs: light letters on dark grounds, a little dimmer after dark
@@ -726,7 +735,6 @@ export default {
       const signNow = fogged(under(SIGN), 0.6);
       cssVar("--date", ensure(gilt, fogged(under(SIGN), 0.9), 5));
       cssVar("--gilt", ensure(gilt, signNow, 5));
-      cssVar("--giltDim", ensure(blend(gilt, "#8a744a", 0.3), signNow, 4.8));
       cssVar("--bill", ensure(cream, PAL.board, 6));
       cssVar("--cream", ensure(cream, PAL.awn, 5));
       cssVar("--chan", blend("#f4ead4", "#ffe6b4", nk));
@@ -1279,6 +1287,31 @@ export default {
           }
         }
 
+        // Leaves and litter blown along the front by the real wind (its speed and
+        // which way it blows), tumbling end over end; more of them the harder it blows.
+        const windK = smoothstep(8, 28, ws) * (snowK > 0.3 ? 0.4 : 1);
+        if (windK > 0.02) {
+          const n = Math.round(NL * windK), dir = windX >= 0 ? 1 : -1;
+          for (let pass = 0; pass < 2; pass++) {
+            fctx.fillStyle = pass ? PAL.paper : PAL.leaf; fctx.globalAlpha = 0.95; fctx.beginPath();
+            for (let i = pass; i < n; i += 2) {
+              const j = i * 5, ph = leaves[j + 2], z = leaves[j + 4];
+              leaves[j] += dir * ws * (9 + 7 * z) * dt;
+              leaves[j + 1] += (Math.sin(t * (1.1 + z) + ph) * (30 + ws) + 10) * dt;
+              if (leaves[j] > W + 40 || leaves[j] < -40 || leaves[j + 1] > LEAF_B || leaves[j + 1] < LEAF_T) {
+                leaves[j] = dir > 0 ? -30 : W + 30;
+                leaves[j + 1] = LEAF_T + 20 + r() * (LEAF_B - LEAF_T - 40);
+              }
+              const x = leaves[j], y = leaves[j + 1], sz = leaves[j + 3] * (0.8 + 0.4 * z);
+              const a = t * (2 + 3 * z) + ph, ca = Math.cos(a) * sz, sa = Math.sin(a) * sz;
+              const flip = 0.25 + 0.75 * Math.abs(Math.sin(t * (1.7 + z) + ph * 2)), cb = -sa * 0.55 * flip, sb = ca * 0.55 * flip;
+              fctx.moveTo(x + ca + cb, y + sa + sb); fctx.lineTo(x - ca + cb, y - sa + sb); fctx.lineTo(x - ca - cb, y - sa - sb); fctx.lineTo(x + ca - cb, y + sa - sb);
+            }
+            fctx.fill();
+          }
+          fctx.globalAlpha = 1;
+        }
+
         // rain
         if (rainK > 0.02) {
           const n = Math.round(NR * Math.pow(rainK, 0.8));
@@ -1317,7 +1350,10 @@ export default {
 
         // ---- the signs ----
         const tx_ = s.text;
-        if (put("date", dateEl, tx_.date)) fitText(dateEl, 952);
+        if (put("date", dateEl, tx_.date)) {
+          dateEl.style.letterSpacing = "";
+          if (fitText(dateEl, 952) < 44) { dateEl.style.letterSpacing = "0.05em"; fitText(dateEl, 952); }
+        }
         if (put("moon", moonA, tx_.moon.split(" ")[0])) { moonB.textContent = tx_.moon.split(" ").slice(1).join(" "); fitText(moonA, 236); fitText(moonB, 236); }
         put("ampm", ampmEl, tx_.ampm);
         if (put("aqi", aqiEl, tx_.aqi)) fitText(aqiEl, 104);
@@ -1326,8 +1362,9 @@ export default {
         if (put("sunV", sunV, tx_.sunValue)) fitText(sunV, 196);
         put("temp", tempEl, tx_.temp);
         if (put("cond", condEl, tx_.condition)) {
-          condEl.style.letterSpacing = "";
-          if (fitText(condEl, 372) < 44) { condEl.style.letterSpacing = "0"; fitText(condEl, 372); }
+          // sign-painter capitals; a long label closes up, then drops to lower case, before it would shrink below 44 px
+          condEl.style.letterSpacing = ""; condEl.style.textTransform = "";
+          if (fitText(condEl, 372) < 44) { condEl.style.letterSpacing = "0"; if (fitText(condEl, 372) < 44) { condEl.style.textTransform = "none"; fitText(condEl, 372); } }
         }
         if (shown.factV !== tx_.factValue || shown.factL !== tx_.factLabel) {
           put("factL", factL, tx_.factLabel);
@@ -1340,7 +1377,7 @@ export default {
             factV.style.whiteSpace = "nowrap"; factV.style.fontSize = "52px"; factV.style.lineHeight = "60px";
             if (factV.scrollWidth > BOARD_W - 60) {
               factV.style.whiteSpace = "normal";
-              for (const size of [40, 38, 36]) { factV.style.fontSize = `${size}px`; factV.style.lineHeight = `${size + 5}px`; if (factV.offsetHeight <= (size + 5) * 2 + 2) break; }
+              for (const size of [38, 36]) { const lh = Math.round(size * 1.24); factV.style.fontSize = `${size}px`; factV.style.lineHeight = `${lh}px`; if (factV.offsetHeight <= lh * 2 + 2) break; }
             }
           }
         }

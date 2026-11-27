@@ -191,7 +191,7 @@ function rasterDigits(rows, maxW, thr) {
 
 // The temperature, in the same face as the numerals, as one bitmap. At only
 // twelve rows a heavy face clogs: a high threshold keeps its counters open.
-const TEMP_THR = 160;
+const TEMP_THR = 185;
 let tempFs = 0;
 function rasterTemp(text, rows) {
   const ring = text.endsWith("°");
@@ -386,7 +386,7 @@ export default {
 
     // ----- per-disc data -----
     const r = rng(seed);
-    const NZ = makeNoise(seed + 11);
+    let NZ = null; // the noise field, made in prepare()
     const cxs = new Uint8Array(N); // column and row in its own grid
     const cys = new Uint8Array(N);
     const rowG = new Uint8Array(N); // row index shared by both grids (fine rows follow the wall's)
@@ -398,41 +398,6 @@ export default {
     const lagOf = new Float32Array(N); // every disc is a little late; a few are sticky
     const warp = new Float32Array(N); // bends the wind bands
     const perm = new Uint16Array(N);
-    for (let i = 0; i < N; i++) {
-      let x, y;
-      if (i < N1) {
-        x = i % COLS;
-        y = (i / COLS) | 0;
-        fxs[i] = x;
-        fys[i] = y;
-        rowG[i] = y;
-        pix[i] = y * 2 * UC + x * 2;
-        pcol[i] = x * 2;
-      } else {
-        const j = i - N1;
-        x = j % FCOLS;
-        y = (j / FCOLS) | 0;
-        fxs[i] = x * 0.5;
-        fys[i] = ROWS + y * 0.5;
-        rowG[i] = ROWS + y;
-        pix[i] = (FTOP / FP + y) * UC + x;
-        pcol[i] = x;
-      }
-      cxs[i] = x;
-      cys[i] = y;
-      bay[i] = BAYER[(y & 7) * 8 + (x & 7)];
-      const hh = Math.imul(i ^ seed, 0x9e3779b1) >>> 0;
-      lagOf[i] = (hh & 1023) < 20 ? 0.3 + ((hh >>> 10) & 255) / 1700 : ((hh >>> 18) & 1023) / 20480;
-      warp[i] = (NZ[(((fys[i] * 0.6) & 127) << 7) | ((fxs[i] * 0.6 + 90) & 127)] - 128) * 0.11;
-      perm[i] = i;
-    }
-    for (let i = N - 1; i > 0; i--) {
-      const j = Math.floor(r() * (i + 1));
-      const tmp = perm[i];
-      perm[i] = perm[j];
-      perm[j] = tmp;
-    }
-
     const lock = new Uint8Array(N);
     const lockNew = new Uint8Array(N);
     const want = new Uint8Array(N);
@@ -449,23 +414,63 @@ export default {
 
     // how much of the noise lies above each threshold, for the cloud cover
     const thrOf = new Int16Array(101);
-    {
-      const hist = new Uint32Array(256);
-      for (let y = 0; y < 128; y++) {
-        for (let x = 0; x < 128; x++) {
-          const n1 = NZ[(y << 7) | x];
-          const n2 = NZ[(((y * 2.3 + 40) & 127) << 7) | ((x * 2.3 + 70) & 127)];
-          hist[(n1 * 3 + n2) >> 2]++;
+    // The field's noise and every disc's own numbers. Made on the first frame,
+    // not here, so that arriving is split into short stalls (see frame()).
+    const prepareField = () => {
+      NZ = makeNoise(seed + 11);
+      for (let i = 0; i < N; i++) {
+        let x, y;
+        if (i < N1) {
+          x = i % COLS;
+          y = (i / COLS) | 0;
+          fxs[i] = x;
+          fys[i] = y;
+          rowG[i] = y;
+          pix[i] = y * 2 * UC + x * 2;
+          pcol[i] = x * 2;
+        } else {
+          const j = i - N1;
+          x = j % FCOLS;
+          y = (j / FCOLS) | 0;
+          fxs[i] = x * 0.5;
+          fys[i] = ROWS + y * 0.5;
+          rowG[i] = ROWS + y;
+          pix[i] = (FTOP / FP + y) * UC + x;
+          pcol[i] = x;
         }
+        cxs[i] = x;
+        cys[i] = y;
+        bay[i] = BAYER[(y & 7) * 8 + (x & 7)];
+        const hh = Math.imul(i ^ seed, 0x9e3779b1) >>> 0;
+        lagOf[i] = (hh & 1023) < 20 ? 0.3 + ((hh >>> 10) & 255) / 1700 : ((hh >>> 18) & 1023) / 20480;
+        warp[i] = (NZ[(((fys[i] * 0.6) & 127) << 7) | ((fxs[i] * 0.6 + 90) & 127)] - 128) * 0.11;
+        perm[i] = i;
       }
-      let acc = 0;
-      let v = 255;
-      for (let p = 1; p <= 100; p++) {
-        while (v > 0 && acc + hist[v] <= (p / 100) * 16384) acc += hist[v--];
-        thrOf[p] = v;
+      for (let i = N - 1; i > 0; i--) {
+        const j = Math.floor(r() * (i + 1));
+        const tmp = perm[i];
+        perm[i] = perm[j];
+        perm[j] = tmp;
       }
-      thrOf[0] = 999;
-    }
+
+      {
+        const hist = new Uint32Array(256);
+        for (let y = 0; y < 128; y++) {
+          for (let x = 0; x < 128; x++) {
+            const n1 = NZ[(y << 7) | x];
+            const n2 = NZ[(((y * 2.3 + 40) & 127) << 7) | ((x * 2.3 + 70) & 127)];
+            hist[(n1 * 3 + n2) >> 2]++;
+          }
+        }
+        let acc = 0;
+        let v = 255;
+        for (let p = 1; p <= 100; p++) {
+          while (v > 0 && acc + hist[v] <= (p / 100) * 16384) acc += hist[v--];
+          thrOf[p] = v;
+        }
+        thrOf[0] = 999;
+      }
+    };
 
     // ----- colours -----
     const img = under.ctx.createImageData(under.cols, under.rows);
@@ -974,8 +979,8 @@ export default {
       lagNext = 0;
     };
 
-    // ----- frost: ferns that grow in from the corners -----
-    {
+    // ----- frost: ferns that grow in from the corners (made on the first frame) -----
+    const prepareFrost = () => {
       const fr = rng(seed + 5);
       const markCell = (i, v) => {
         if (!frostOrd[i] || frostOrd[i] > v) frostOrd[i] = v;
@@ -1023,7 +1028,7 @@ export default {
       crystal(COLS, -1, 0.5 + fr.range(-0.08, 0.08), 50, 10);
       crystal(COLS, fr.range(38, 56), fr.range(0, 1), 32, 70);
       crystal(COLS, fr.range(100, 118), fr.range(0, 1), 28, 100);
-    }
+    };
 
     
     const gq = new Uint16Array(N);
@@ -1529,20 +1534,23 @@ export default {
       instant = false;
     };
 
-    // ----- set up: the wall is built on the first frame, complete. (Doing it
-    // there rather than here splits the work of arriving into two shorter
-    // stalls; the runner gives a piece unseen frames before it is cut to.)
-    let ready = false;
+    // ----- set up: the field is made on the first frame and the wall built,
+    // complete, on the second. (Splitting the work of arriving into three
+    // short stalls rather than one long one: the runner gives a piece unseen
+    // frames before it is cut to, and the previous piece keeps moving.)
+    let stage = 0;
     let lastMs = state.ms;
 
     return {
       frame(s) {
         const t = s.t;
         const dt = s.dt;
-        if (!ready) {
-          ready = true;
+        if (stage < 2) {
+          if (stage++ === 0) {
+            prepareField();
+            prepareFrost();
+          } else settle(s, t);
           lastMs = s.ms;
-          settle(s, t);
           return;
         }
         // the clock jumped (fast gallery, test steps, a wake from sleep)

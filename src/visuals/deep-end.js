@@ -56,7 +56,7 @@ const DIGITS = ["ABCDEF", "", "ABGED", "ABGCD", "FGBC", "AFGCD", "AFGECD", "ABC"
 const LETTERS = {
   A: [".#####.", "#######", "##...##", "##...##", "##...##", "#######", "#######", "##...##", "##...##", "##...##"],
   P: ["######.", "#######", "##...##", "##...##", "#######", "######.", "##.....", "##.....", "##.....", "##....."],
-  M: ["##...##", "###.###", "#######", "##.#.##", "##...##", "##...##", "##...##", "##...##", "##...##", "##...##"],
+  M: ["##...##", "###.###", "#######", "##.#.##", "##.#.##", "##...##", "##...##", "##...##", "##...##", "##...##"],
 };
 
 function buildDigit(ch) {
@@ -891,7 +891,8 @@ export default {
         mix3(U.veil, U.veil, skyMean, 0.12);
 
         // ----- light -----
-        const lamp = smoothstep(0.4, 0.1, day);
+        // the pool lights come on at dusk, sooner when rain or storm darkens the day
+        const lamp = smoothstep(0.42, 0.12, day * (1 - 0.35 * e.wet - 0.2 * e.storm));
         const low = smoothstep(26, 3, s.sun.alt);
         mix3(U.sunCol, COL.sunHigh, COL.sunLow, low * (1 - lamp));
         mix3(U.sunCol, U.sunCol, COL.lampCol, lamp);

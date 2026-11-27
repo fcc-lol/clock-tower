@@ -106,7 +106,7 @@ const CSS = `
 .cs .stack { flex: 1; min-width: 0; }
 .cs .cond { font-size: 54px; line-height: 1; white-space: nowrap; }
 .cs .ampm { flex: none; background: var(--accent); color: var(--on); font-size: 50px; line-height: 1; padding: 12px 16px 15px; border-radius: 10px; }
-.cs .col { position: absolute; left: 0; right: 0; top: 0; padding: 24px 34px; display: flex; flex-direction: column; }
+.cs .col { position: absolute; left: 0; right: 0; top: 0; padding: 21px 34px 24px; display: flex; flex-direction: column; }
 .cs .row1 { display: flex; justify-content: space-between; align-items: baseline; gap: 44px; font-size: 42px; line-height: 1; white-space: nowrap; }
 .cs .row2 { display: flex; align-items: baseline; gap: 56px; margin-top: 24px; font-size: 42px; line-height: 1; white-space: nowrap; }
 .cs .rule { height: 3px; margin-top: 28px; border-radius: 2px; background: var(--soft); opacity: 0.5; }
