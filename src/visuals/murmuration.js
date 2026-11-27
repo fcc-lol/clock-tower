@@ -520,6 +520,9 @@ export default {
         let k = 0;
         while (k < 3 && f > cum[k]) k++;
         if (k !== dsl[i] || slots[k].changed) {
+          // a speck whose digit has gone altogether (12 to 1) leaves at once,
+          // so the old figure does not linger to be misread
+          const gone = dsl[i] >= 0 && slots[dsl[i]].ch < 0;
           dsl[i] = k;
           newAnchor(slots[k]);
           dax[i] = aX; day_[i] = aY; dpsi[i] = fPsi;
@@ -527,7 +530,7 @@ export default {
             // fly there from wherever it is now, each bird in its own time
             dfx[i] = dX[i];
             dfy[i] = dY[i];
-            dtw[i] = -0.35 * hash(i, 7);
+            dtw[i] = gone ? 0.2 : -0.35 * hash(i, 7);
           }
         }
       }
@@ -1336,10 +1339,9 @@ export default {
         }
       }
       if (groundDirty) paintGround();
-      const sk = `skewX(${((-Math.atan(qs) * 180) / Math.PI).toFixed(2)}deg)`;
-      if (shown.ampmTf !== sk) {
-        shown.ampmTf = sk;
-        ampmBox.style.transform = sk;
+      if (shown.ampmTf !== qs) {
+        shown.ampmTf = qs;
+        ampmBox.style.transform = `skewX(${((-Math.atan(qs) * 180) / Math.PI).toFixed(2)}deg)`;
       }
       // clouds drift with the wind
       const ux = -Math.sin((wx.windDir * Math.PI) / 180);

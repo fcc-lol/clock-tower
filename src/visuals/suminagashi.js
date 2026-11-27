@@ -71,7 +71,7 @@ const SEAL_COL = 946; // centre line of the seal column down the right margin
 const SEAL_W = 100, SEAL_H = 176; // the AM/PM seal
 const SEAL_X = SEAL_COL - SEAL_W / 2; // its left edge
 const RS = 140; // the AQI and UV seals: their figures at 54 px, captions at 28
-const RS_GAP = 34;
+const RS_GAP = 40;
 const MORPH_S = 2.6; // seconds a changed numeral takes to melt into the next
 
 const SUMI = "#16130f";
@@ -508,23 +508,23 @@ export default {
       .sm .seal text { font-family: ${NUM_FAMILY}, serif; font-weight: 800; fill: var(--sealtext); text-anchor: middle; }
       .sm .head { position: absolute; left: 94px; right: 64px; top: 72px; white-space: nowrap; line-height: 1; }
       .sm .date { font-size: 64px; font-weight: 600; letter-spacing: 0.004em; }
-      .sm .sun { display: flex; align-items: center; margin-top: 26px; font-size: 48px; letter-spacing: 0.01em; }
+      .sm .sun { display: flex; align-items: center; margin-top: 42px; font-size: 48px; letter-spacing: 0.01em; }
       .sm .sun i { font-weight: 500; margin-right: 0.24em; }
       .sm .dot { flex: none; width: 11px; height: 11px; border-radius: 50%; background: var(--seal); margin: 4px 20px 0 2px; }
       .sm .ampm { position: absolute; }
       .sm .foot { position: absolute; left: ${NUM_LEFT + 6}px; right: 64px; bottom: 70px; }
       .sm .wx { display: flex; align-items: flex-end; }
       .sm .temp { font-family: ${NUM_FAMILY}, serif; font-weight: 800; font-size: 176px; line-height: 0.74; letter-spacing: -0.03em;
-        margin-right: 46px; white-space: nowrap; }
+        margin-right: 56px; white-space: nowrap; }
       .sm .temp.none .tn { display: inline-block; margin-right: 0.04em; transform: translateY(-0.15em) scaleY(1.45); }
       .sm .lines { padding-bottom: 1px; min-width: 0; }
-      .sm .cond { font-style: italic; font-size: 62px; line-height: 1; white-space: nowrap; margin-bottom: 32px; }
+      .sm .cond { font-style: italic; font-size: 62px; line-height: 1; white-space: nowrap; margin-bottom: 48px; }
       .sm .moon { font-weight: 500; font-size: 48px; line-height: 0.86; white-space: nowrap; letter-spacing: 0.01em; }
       .sm .seals { position: absolute; display: flex; flex-direction: column; gap: ${RS_GAP}px; }
       .sm .seal .cap { font-family: "Cormorant Garamond", serif; font-weight: 700; letter-spacing: 0.14em; }
-      .sm .fact { margin-top: 56px; }
+      .sm .fact { margin-top: 78px; }
       .sm .flabel { font-weight: 700; font-size: 28px; line-height: 1; letter-spacing: 0.16em; text-transform: uppercase; }
-      .sm .fvalue { font-style: italic; font-weight: 500; font-size: 50px; line-height: 1.2; margin-top: 14px; text-wrap: balance; }
+      .sm .fvalue { font-style: italic; font-weight: 500; font-size: 50px; line-height: 1.4; margin-top: 12px; text-wrap: balance; }
     `);
 
     const r = rng(seed);
@@ -562,8 +562,8 @@ export default {
     // each carved with its figure and a small caption
     const roundSeal = (caption) => {
       const s = makeSeal(RS, RS, true, r);
-      const t = svg("text", { x: RS / 2, y: 76, "font-size": 54 });
-      s.append(t, svg("text", { class: "cap", x: RS / 2 + 2, y: 109, "font-size": 28, text: caption }));
+      const t = svg("text", { x: RS / 2, y: 72, "font-size": 54 });
+      s.append(t, svg("text", { class: "cap", x: RS / 2 + 2, y: 111, "font-size": 28, text: caption }));
       return { box: s, text: t };
     };
     const aqi = roundSeal("AQI");
@@ -606,7 +606,7 @@ export default {
     ampmSeal.style.left = `${SEAL_X}px`;
     ampmSeal.style.top = `${Math.round(baseM - SEAL_H + 4)}px`;
     sealsNode.style.left = `${SEAL_COL - RS / 2}px`;
-    sealsNode.style.top = `${Math.round(baseM + 4 + 52)}px`;
+    sealsNode.style.top = `${Math.round(baseM + 4 + 60)}px`;
 
     // ----- the field, three buffers taking turns: this minute, the last, the next -----
     let bufCur = new Uint16Array(NCELL);
@@ -853,7 +853,7 @@ export default {
     // quietens it. A coloured sky (a blue noon, a red dusk) still wins, less
     // so in a heat wave. Hues are carried round the wheel, never blended, so
     // the ink does not turn to mud.
-    const SEASON_H = [262, 262, 300, 350, 338, 250, 190, 185, 150, 70, 52, 48, 290, 262];
+    const SEASON_H = [262, 262, 300, 4, 340, 250, 190, 185, 150, 70, 52, 48, 290, 262];
     const SEASON_AT = [0, 0.04, 0.17, 0.3, 0.38, 0.45, 0.52, 0.62, 0.7, 0.76, 0.84, 0.9, 0.96, 1];
     const steepL = { l: 0.6, c: 0.09, h: 262, w: 1 };
     function dayInk(s) {
@@ -1046,7 +1046,7 @@ export default {
           fValue.textContent = s.text.factValue;
           fValue.style.fontSize = "";
           // two lines at 50 px; only a fact that would need a third steps down
-          if (fact && fValue.offsetHeight > 50 * 1.2 * 2 + 4) fValue.style.fontSize = "44px";
+          if (fact && fValue.offsetHeight > 50 * 1.4 * 2 + 4) fValue.style.fontSize = "44px";
         }
 
         // ----- temperature: viscosity -----

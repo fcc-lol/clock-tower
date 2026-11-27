@@ -755,7 +755,7 @@ export default {
     };
 
     // ----- snowflakes: each one falls away from the viewer toward the spot it lands on -----
-    const NF = 420;
+    const NF = 320;
     const fl = new Float32Array(NF * 6); // land x, land y, phase, fall seconds, size, sideways drift
     for (let i = 0; i < NF; i++) {
       fl[i * 6] = r.range(-20, W + 20);
@@ -1121,7 +1121,8 @@ export default {
           shown.splashLight = `rgba(255,255,255,${(0.1 + 0.3 * dw).toFixed(3)})`;
           shown.splashDark = `rgba(10,20,40,${(0.2 + 0.1 * dw).toFixed(3)})`;
           shown.flakeShadow = `rgba(20,40,70,${(0.2 * dw).toFixed(3)})`;
-          shown.flakeFar = `rgba(255,255,255,${(0.3 * fb).toFixed(3)})`;
+          // by day the big near-the-eye flakes are a soft blue-grey, or white flakes vanish on pale stone
+          shown.flakeFar = `rgba(${Math.round(lerp(255, 150, dw))},${Math.round(lerp(255, 172, dw))},${Math.round(lerp(255, 200, dw))},${((0.3 + 0.12 * dw) * fb).toFixed(3)})`;
           shown.flakeNear = `rgba(255,255,255,${(0.75 * fb).toFixed(3)})`;
           shown.flakeLand = `rgba(255,255,255,${(0.85 * fb).toFixed(3)})`;
           shown.rainInk = `rgba(${Math.round(lerp(150, 235, dw))},${Math.round(lerp(225, 245, dw))},255,${(0.18 + 0.14 * e.rain).toFixed(2)})`;
@@ -1180,10 +1181,16 @@ export default {
           const streak = smoothstep(10, 30, wind);
           const sa = Math.atan2(U.wind[1], U.wind[0]);
           const ca = Math.cos(sa), sn = Math.sin(sa);
-          const p0 = dw > 0.15 ? -1 : 0; // flake shadows only show by day (they are what makes white flakes read on pale stone)
+          const streaking = streak > 0.05;
+          const p0 = dw > 0.15 ? -1 : 0; // flake shadows only show by day
+          ctx.lineCap = "round";
           for (let pass = p0; pass < 3; pass++) {
-            // the shadows of the falling flakes, then far (big, soft), near, landed
-            ctx.fillStyle = pass < 0 ? shown.flakeShadow : pass === 0 ? shown.flakeFar : pass === 1 ? shown.flakeNear : shown.flakeLand;
+            // the shadows of the near flakes, then far (big, soft), near, landed;
+            // driven flakes are drawn as short round-capped strokes, which is cheap
+            const strokeIt = streaking && pass < 2;
+            const style = pass < 0 ? shown.flakeShadow : pass === 0 ? shown.flakeFar : pass === 1 ? shown.flakeNear : shown.flakeLand;
+            if (strokeIt) (ctx.strokeStyle = style), (ctx.lineWidth = pass === 0 ? 10 : 5);
+            else ctx.fillStyle = style;
             ctx.beginPath();
             for (let i = 0; i < nFl; i++) {
               const j = i * 6;
@@ -1201,7 +1208,7 @@ export default {
               }
               const uf = (u * (fall + rest)) / fall; // 0..1 falling, above 1 lying where it landed
               const which = uf >= 1 ? 2 : uf > 0.55 ? 1 : 0;
-              if (pass < 0 ? which === 2 : which !== pass) continue;
+              if (pass < 0 ? which !== 1 : which !== pass) continue;
               let x = fl[j], y = fl[j + 1], sz;
               if (uf < 1) {
                 const up = 1 - uf;
@@ -1215,10 +1222,10 @@ export default {
                 sz = 2.4 * fl[j + 4] * (onWater ? 1 - melt : 1 - melt * melt * melt);
               }
               if (sz < 0.3) continue;
-              if (uf < 1 && streak > 0.05) {
-                const rx = sz * (1 + 2.6 * streak);
-                ctx.moveTo(x + rx * ca, y + rx * sn);
-                ctx.ellipse(x, y, rx, sz, sa, 0, TAU);
+              if (strokeIt) {
+                const len = sz * 2.6 * streak;
+                ctx.moveTo(x - ca * len, y - sn * len);
+                ctx.lineTo(x + ca * len, y + sn * len);
                 continue;
               }
               if (sz < 2) {
@@ -1228,7 +1235,8 @@ export default {
               ctx.moveTo(x + sz, y);
               ctx.arc(x, y, sz, 0, TAU);
             }
-            ctx.fill();
+            if (strokeIt) ctx.stroke();
+            else ctx.fill();
           }
         }
         if (nSp) {

@@ -1056,7 +1056,7 @@ export default {
       const vs = (h / env.lastH) * Math.exp(-c.damp * h);
       const ax = c.ax;
       const az = c.az;
-      const drag = c.tether ? 0.4 : 0.6;
+      const drag = c.tether ? 0.16 : 0.3;
       const rip = c.rip;
       const gy = GRAV * c.mass;
       for (let j = 1; j < rows; j++) {
@@ -1108,10 +1108,18 @@ export default {
             P[k3 + 1] += (ty0 - P[k3 + 1]) * 0.16;
             P[k3 + 2] += -P[k3 + 2] * 0.16;
           }
+          // the hem is stitched heavy: it may swing in and out but does not roll up sideways
+          const off0 = c.x + L.haul + (c.ax / GRAV) * 26;
+          for (let i = 1; i < cols - 1; i++) {
+            const k3 = (last + i) * 3;
+            P[k3] += (off0 + i * dx - P[k3]) * 0.05;
+          }
         } else {
-          // the small linen has weighted hems: it streams with the wind (never past about 35 degrees) but keeps its face to the room
-          const lean = clamp(c.ax / GRAV, -0.6, 0.6);
-          const drop = (c.h * 0.975) / Math.sqrt(1 + lean * lean);
+          // the small linen has weighted hems: it leans with the wind, only as far as the gap to its neighbours
+          // and the walls allows, and keeps its face to the room
+          const drop0 = c.h * 0.975;
+          const lean = clamp(c.ax / GRAV, -0.6, 0.6) * Math.min(1, 26 / drop0 / 0.6);
+          const drop = drop0 / Math.sqrt(1 + lean * lean);
           for (let s = 0; s < 2; s++) {
             const k3 = (last + (s ? cols - 1 : 0)) * 3;
             const px = c.x + L.haul + (s ? c.w : 0);

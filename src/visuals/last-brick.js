@@ -64,12 +64,12 @@ const PAD_W = 150;
 const PAD_H = 16;
 const BR = 9; // ball radius
 const QUARTER = 15 * 60 * 1000;
-const U0 = 0.66; // how much of its colour an unlit brick keeps at night
+const U0 = 0.62; // how much of its colour an unlit brick keeps at night
 const ROW_MS = 36 * 60 * 1000; // 24 hours over 40 courses
 const TRAIL = 48;
 
 const STEEL_DAY = "#f5eedd";
-const STEEL_NIGHT = "#adb1b9"; // moonlit steel
+const STEEL_NIGHT = "#9ba1aa"; // moonlit steel
 const NIGHT_GROUND = "#05060a";
 const NIGHT_SKY = "#080b16";
 
@@ -1230,7 +1230,7 @@ export default {
         // The air behind the wall is the sky as it is now, held deep so the
         // ivory always reads on it: cobalt at noon, slate under cloud, navy at
         // night with the city's sodium glow under a low ceiling of cloud.
-        const dk = Math.round(smoothstep(0.03, 0.55, dl) * 40) / 40;
+        const dk = Math.round(smoothstep(0.08, 0.6, dl) * 40) / 40;
         const cloud = clamp(s.weather.cloud / 100);
         const top = mix(NIGHT_SKY, adjust(s.sky.mean, { l: 0.3, c: (v) => Math.min(v * 0.9, 0.075) }), dk);
         // (low down it is the western sky: the studio looks across the river at Manhattan)
@@ -1255,7 +1255,7 @@ export default {
         // one background for the whole stage: the sky down to the horizon, then the ground
         wrap.style.background = `linear-gradient(to bottom, ${top} 0px, ${mix(top, bot, 0.45)} ${FLOOR / 2}px, ${bot} ${FLOOR}px, ${mix(ground, bot, 0.25)} ${FLOOR}px, ${ground} ${FLOOR + 160}px, ${ground} ${H}px)`;
         starA = (1 - smoothstep(0.02, 0.3, dl)) * Math.pow(1 - cloud, 1.5) * (1 - env.fog);
-        snowCol = mix("#d3d9e2", "#ffffff", k);
+        snowCol = mix("#bcc3ce", "#ffffff", k);
         rainCol = rgba(mix("#8fa2bd", "#e4eef7", k), 0.5 + 0.2 * k);
         trailCol = TRAIL_RAMP(clamp((s.weather.temp - 10) / 90));
         glaze(s);
@@ -1286,7 +1286,7 @@ export default {
       for (let k = 0; k < nCells; k++) {
         const i = cellList[k];
         cellFlag[i] = 0;
-        paintRange((i / COLS) | 0, i % COLS, i % COLS);
+        if (s.frame < 30) paintRange((i / COLS) | 0, i % COLS, i % COLS);
       }
       nCells = 0;
 
@@ -1334,7 +1334,7 @@ export default {
           const n = Math.min(SN, Math.round(80 + 400 * env.snow));
           const streak = Math.min(16, Math.abs(env.wind) * 0.45); // a driving wind draws the flakes out sideways
           ac.fillStyle = snowCol;
-          ac.globalAlpha = 0.85;
+          ac.globalAlpha = 0.48 + 0.37 * ((unlit - U0) / (1 - U0)); // softer in the dark: snow must not light the room
           ac.beginPath();
           for (let i = 0; i < n; i++) {
             if (!jumped) {
@@ -1395,7 +1395,8 @@ export default {
       if (rumble > 0) {
         rumble = Math.max(0, rumble - dt);
         const amp = 2 * Math.min(1, rumble / 1.5) * Math.min(1, (3.2 - rumble) * 2);
-        const tx = `translate(${(Math.sin(s.t * 13) * amp).toFixed(2)}px,${(Math.sin(s.t * 9.1 + 1) * amp * 0.5).toFixed(2)}px)`;
+        // (a slow tremor, a couple of pixels, never a buzz)
+        const tx = `translate(${(Math.sin(s.t * 6.3) * amp).toFixed(2)}px,${(Math.sin(s.t * 4.4 + 1) * amp * 0.5).toFixed(2)}px)`;
         wall.canvas.style.transform = tx;
         steelL.canvas.style.transform = tx;
         shiver = true;

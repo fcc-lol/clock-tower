@@ -18,7 +18,7 @@
 // heaps a mound under itself at the bottom.
 //
 // How the conditions drive it:
-//   seconds       a plumb thread of sand falls without stop down its lane with
+//   seconds       a thread of sand falls without stop down its lane with
 //                 a short gap at every second, so the tick runs down it, and
 //                 feeds the mound on the dune (which drains through a slot in
 //                 the rock beneath it)
@@ -32,7 +32,7 @@
 //                 streaks: they run off the numerals in little falls, sift
 //                 through the lettering, pool in the dune's hollows and seep away
 //   snow          slow white grains that settle on every shoulder, melt above 34 F
-//   wind          leans the rain and snow (the thread stays plumb), blows sand and
+//   wind          leans the rain, the snow and (within its lane) the thread, blows sand and
 //                 snow off every crest in streams, and makes the dune's surface
 //                 hop downwind so it creeps along the floor
 //   fog, bad air  a veil hanging in soft banks that slide along at their own
@@ -70,7 +70,8 @@ const CD_Y = 235;
 const MOON_R = 5; // the engraved line, in bedrock rows
 const SCAN_Y = 222; // the dune lives below this row
 const LH = 9; // height of the pixel letters
-const TEXT_END = 112; // no readout below the minutes reaches past this column
+const TEXT_END = 112;
+const LOW_Y = TEMP_Y + 2 * LH; // below this row, nothing may heap above the dune's ceiling // no readout below the minutes reaches past this column
 const SNOW_TOP = DATE_Y + LH + 5; // drifts on the hours stop short of the date
 const GAP_Y = HOUR_Y + GH * U; // and drifts on the minutes stop short of the hours
 const noDrift = (y) => y < SNOW_TOP || (y >= GAP_Y && y < GAP_Y + 3);
@@ -312,7 +313,7 @@ export default {
     };
 
     // ----- what the weather is doing, as numbers the automaton uses -----
-    const E = { rain: 0, snow: 0, wdir: 1, ws: 0, temp: 50, cloud: 0, fog: 0, haze: 0, sun: 0, lagP: 20, driftP: 0, rainDrift: 0, snowDrift: 0, melt: 0, seepP: 6, snowCap: 3 };
+    const E = { rain: 0, snow: 0, wdir: 1, ws: 0, temp: 50, cloud: 0, fog: 0, haze: 0, sun: 0, lagP: 20, driftP: 0, threadP: 0, rainDrift: 0, snowDrift: 0, melt: 0, seepP: 6, snowCap: 3 };
     function readWeather(s) {
       const w = s.weather;
       const f = w.falling;
@@ -331,6 +332,7 @@ export default {
       const heat = clamp((w.temp - 84) / 16);
       E.lagP = 20 + Math.round(heat * 70); // of 256: how often a falling grain hesitates
       E.driftP = Math.round(clamp(E.ws * 0.5, 0, 0.75) * 256);
+      E.threadP = Math.round(clamp(E.ws * 0.05, 0, 0.05) * 256); // the thread leans a little, inside its lane
       E.rainDrift = Math.round(clamp(E.ws * 0.42) * 256);
       E.snowDrift = Math.round(clamp(E.ws * 0.85, 0, 0.9) * 256);
       E.melt = clamp((w.temp - 34) / 14);
@@ -1234,7 +1236,9 @@ export default {
               let j = below;
               let yy = y + 1;
               if (t === T_FRESH && col[i] >= P_THREAD) {
-                // the thread falls plumb down its own lane
+                // the thread leans with the wind, but never out of its own lane
+                const nx = x + wdir;
+                if (((r >>> 8) & 255) < E.threadP && nx >= THREAD_X - 5 && nx <= THREAD_X + 6 && type[below + wdir] === 0) j = below + wdir;
               } else if (((r >>> 8) & 255) < driftP) {
                 const nx = x + wdir;
                 const jw = nx < 0 ? below + COLS - 1 : nx >= COLS ? below - COLS + 1 : below + wdir;
@@ -1362,6 +1366,13 @@ export default {
               sift(i, y, t);
               continue;
             }
+            if (y > LOW_Y && y < ceilRow[x] && ((r >>> 8) & 255) < 48) {
+              // a pool never rises into the readouts: what would, soaks away
+              type[i] = 0;
+              waterCount--;
+              live[y] = 2;
+              continue;
+            }
             const d = r & 2 ? 1 : -1;
             const okA = x + d >= 0 && x + d < COLS;
             const okB = x - d >= 0 && x - d < COLS;
@@ -1443,7 +1454,7 @@ export default {
           }
           const under = q < N ? type[q] : T_WALL;
           const cap = under === T_INK ? 1 : under === T_GLUE ? E.snowCap : E.snowCap + 2;
-          if ((depth >= cap || noDrift(y)) && ((r >>> 8) & 7) === 0) {
+          if ((depth >= cap || noDrift(y) || (y > LOW_Y && y < ceilRow[x])) && ((r >>> 8) & 7) === 0) {
             type[i] = 0;
             live[y] = 2;
           }
@@ -1601,7 +1612,8 @@ export default {
       // the thread, already falling
       for (let y = 0; y < FLOOR; y++) {
         for (let q = 0; q < 2; q++) {
-          const i = y * COLS + THREAD_X + q;
+          const lean = clamp(Math.round((E.wdir * y * E.threadP) / 384), -5, 5);
+          const i = y * COLS + THREAD_X + q + lean;
           if (type[i] === 0 && r() < 0.7 && (y + 3) % 90 > 8) {
             type[i] = T_FRESH;
             col[i] = P_THREAD + (q & 1);
@@ -1640,7 +1652,7 @@ export default {
           clear++;
           const tb = type[i + COLS];
           if (tb === 0 || tb === T_SNOW || tb === T_WATER || clear < 4) continue;
-          if (inBand[i]) continue;
+          if (inBand[i] || (y > LOW_Y && y < ceilRow[x])) continue;
           const room = noDrift(y) ? 0 : y < GAP_Y ? y - SNOW_TOP + 1 : y - GAP_Y - 2;
           if (room < 1) continue;
           const cap = tb === T_INK ? 1 : tb === T_GLUE ? E.snowCap : E.snowCap + 2;
