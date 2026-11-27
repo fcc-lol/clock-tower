@@ -48,14 +48,14 @@ import { sunPosition } from "../lib/astro.js";
 
 const CELL = 6;
 const COLS = 180;
-const FLOOR = 263; // first row of the bedrock; the simulation is rows 0..FLOOR-1
+const FLOOR = 261; // first row of the bedrock; the simulation is rows 0..FLOOR-1
 const ROWS = 320; // the whole stage in cells
 const BR = ROWS - FLOOR; // rows of bedrock
 const LEFT = 11; // 66 px
 const RIGHT = 169; // last column text may use (1014 px)
 const DATE_Y = 11;
-const HOUR_Y = 29;
-const MIN_Y = 112;
+const HOUR_Y = 32; // 72 px under the date
+const MIN_Y = 115;
 const U = 5; // cells per numeral pixel
 const GW = 13;
 const GH = 15;
@@ -64,15 +64,15 @@ const DH = GH * U;
 const SLOT_X = [11, 88];
 const CENTER_X = 49; // a lone hour digit, centred over the minutes
 const THREAD_X = 162; // the thread is THREAD_X and THREAD_X + 1: its own lane, right of every line of type
-const TEMP_Y = 196; // temperature (and AM/PM) row
-const COND_Y = 218;
-const CD_Y = 235;
-const MOON_R = 5; // the engraved line, in bedrock rows
-const SCAN_Y = 222; // the dune lives below this row
+const TEMP_Y = 201; // temperature (and AM/PM) row, 66 px under the minutes
+const COND_Y = 226; // 42 px under the temperature
+const CD_Y = 243; // 48 px under the condition
+const MOON_R = 4; // the engraved line, in bedrock rows
+const SCAN_Y = TEMP_Y + 26; // the dune lives below this row
 const LH = 9; // height of the pixel letters
 const TEXT_END = 112;
 const LOW_Y = TEMP_Y + 2 * LH; // below this row, nothing may heap above the dune's ceiling // no readout below the minutes reaches past this column
-const SNOW_TOP = DATE_Y + LH + 5; // drifts on the hours stop short of the date
+const SNOW_TOP = HOUR_Y - 4; // drifts on the hours stop short of the date
 const GAP_Y = HOUR_Y + GH * U; // and drifts on the minutes stop short of the hours
 const noDrift = (y) => y < SNOW_TOP || (y >= GAP_Y && y < GAP_Y + 3);
 
@@ -229,10 +229,10 @@ const STYLE = `
 .ph { position: absolute; inset: 0; overflow: hidden; background: #2a2724; }
 .ph-base { position: absolute; left: 0; right: 0; top: ${FLOOR * CELL}px; bottom: 0; color: #eee7da;
   font-family: "Space Grotesk", sans-serif; z-index: 3; text-shadow: 0 -2px 0 rgba(0,0,0,0.55); }
-.ph-fact { position: absolute; left: ${LEFT * CELL}px; right: 66px; top: ${(MOON_R + LH) * CELL + 48}px; }
+.ph-fact { position: absolute; left: ${LEFT * CELL}px; right: 66px; top: ${(MOON_R + LH) * CELL + 58}px; }
 .ph-fl { font-weight: 700; font-size: 26px; line-height: 30px; letter-spacing: 0.16em; text-transform: uppercase; color: #aaa192; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; }
-.ph-fv { margin-top: 12px; font-weight: 500; font-size: 46px; line-height: 1.2; letter-spacing: -0.005em; text-wrap: balance;
+.ph-fv { margin-top: -8px; font-weight: 500; font-size: 46px; line-height: 74px; letter-spacing: -0.005em; text-wrap: balance;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .ph-base.nofact .ph-fact { display: none; }
 `;
@@ -978,8 +978,10 @@ export default {
       for (let x = 0; x < COLS; x++) {
         // a low dune under the readouts, rising to the mound the thread has been building
         const mound = 34 - Math.abs(x - THREAD_X - 0.5) * 0.62 + 0.7 * Math.sin(x * 1.7);
-        const base = Math.round(5 + 4 * hump(x / COLS + ph1) + 2 * hump((2 * x) / COLS + ph2) + Math.sin(x * 0.21 + ph3));
-        const top = Math.min(FLOOR - ceilRow[x], Math.max(base, Math.round(mound)));
+        const cap = FLOOR - ceilRow[x];
+        // the low dune keeps its rolling top, scaled down where the readouts leave it less room
+        const base = Math.max(1, Math.round((5 + 4 * hump(x / COLS + ph1) + 2 * hump((2 * x) / COLS + ph2) + Math.sin(x * 0.21 + ph3)) * Math.min(1, cap / 12)));
+        const top = Math.min(cap, Math.max(base, Math.round(mound)));
         const h = Math.abs(x - THREAD_X - 0.5) < 7 ? top - 2 : top; // the tip of the mound is the newest sand
         let total = 0;
         for (let k = 0; k < HIST; k++) {
@@ -1009,12 +1011,13 @@ export default {
       for (let k = 0; k < 4; k++) for (let dx = -1; dx <= 1; dx++) bedMark[slots[k] + dx] = bedMark[COLS + slots[k] + dx] = 4;
       wake(SCAN_Y, FLOOR - 1);
     }
-    // The highest row the dune may reach in each column: a clear 54 px under the
-    // lowest readout above it, and never more than a gentle slope from its neighbours.
+    // The highest row the dune may reach in each column: a clear 30 px under the
+    // lowest readout above it (84 px under AM/PM; the thread's lane, right of AM/PM,
+    // keeps the old height for the mound), and never more than a gentle slope from its neighbours.
     const ceilRow = new Int16Array(COLS);
     {
       const hm = new Float32Array(COLS);
-      for (let x = 0; x < COLS; x++) hm[x] = x <= TEXT_END ? FLOOR - (CD_Y + LH + 9) : FLOOR - (TEMP_Y + 2 * LH + 14);
+      for (let x = 0; x < COLS; x++) hm[x] = x <= TEXT_END ? FLOOR - (CD_Y + LH + 5) : x < SLOT_X[1] + DW + 3 ? FLOOR - (TEMP_Y + 2 * LH + 14) : FLOOR - (TEMP_Y + 2 * LH + 7);
       for (let x = 1; x < COLS; x++) hm[x] = Math.min(hm[x], hm[x - 1] + 1);
       for (let x = COLS - 2; x >= 0; x--) hm[x] = Math.min(hm[x], hm[x + 1] + 1);
       for (let x = 0; x < COLS; x++) ceilRow[x] = FLOOR - hm[x];
@@ -1712,11 +1715,12 @@ export default {
         put("fl", nFactLab, tx.factLabel);
         if (put("fv", nFact, tx.factValue)) {
           base.classList.toggle("nofact", tx.factValue === "");
-          // 46 px on one line; two lines at 42 px (38 px if it needs it) still clear the bottom by 64 px
+          // 46 px on one line; two lines at 38 px (36 px if it needs it), 74 px apart (about 40 px
+          // of clear space between them), still clear the bottom by 64 px
           nFact.style.fontSize = "46px";
-          if (nFact.scrollHeight > 46 * 1.2 + 4) {
-            nFact.style.fontSize = "42px";
-            if (nFact.scrollHeight > 2 * 42 * 1.2 + 4) nFact.style.fontSize = "38px";
+          if (nFact.scrollHeight > 74 + 4) {
+            nFact.style.fontSize = "38px";
+            if (nFact.scrollHeight > 2 * 74 + 4) nFact.style.fontSize = "36px";
           }
         }
       },

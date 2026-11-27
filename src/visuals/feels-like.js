@@ -70,7 +70,7 @@ export default {
       .fl .r56 { font-size: 56px; line-height: 1; }
       .fl .r46 { font-size: 46px; line-height: 1; }
       .fl .row.fact { margin-top: 64px; }
-      .fl .fact u { display: block; text-decoration: none; font-size: 24px; line-height: 1; text-transform: uppercase; letter-spacing: 0.14em; margin-bottom: 18px; }
+      .fl .fact u { display: block; text-decoration: none; font-size: 24px; line-height: 1; text-transform: uppercase; letter-spacing: 0.14em; margin-bottom: 12px; }
       .fl .fact b { font-size: 40px; white-space: normal; text-wrap: balance; max-width: ${MEASURE - LABEL - 30}px; }
     `);
     const wrap = el("div", { class: "fl" });
@@ -179,19 +179,23 @@ export default {
       wght = 0; // the weight in use is set again by the caller
     }
 
-    // The fact may be 80 characters: step its size down until it sits in two lines.
-    // Its lines are set far enough apart that a wrapped fact leaves a clear
-    // gap of about 42 px between them; the leading above the first line and
-    // below the last is taken back, so a one-line fact takes no extra room.
+    // The fact may be 80 characters. A fact that can sit in one line at a size
+    // or two below the full one is set that way (a second line costs the time
+    // most of a line of room); otherwise its size steps down until it sits in
+    // two lines. Those lines are set far enough apart to leave a clear gap of
+    // about 42 px between them; the leading above the first line and below the
+    // last is taken back, so a one-line fact takes no extra room.
+    function setFact(size) {
+      const pitch = Math.round(size * 0.94 + 42);
+      factValue.style.fontSize = `${size}px`;
+      factValue.style.lineHeight = `${pitch}px`;
+      factValue.style.margin = `${-(pitch - size * 1.14) / 2}px 0`;
+      return factValue.offsetHeight / pitch; // lines
+    }
     function fitFact() {
       let size = 42;
-      for (; size >= 36; size -= 2) {
-        const pitch = Math.round(size * 0.94 + 42);
-        factValue.style.fontSize = `${size}px`;
-        factValue.style.lineHeight = `${pitch}px`;
-        factValue.style.margin = `${-(pitch - size * 1.14) / 2}px 0`;
-        if (factValue.offsetHeight <= pitch * 2 + 2) break;
-      }
+      for (; size >= 38; size -= 2) if (setFact(size) < 1.5) break;
+      if (size < 38) for (size = 42; size >= 36; size -= 2) if (setFact(size) < 2.5) break;
       labels.fact.textContent = String(Math.max(36, size));
     }
 

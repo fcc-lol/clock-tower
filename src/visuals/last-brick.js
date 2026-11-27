@@ -755,7 +755,10 @@ export default {
       env.slick = Math.min(1, env.rain * 1.6);
       env.storm = w.falling === "storm";
       env.speed = 520 * lerp(1, 1.28, smoothstep(78, 100, w.temp)) * lerp(1, 0.9, smoothstep(40, 10, w.temp)) * (1 - 0.12 * env.snow);
-      env.fog = Math.max(w.fog ? 1 : 0, 0.7 * smoothstep(1, 0.1, w.visibility));
+      // the fog bank is for fog and mist; in rain and snow the falling weather
+      // itself is what cuts the view (and the bank's layers cost too much to
+      // stack on top of a storm on the Pi)
+      env.fog = w.fog ? 1 : w.falling ? 0 : 0.7 * smoothstep(1, 0.1, w.visibility);
     }
 
     // Carve the wall the way a ball would have: a cavern eaten in from the

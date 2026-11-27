@@ -33,7 +33,7 @@
 //   the minute   the tiles of a changed figure flip over in a diagonal wave
 // Now and then something floats by: a rubber duck, a leaf, a pool ring.
 //
-// Technique: one fragment shader draws the pool. The mosaic is a 45 x 55
+// Technique: one fragment shader draws the pool. The mosaic is a 45 x 50
 // texture with one texel per tile, plus a blurred copy of the figures sampled
 // with linear filtering for the night halo (the kit's shader() has no
 // textures, so both are bound here on the kit surface's own GL context).
@@ -43,9 +43,9 @@
 import { W, H, TAU, clamp, lerp, smoothstep, approach, rng, hash, el, svg, addStyle, canvas2d, shader, grain, fitText, vec3 } from "../lib/kit.js";
 
 // The pool's opening in the coping, in stage units, and the mosaic grid.
-const PX0 = 48, PY0 = 291, PX1 = 1032, PY1 = 1491;
+const PX0 = 48, PY0 = 332, PX1 = 1032, PY1 = 1426;
 const PCX = (PX0 + PX1) / 2, PCY = (PY0 + PY1) / 2, PHW = (PX1 - PX0) / 2, PHH = (PY1 - PY0) / 2;
-const GW = 45, GH = 55;
+const GW = 45, GH = 50;
 
 // ---------------------------------------------------------------------------
 // Tile numerals: block figures 13 tiles wide and 22 tall with 4-tile strokes,
@@ -134,10 +134,10 @@ function layTime(out, hh, mm, ampm) {
   // hours and AM/PM as one unit, centred like the minutes below them
   const hx = 7 + Math.floor((31 - (width(hh) + 3 + LW)) / 2);
   const ax = hx + width(hh) + 3;
-  row(hh, hx, 3);
-  row(mm, 7 + Math.floor((31 - width(mm)) / 2), 29);
-  stamp(GLYPH[ampm[0]] || GLYPH.A, ax, 3);
-  stamp(GLYPH.M, ax, 15);
+  row(hh, hx, 1);
+  row(mm, 7 + Math.floor((31 - width(mm)) / 2), 27);
+  stamp(GLYPH[ampm[0]] || GLYPH.A, ax, 1);
+  stamp(GLYPH.M, ax, 13);
 }
 
 // ---------------------------------------------------------------------------
@@ -489,28 +489,29 @@ const STYLE = `
 .de .clip { position: absolute; left: ${PX0}px; top: ${PY0}px; width: ${PX1 - PX0}px; height: ${PY1 - PY0}px; overflow: hidden; }
 .de .floaty { position: absolute; left: 0; top: 0; width: 160px; height: 160px; margin: -80px 0 0 -80px; will-change: transform; }
 .de .txt { position: absolute; inset: 0; color: var(--paint); }
-.de .date { position: absolute; left: 64px; top: 58px; font-weight: 600; font-size: 54px; line-height: 64px; letter-spacing: 0.13em; text-transform: uppercase; }
+.de .date { position: absolute; left: 64px; top: 40px; font-weight: 600; font-size: 54px; line-height: 88px; letter-spacing: 0.13em; text-transform: uppercase; }
 .de .date div { white-space: nowrap; }
 .de .tb { position: absolute; right: 64px; top: 64px; display: flex; flex-direction: column; align-items: flex-end; }
-.de .cond { margin-top: 20px; font-weight: 500; font-size: 48px; line-height: 48px; letter-spacing: 0.01em; white-space: nowrap; }
+.de .cond { margin-top: 42px; font-weight: 500; font-size: 48px; line-height: 48px; letter-spacing: 0.01em; white-space: nowrap; }
 .de .temp { height: 104px; display: flex; gap: 8px; }
 .de .temp span { width: 100px; height: 104px; border-radius: 5px; background: var(--tile); color: var(--glyph);
   box-shadow: inset 0 3px 0 rgba(255,255,255,.14), inset 0 -4px 0 rgba(0,0,10,.25), 0 0 0 2px var(--jd);
   font-weight: 600; font-size: 96px; line-height: 104px; text-align: center; }
 .de .temp span.deg { width: 72px; }
-.de .rowA { position: absolute; left: 64px; right: 64px; top: ${PY1 + 55}px; display: grid; grid-template-columns: 240px 1fr 104px 72px; column-gap: 44px; align-items: start; }
+.de .low { position: absolute; left: 64px; right: 64px; top: ${PY1 + 7}px; bottom: 64px; display: flex; flex-direction: column; }
+.de .mid { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+.de .rowA { display: grid; grid-template-columns: 240px 1fr 104px 72px; column-gap: 52px; align-items: start; }
 .de .it { display: flex; flex-direction: column; white-space: nowrap; min-width: 0; }
 .de .it.end { align-items: flex-end; }
 .de .lb { font-weight: 600; font-size: 28px; line-height: 32px; letter-spacing: 0.16em; text-transform: uppercase; }
-.de .vl { margin-top: 8px; font-weight: 500; font-size: 48px; line-height: 54px; letter-spacing: 0.01em; }
-.de .plaque { position: absolute; left: 64px; right: 64px; height: 168px; bottom: 64px; box-sizing: border-box; padding: 18px 44px 0 44px;
+.de .vl { margin-top: 12px; font-weight: 500; font-size: 48px; line-height: 54px; letter-spacing: 0.01em; }
+.de .plaque { position: relative; flex: none; min-height: 168px; box-sizing: border-box; padding: 17px 44px 4px 44px;
   border-radius: 7px; background: var(--tile); color: var(--glyph);
   box-shadow: inset 0 3px 0 rgba(255,255,255,.14), inset 0 -4px 0 rgba(0,0,10,.25), inset 0 0 0 2px rgba(255,255,255,.1), 0 0 0 2px var(--jd), 0 5px 0 var(--jd); }
 .de .plaque .lb { opacity: 0.85; }
-.de .fv { margin-top: 8px; font-weight: 500; font-size: 38px; line-height: 1.22; letter-spacing: 0.005em; overflow: hidden; max-height: 94px; }
+.de .fv { margin-top: -9px; font-weight: 500; font-size: 38px; line-height: 80px; letter-spacing: 0.005em; overflow: hidden; max-height: 160px; }
 .de .screw { position: absolute; width: 11px; height: 11px; border-radius: 50%; background: var(--glyph); opacity: 0.5; box-shadow: inset 0 -2px 0 rgba(0,0,0,.35); }
 .de.nofact .plaque { display: none; }
-.de.nofact .rowA { top: ${Math.round((PY1 + 7 + H - 64) / 2 - 56)}px; }
 .de.nofact .lb { font-size: 30px; line-height: 36px; }
 .de.nofact .vl { font-size: 56px; line-height: 64px; }
 `;
@@ -705,7 +706,7 @@ export default {
     const plaque = el("div", { class: "plaque" }, factLb, factVl,
       el("div", { class: "screw", style: { left: "14px", top: "14px" } }), el("div", { class: "screw", style: { right: "14px", top: "14px" } }),
       el("div", { class: "screw", style: { left: "14px", bottom: "16px" } }), el("div", { class: "screw", style: { right: "14px", bottom: "16px" } }));
-    txt.append(date, tb, rowA, plaque);
+    txt.append(date, tb, el("div", { class: "low" }, el("div", { class: "mid" }, rowA), plaque));
     wrap.append(txt);
 
     // ----- what falls: snowflakes and the splashes of rain on the stone -----
@@ -1305,7 +1306,7 @@ export default {
             // two lines at most: step the size down for a long one
             let size = 38;
             factVl.style.fontSize = "38px";
-            while (factVl.scrollHeight > 90 && size > 36) factVl.style.fontSize = `${--size}px`;
+            while (factVl.scrollHeight > 165 && size > 36) factVl.style.fontSize = `${--size}px`;
           }
         }
         first = false;

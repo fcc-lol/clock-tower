@@ -42,9 +42,9 @@ import {
 } from "../lib/kit.js";
 
 const MX = 64; // side margin for type
-const TOP = 70; // top of the hour numerals
-const HD = 612; // height of a numeral
-const STRIP = 128; // the letterpress strip between the rows (the date has clear air above and below)
+const TOP = 58; // top of the hour numerals (no digit's ink reaches the top 6 px of its cell, so the ink keeps 64 px from the edge)
+const HD = 580; // height of a numeral
+const STRIP = 166; // the letterpress strip between the rows (the date keeps about 64 px of clear air from the numerals above and below)
 const R1 = TOP;
 const R1B = R1 + HD;
 const R2 = R1B + STRIP;
@@ -55,6 +55,10 @@ const SCENE_H = R2B + 24;
 const DFONT = '"Stardos Stencil", "Rockwell", serif';
 const AMPM_CAP = 60;
 const PAD = 24; // spare width on the layer bitmaps, for the sway
+// The lower margin: the temperature's ink starts 64 px under the minutes' ink; the fact's last line
+// ends 64 px above the frame (its line box is tall, for air between wrapped lines, so it reaches below).
+const FOOT_T = 60, FOOT_B = 12;
+const FACT_LEAD = 16; // the fact's half-leading above its ink, taken back so the gaps share out evenly
 
 const roundRect = (p, x, y, w, h, r) => {
   p.moveTo(x + r, y);
@@ -100,7 +104,7 @@ export default {
       .dc .date { font-size: 52px; font-weight: 700; letter-spacing: .01em; white-space: nowrap; line-height: 1; padding-bottom: 6px; }
       .dc .rule { flex: 1; height: 2px; background: currentColor; opacity: .55; margin: 0 30px; box-shadow: 0 1.2px 0 var(--hl); }
       .dc .ampmgap { flex: none; }
-      .dc .foot { position: absolute; left: ${MX}px; width: ${W - 2 * MX}px; top: ${R2B + 58}px; height: ${H - 64 - R2B - 58}px;
+      .dc .foot { position: absolute; left: ${MX}px; width: ${W - 2 * MX}px; top: ${R2B + FOOT_T}px; height: ${H - 64 + FOOT_B - R2B - FOOT_T}px;
                   display: flex; flex-direction: column; justify-content: space-between; }
       .dc .title { display: flex; align-items: baseline; white-space: nowrap; }
       .dc .temp { font-family: ${DFONT}; font-weight: 700; font-size: 120px; line-height: .84; letter-spacing: -.01em; }
@@ -113,8 +117,9 @@ export default {
       .dc .line2 { display: flex; align-items: baseline; justify-content: space-between; white-space: nowrap; }
       .dc .line2 .val { margin-left: 14px; }
       .dc .line2 .moon { font-style: italic; font-weight: 600; }
-      .dc .fact .lab { display: block; margin-bottom: 6px; }
-      .dc .fact .fv { font-style: italic; font-weight: 600; font-size: 42px; line-height: 1.2; max-height: 2.4em; overflow: hidden; }
+      .dc .fact { font-size: 42px; line-height: 2; max-height: 4em; overflow: hidden; text-wrap: balance; margin-top: -${FACT_LEAD}px; }
+      .dc .fact .lab { white-space: nowrap; margin-right: 20px; }
+      .dc .fact .fv { display: inline; font-style: italic; font-weight: 600; }
       .dc.nofact .foot { justify-content: center; gap: 64px; }
       .dc.nofact .temp { font-size: 150px; }
       .dc.nofact .cond { font-size: 64px; }
@@ -1871,7 +1876,7 @@ export default {
           T.cond.dataset.baseSize = "";
           T.cond.style.fontSize = "";
         }
-        if (a || b || c || d || e) fitText(T.cond, W - 2 * MX - T.temp.offsetWidth - T.ed.offsetWidth - 22 - 36);
+        if (a || b || c || d || e) fitText(T.cond, W - 2 * MX - T.temp.offsetWidth - T.ed.offsetWidth - 22 - 50);
       },
     };
   },

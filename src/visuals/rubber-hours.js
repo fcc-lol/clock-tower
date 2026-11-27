@@ -33,10 +33,10 @@ import {
 // ---------------------------------------------------------------------------
 const TUBE = 130; // tube thickness
 const SK_W = 318; // extent of a numeral's centreline
-const SK_H = 440;
+const SK_H = 424;
 const LEFT = 82;
 const ROW_H = 60; // top of the hours row (outer edge of the tubes)
-const ROW_M = 652; // top of the minutes row
+const ROW_M = 672; // top of the minutes row: clear air between the two rows of the time
 const CELL = SK_W + TUBE;
 const CELL_GAP = 20;
 const NN = 14; // nodes per numeral
@@ -44,6 +44,13 @@ const SUB = 6; // spline steps between nodes
 const NP = (NN - 1) * SUB + 1;
 const MINI = 32; // AM/PM tube thickness
 const MINI_H = 96;
+// The paper tags under the minutes: the sticker, and the room between the words and it.
+const STK = 116;
+const STK_GAP = 50;
+const SUN_W = 416;
+const MOON_W = 496;
+const SUN_COL = SUN_W - 44 - STK_GAP - STK; // room for the sun countdown beside its sticker
+const LAW_AIR = 76; // clear ground kept between those tags (swinging) and the label at the foot
 
 // Light comes from the upper left: each tone of the tube is the same path,
 // thinner and shifted further toward the light.
@@ -188,35 +195,39 @@ export default {
       .rh .hole { position: absolute; left: 50%; top: 26px; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%;
         background: var(--hole); box-shadow: 0 0 0 5px var(--stk); }
       .rh .lab { font-size: 36px; line-height: 1; color: var(--ink2); }
-      .rh .stk { width: 124px; height: 124px; border-radius: 50%; background: var(--stk); color: var(--stkink); flex: none;
+      .rh .stk { width: ${STK}px; height: ${STK}px; border-radius: 50%; background: var(--stk); color: var(--stkink); flex: none;
         display: flex; flex-direction: column; align-items: center; justify-content: center;
         box-shadow: inset 0 0 0 4px var(--stkrim); }
       .rh .stk b { font-family: "DM Sans", sans-serif; font-weight: 900; font-size: 24px; line-height: 1; letter-spacing: 0.08em; margin-top: 4px; }
-      .rh .stk i { font-style: normal; font-size: 58px; line-height: 0.9; margin-top: 8px; white-space: nowrap; }
+      .rh .stk i { font-style: normal; font-size: 58px; line-height: 0.9; margin-top: 10px; white-space: nowrap; }
       .rh .t-temp .paper { padding: 50px 14px 22px; }
       .rh .t-temp .temp { font-size: 190px; line-height: 0.8; margin: 4px -10px 0 0; white-space: nowrap; }
-      .rh .t-temp .cond { font-size: 54px; line-height: 1.2; margin-top: 18px; text-wrap: balance; }
-      .rh .t-sun .card { width: 420px; left: -210px; }
-      .rh .t-moon .card { width: 380px; left: -190px; }
-      .rh .t-sun .paper, .rh .t-moon .paper { display: flex; align-items: center; justify-content: space-between; gap: 40px;
-        text-align: left; padding: 52px 18px 20px 26px; }
+      .rh .t-temp .cond { font-size: 54px; text-wrap: balance;
+        /* a wrapped condition gets 40 px of air between its lines; the margins take the
+           extra leading back off a single line, so it sits 48 px clear of the temperature */
+        line-height: calc(1em + 42px); margin: calc(9px + 0.1em) -4px calc(0.1em - 21px); }
+      .rh .t-sun .card { width: ${SUN_W}px; left: -${SUN_W / 2}px; }
+      .rh .t-moon .card { width: ${MOON_W}px; left: -${MOON_W / 2}px; }
+      .rh .t-sun .paper, .rh .t-moon .paper { display: flex; align-items: center; justify-content: space-between; gap: ${STK_GAP}px;
+        text-align: left; padding: 48px 18px 20px 26px; }
       .rh .col { flex: 1; min-width: 0; }
       .rh .t-sun .val { font-size: 80px; line-height: 0.92; white-space: nowrap; margin-top: 10px; }
       .rh .t-sun .stk { transform: rotate(8deg); }
-      .rh .t-moon .val { font-size: 52px; line-height: 1.2; margin-top: 6px; }
+      .rh .t-moon .val { font-size: 52px; line-height: 1.2; margin-top: 6px; white-space: nowrap; }
+      .rh .t-moon .val.wrap { white-space: normal; line-height: calc(1em + 42px); margin: calc(0.1em - 15px) 0 calc(0.1em - 21px); }
       .rh .t-moon .stk { transform: rotate(-9deg); }
-      .rh .law { position: absolute; left: 64px; right: 64px; bottom: 48px; z-index: 2; box-sizing: border-box;
+      .rh .law { position: absolute; left: 64px; right: 64px; bottom: 40px; z-index: 2; box-sizing: border-box;
         background: var(--paper); color: var(--ink); border-radius: 4px 4px 10px 10px; padding: 28px 36px 28px;
         font-family: "DM Sans", sans-serif; box-shadow: var(--shx) var(--shy) 0 rgba(0,0,0,var(--tsh)); }
       .rh .law::before { content: ""; position: absolute; inset: 11px; border: 3px dashed var(--ink2); border-radius: 3px; opacity: 0.38; }
       .rh .law::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 9px; background: var(--fold); border-radius: 4px 4px 0 0; }
-      .rh .lrow { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
       .rh .date { font-weight: 900; font-size: 62px; line-height: 1.02; letter-spacing: -0.015em; white-space: nowrap; }
-      .rh .made { flex: none; font-weight: 800; font-size: 24px; line-height: 1.04; letter-spacing: 0.14em; text-align: center;
-        color: var(--ink2); border: 3px solid var(--ink2); border-radius: 8px; padding: 7px 4px 6px 9px; transform: rotate(-6deg); }
-      .rh .fact { margin-top: 24px; padding-top: 22px; border-top: 3px solid var(--rule); }
+      .rh .fact { margin-top: 32px; padding-top: 29px; border-top: 3px solid var(--rule); }
       .rh .flab { font-weight: 800; font-size: 25px; line-height: 1.2; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink2); }
-      .rh .fval { margin-top: 10px; font-weight: 700; font-size: 40px; line-height: 1.22; letter-spacing: -0.005em; text-wrap: pretty; }
+      .rh .fval { font-weight: 700; font-size: 40px; letter-spacing: -0.005em; text-wrap: pretty;
+        /* a two-line fact gets 40 px of air between its lines; on one line the margins
+           take the extra leading back off */
+        line-height: calc(1em + 40px); margin: calc(0.11em - 10px) 0 calc(0.11em - 20px); }
     `);
 
     const wrap = el("div", { class: "rh" });
@@ -236,22 +247,22 @@ export default {
       const card = el("div", { class: "card", style: { top: `${len}px` } }, el("div", { class: "sh" }), paper);
       const node = el("div", { class: `tag ${cls}` }, card, str, el("div", { class: "knot" }));
       wrap.append(node);
-      return { node, card, hole, len, w: 226, h: 300, th: 0, om: 0, ph: 0, pom: 0, x: 0, y: 0, pvx: 0, shift: 0, shiftT: 0, ss: "", sx: "", sc: "" };
+      return { node, card, hole, str, len, len0: len, w: 226, h: 300, th: 0, om: 0, ph: 0, pom: 0, x: 0, y: 0, pvx: 0, shift: 0, shiftT: 0, ss: "", sx: "", sc: "" };
     };
     const tagTemp = makeTag("t-temp", 48,
       (T.temp = el("div", { class: "temp" })), (T.cond = el("div", { class: "cond" })));
-    const tagSun = makeTag("t-sun", 56,
+    const tagSun = makeTag("t-sun", 44,
       el("div", { class: "col" }, (T.sunLabel = el("div", { class: "lab" })), (T.sunValue = el("div", { class: "val" }))),
       sticker("uv", "UV"));
     const tagMoon = makeTag("t-moon", 50,
       el("div", { class: "col" }, el("div", { class: "lab", text: "Moon" }), (T.moon = el("div", { class: "val" }))),
       sticker("aqi", "AQI"));
-    tagTemp.w = 280; tagSun.w = 420; tagMoon.w = 380;
+    tagTemp.w = 280; tagSun.w = SUN_W; tagMoon.w = MOON_W;
     const tags = [tagTemp, tagSun, tagMoon];
 
     // the sewn-in label at the toy's foot: when it was made, and today's fact
     const law = el("div", { class: "law" },
-      el("div", { class: "lrow" }, (T.date = el("div", { class: "date" })), el("div", { class: "made" }, "MADE", el("br"), "FRESH")),
+      (T.date = el("div", { class: "date" })),
       (T.fact = el("div", { class: "fact" }, (T.factLabel = el("div", { class: "flab" })), (T.factValue = el("div", { class: "fval" })))));
     wrap.append(law);
     root.append(wrap);
@@ -345,7 +356,7 @@ export default {
           if (!level && !end) continue;
           // never down into the row below, nor into the tags under the minutes
           const top = tmpY[j] + TUBE / 2 - 14;
-          let room = sl.row ? sl.rowY + TUBE + SK_H + 30 - top : ROW_M - 6 - top;
+          let room = sl.row ? sl.rowY + TUBE + SK_H + 30 - top : ROW_H + TUBE + SK_H + 16 - top;
           for (const s2 of def.strokes) {
             for (let q = s2[0] * SUB; q <= s2[1] * SUB; q++) {
               const dy = tmpY[q] - tmpY[j];
@@ -356,6 +367,7 @@ export default {
         }
       }
       sl.tie = sl.low;
+      sl.tieY = tmpY[sl.tie] + TUBE / 2 - 5; // where its tag is tied, at rest
       // where the heat makes it drip: low on the numeral, toward the gap between the tags,
       // and only from the underside of a level run of tube (a wide neck) or from a
       // downward-pointing end (a narrow one), so the neck never sticks out into the air
@@ -445,10 +457,11 @@ export default {
     function fitTemp() {
       if (shown.temp === undefined) return;
       fitText(T.temp, tagTemp.w - 34, 190);
-      // the condition wraps by word; a long single word is set smaller (never under 44 px)
+      // the condition is set smaller (never under 44 px) to stay on one line; only what
+      // still does not fit wraps, by word, with the lines well apart
       let fs = 54;
       T.cond.style.fontSize = `${fs}px`;
-      while (fs > 44 && (T.cond.scrollWidth > T.cond.clientWidth + 1 || T.cond.offsetHeight > fs * 1.2 * 2 + 4)) { fs -= 2; T.cond.style.fontSize = `${fs}px`; }
+      while (fs > 44 && (T.cond.scrollWidth > T.cond.clientWidth + 1 || T.cond.offsetHeight > fs + 42 + 4)) { fs -= 2; T.cond.style.fontSize = `${fs}px`; }
       tagTemp.h = tagTemp.card.offsetHeight || tagTemp.h;
     }
 
@@ -1237,14 +1250,17 @@ export default {
       put("aqi", x.aqi);
       put("uv", x.uv);
       put("sunLabel", x.sunLabel);
-      if (put("sunValue", x.sunValue)) fitText(T.sunValue, 420 - 44 - 40 - 124, 80);
+      if (put("sunValue", x.sunValue)) fitText(T.sunValue, SUN_COL, 80);
       if (put("moon", x.moon)) {
         measure = true;
+        // the moon's name on one line; a name too long even at 44 px wraps, lines well apart
         let fs = 52;
+        T.moon.classList.remove("wrap");
         T.moon.style.fontSize = `${fs}px`;
         while (fs > 44 && T.moon.scrollWidth > T.moon.clientWidth + 1) { fs -= 2; T.moon.style.fontSize = `${fs}px`; }
+        if (T.moon.scrollWidth > T.moon.clientWidth + 1) T.moon.classList.add("wrap");
       }
-      if (put("date", x.date)) fitText(T.date, 952 - 72 - 150, 62);
+      if (put("date", x.date)) fitText(T.date, 952 - 72, 62);
       const has = x.factValue !== "";
       if (shown.has !== has) { shown.has = has; T.fact.style.display = has ? "" : "none"; }
       if (has) {
@@ -1253,7 +1269,7 @@ export default {
           // at most two lines
           let fs = 40;
           T.factValue.style.fontSize = `${fs}px`;
-          while (fs > 36 && T.factValue.offsetHeight > fs * 1.22 * 2 + 2) { fs -= 2; T.factValue.style.fontSize = `${fs}px`; }
+          while (fs > 36 && T.factValue.offsetHeight > (fs + 40) * 2 + 2) { fs -= 2; T.factValue.style.fontSize = `${fs}px`; }
         }
       }
       if (measure || shown.measured === undefined || shown.lawFact !== x.factValue) {
@@ -1261,6 +1277,26 @@ export default {
         shown.lawFact = x.factValue;
         lawTop = law.offsetTop || lawTop;
         for (let k = 1; k < 3; k++) tags[k].h = tags[k].card.offsetHeight || tags[k].h;
+        stringKey = "";
+      }
+    }
+
+    // The tags under the minutes hang on shorter strings when the label below needs the
+    // room (a two-line fact, or the heat letting the numerals down), so that a clear band
+    // of ground always separates them from it.
+    let stringKey = "";
+    function fitStrings() {
+      const key = `${lawTop}|${Math.round(P.sag / 3)}|${slots[2].tieY}|${slots[3].tieY}|${tags[1].h}|${tags[2].h}`;
+      if (key === stringKey) return;
+      stringKey = key;
+      for (let k = 1; k < 3; k++) {
+        const tg = tags[k];
+        const sl = slots[1 + k];
+        const len = Math.round(clamp(lawTop - LAW_AIR - tg.h - (sl.tieY + P.sag), 14, tg.len0));
+        if (len === tg.len) continue;
+        tg.len = len;
+        tg.str.style.height = `${len + 26}px`;
+        tg.card.style.top = `${len}px`;
       }
     }
 
@@ -1271,6 +1307,7 @@ export default {
     timeKey = state.text.time + state.text.ampm;
     texts(state);
     palette(state);
+    fitStrings();
     for (let i = 0; i < 36; i++) simulate(state, 1 / 15, i < 2);
     for (const tg of tags) tg.om *= 0.3;
 
@@ -1304,6 +1341,7 @@ export default {
         const fl = (stormPulse * 0.13).toFixed(3);
         if (shown.fl !== fl) { shown.fl = fl; flash.style.opacity = fl; }
 
+        fitStrings();
         simulate(s, dt, jump);
         for (const sl of slots) if (sl.iceGrow < 1) sl.iceGrow = Math.min(1, sl.iceGrow + dt / 14);
         rainCount = P.rainy > 0 ? Math.round((P.drizzle ? 26 + 130 * P.rainy : 40 + 250 * P.rainy)) : 0;

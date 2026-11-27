@@ -1416,11 +1416,12 @@ export default {
           factEl.style.display = hasFact ? "flex" : "none";
           if (hasFact) {
             // one line if it fits large, otherwise two lines
-            factV.style.whiteSpace = "nowrap"; factV.style.fontSize = "52px"; factV.style.lineHeight = "60px";
+            factV.style.whiteSpace = "nowrap"; factV.style.fontSize = "52px"; factV.style.lineHeight = "60px"; factV.style.marginTop = "";
             if (factV.scrollWidth > BOARD_W - 60) {
-              factV.style.whiteSpace = "normal";
-              // a wrapped fact keeps its lines open (line height 1.44): one line at 38 px if it fits, otherwise two at 36
-              for (const size of [38, 36]) { const lh = Math.round(size * 1.44); factV.style.fontSize = `${size}px`; factV.style.lineHeight = `${lh}px`; if (factV.offsetHeight <= lh + 2) break; }
+              // one line at 38 px if it fits; otherwise two lines at 36 px, opened up as far as the
+              // board allows (line height 1.56), the label kept 16 px clear above them
+              factV.style.whiteSpace = "normal"; factV.style.fontSize = "38px"; factV.style.lineHeight = "55px";
+              if (factV.offsetHeight > 57) { factV.style.fontSize = "36px"; factV.style.lineHeight = "56px"; factV.style.marginTop = "1px"; }
             }
           }
         }

@@ -54,15 +54,15 @@ export default {
       .pv { position: absolute; inset: 0; font-family: "Space Grotesk", sans-serif; color: ${INK}; }
       .pv .band { position: absolute; left: 0; right: 0; top: ${FIELD_H}px; bottom: 0; }
       .pv .tab { position: absolute; right: 0; top: ${FIELD_H - TAB_H}px; height: ${TAB_H + 2}px; padding: 0 64px 0 34px; font-family: "Archivo Black", sans-serif; font-size: 112px; line-height: ${TAB_H + 10}px; white-space: nowrap; }
-      .pv .plate { position: absolute; left: ${M}px; right: ${M}px; top: ${FIELD_H + 40}px; bottom: 66px; display: flex; flex-direction: column; justify-content: space-between; gap: 60px; }
+      .pv .plate { position: absolute; left: ${M}px; right: ${M}px; top: ${FIELD_H + 40}px; bottom: 66px; display: flex; flex-direction: column; justify-content: space-between; gap: 58px; }
       .pv .date { font-size: 46px; font-weight: 400; line-height: 1; white-space: nowrap; opacity: 0.86; }
-      .pv .now { display: flex; align-items: baseline; gap: 48px; white-space: nowrap; }
+      .pv .now { display: flex; align-items: baseline; gap: 54px; margin-top: 5px; white-space: nowrap; }
       .pv .temp { font-size: 156px; font-weight: 700; line-height: 0.74; letter-spacing: -0.04em; }
       .pv .cond { font-size: 60px; font-weight: 500; line-height: 1; }
       .pv .stats { display: flex; justify-content: space-between; column-gap: 48px; }
       .pv .stat span, .pv .fact span { display: block; font-size: 24px; font-weight: 500; line-height: 1; letter-spacing: 0.14em; text-transform: uppercase; white-space: nowrap; opacity: 0.72; }
       .pv .stat b { display: block; margin-top: 18px; font-size: 40px; font-weight: 500; line-height: 1; white-space: nowrap; }
-      .pv .fact b { display: block; margin: -5px 0 -18px; font-size: 37px; font-weight: 500; line-height: 2; text-wrap: balance; max-height: ${37 * 2 * 2 + 1}px; overflow: hidden; } /* a wide line height, so two lines of the fact stand 40 px apart; the margins take back its half-leading above and below */
+      .pv .fact b { display: block; margin: -2px 0 -18px; font-size: 37px; font-weight: 500; line-height: 2; text-wrap: balance; max-height: ${37 * 2 * 2 + 1}px; overflow: hidden; } /* a wide line height, so two lines of the fact stand 40 px apart; the margins take back its half-leading above and below */
     `);
     const wrap = el("div", { class: "pv" });
     root.append(wrap);
@@ -111,7 +111,6 @@ export default {
           const capMax = (FIELD_H - TAB_H - 42 - ROW_TOP - ROW_GAP) / 2;
           digitSize = Math.min(capMax / CAP, ((W - 140) * 100) / widest);
           rowCap = digitSize * CAP;
-          console.warn("DBG digit", digitSize, capMax / CAP, ((W - 140) * 100) / widest, widest);
         }
         ctx.font = `${digitSize / CELL}px "Archivo Black"`;
         ctx.filter = `blur(${blur}px)`; // soft edges: the lines swell into the figures, they do not step
@@ -678,7 +677,7 @@ export default {
         // ---- type ----
         put("ampm", ampm, tx.ampm);
         const fresh = put("temp", temp, tx.temp);
-        if (put("cond", cond, tx.condition) || fresh) fitText(cond, W - 2 * M - 48 - temp.offsetWidth, 60);
+        if (put("cond", cond, tx.condition) || fresh) fitText(cond, W - 2 * M - 54 - temp.offsetWidth, 60);
         if (put("date", date, tx.date)) fitText(date, W - 2 * M, 46);
         put("sunL", sSun.span, tx.sunLabel);
         put("sunV", sSun.b, tx.sunValue);
@@ -686,7 +685,7 @@ export default {
         put("aqi", sAir.b, tx.aqi);
         put("uv", sUv.b, tx.uv);
         put("factL", factLabel, tx.factLabel);
-        put("factV", factValue, tx.factValue ? "Alfred Nobel Signs the Will That Establishes the Nobel Prizes, in Paris, France" : tx.factValue); // DBGFACT
+        put("factV", factValue, tx.factValue);
         const factShow = tx.factValue ? "" : "none";
         if (shown.factShow !== factShow) {
           shown.factShow = factShow;
