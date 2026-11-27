@@ -1416,7 +1416,7 @@ export default {
       // queued lantern fills pile up and stall a frame for a second)
       fc.clearRect(0, 0, W, H);
       const dark = 1 - (unlit - U0) / (1 - U0); // 1 at night
-      if (dark > 0.03) {
+      if (dark > 0.03 && false) {
         // the ball is a lantern: the glaze near it shows its daylight colour,
         // fading with distance (the bevels are left in shadow)
         for (const b of balls) {

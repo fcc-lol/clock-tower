@@ -46,7 +46,7 @@ const MINI = 32; // AM/PM tube thickness
 const MINI_H = 96;
 // The paper tags under the minutes: the sticker, and the room between the words and it.
 const STK = 112;
-const STK_GAP = 48;
+const STK_GAP = 50;
 const SUN_W = 384;
 const MOON_W = 490;
 const SUN_COL = SUN_W - 44 - STK_GAP - STK; // room for the sun countdown beside its sticker
@@ -823,13 +823,15 @@ export default {
         if (k === 1) roomR = Math.min(roomR, tags[2].x + tags[2].shift - tags[2].w / 2 - (cx + tg.w / 2) - 30);
         if (k === 2) roomL = Math.min(roomL, cx - tg.w / 2 - (tags[1].x + tags[1].shift + tags[1].w / 2) - 30);
         const full = tg.len + tg.h;
-        const hi = clamp(roomL / full, 0.015, 0.42), lo = -clamp(roomR / full, 0.015, 0.42);
+        // ... and its low corner off the label at the foot: a tilted card drops one corner
+        const tilt = k === 0 ? 0.42 : clamp((lawTop - LAW_AIR + 12 - (ty + full)) / (tg.w / 2 + Math.abs(tg.shift)), 0.015, 0.42);
+        const hi = Math.min(tilt, clamp(roomL / full, 0.015, 0.42)), lo = -Math.min(tilt, clamp(roomR / full, 0.015, 0.42));
         if (tg.th > hi) { tg.th = hi + (tg.th - hi) * 0.5; if (tg.om > 0) tg.om *= 0.6; }
         if (tg.th < lo) { tg.th = lo + (tg.th - lo) * 0.5; if (tg.om < 0) tg.om *= 0.6; }
         // the card turns on its hole, a beat behind the string
         const pacc = -60 * (tg.ph + tg.th * 0.25) - acc * 0.5 + noise.n2(s.t * 3.1 + k * 5, 17.1) * mph * 0.5;
         tg.pom = (tg.pom + pacc * dt) / (1 + 3.4 * dt);
-        const phMax = clamp(Math.max(0, Math.min(roomL, roomR)) / tg.h + 0.035, 0.035, 0.16); // tight quarters: less turn
+        const phMax = Math.min(clamp(Math.max(0, Math.min(roomL, roomR)) / tg.h + 0.035, 0.035, 0.16), Math.max(0.012, tilt - Math.abs(tg.th))); // tight quarters: less turn
         tg.ph = clamp(tg.ph + tg.pom * dt, -phMax, phMax);
       }
     }
