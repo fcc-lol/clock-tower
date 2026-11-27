@@ -1,99 +1,97 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import styled, { css } from "styled-components";
-import { WMO, moonPhase, nextSunEvent, fetchWeather } from "./lib/sky.js";
-import { FONTS, ENUMS, resolveLayout } from "./lib/layout.js";
-import { fetchToday, factFor } from "./lib/today.js";
+import React, { useEffect, useRef, useState } from "react";
+import styled from "styled-components";
+import { IDS } from "./lib/registry.js";
+import { SLOT_MS, slotOf, pieceForSkipping } from "./lib/schedule.js";
+import { createHub } from "./lib/data.js";
+import { resolveSim } from "./lib/simulate.js";
+import { zoned, WEEKDAYS, MONTHS } from "./lib/time.js";
+import { labelOf } from "./lib/weather.js";
 
-// Fixed design dimensions — everything is authored at this exact size.
+// The display. It shows one visualization at a time from the library in
+// src/visuals/, each running in its own iframe (visual.html), and cuts to the
+// next one on every quarter hour. This page only keeps the schedule, fetches
+// the live data once for everybody, and swaps the iframes.
+//
+//   /                 the rotation
+//   /?viz=<id>        one piece, held
+//   /?onDevice=true   kiosk: no cursor, no keys; pieces run in a process of their own
+//   /?debug=1         what is showing, what is next, frame rate
+//   /?scenario=..., ?wx=..., ?at=..., ?rate=...   simulated conditions (src/lib/simulate.js)
+// Off the kiosk: click or press the right arrow for the next piece, left for
+// the previous one, G for the gallery.
+
 const STAGE_W = 1080;
 const STAGE_H = 1920;
+const PRELOAD_MS = 45 * 1000; // start the next piece this long before its slot, so it is running when cut to
+const LOAD_TIMEOUT_MS = 30 * 1000; // a piece that has not drawn by then is skipped
+const BAD_FOR_MS = 60 * 60 * 1000; // a piece that failed is left out for an hour, then given another chance
+const PING_MS = 5 * 1000; // how often each piece is asked whether it is still there
+const SILENT_MS = 15 * 1000; // one that has not answered for this long has hung, and is taken off
+const HELLO_TIMEOUT_MS = 12 * 1000; // how long to wait for the first word from one of the machine's other names
 
-// ---------------------------------------------------------------------------
-// Readout layout
-//
-// How the time and weather are set on the backdrop comes with each image: the
-// server asks Claude to design a layout for it (layout.js), and falls back to
-// a built-in layout per image style (src/lib/layout.js). The layout switches
-// in the same frame as the image. Here it is turned into concrete CSS values.
-// ---------------------------------------------------------------------------
-const PAD_X = 88;
-const PAD_Y = 120;
-const MEASURE = STAGE_W - PAD_X * 2;
-const WEIGHT = { light: 0, regular: 1, bold: 2 };
-const TRACK = { tight: -0.01, normal: 0.02, wide: 0.14 };
-const TIME_TRACK = { tight: -0.045, normal: -0.02, wide: 0.02 };
-const SCRIM = { light: 0.22, medium: 0.4, strong: 0.58 };
-const FLEX = { left: "flex-start", center: "center", right: "flex-end" };
-const JUSTIFY = { stack_top: "flex-start", stack_center: "center", stack_bottom: "flex-end", split: "space-between" };
-
-// The scrim fades out along an eased curve rather than a straight ramp, so it
-// reads as the picture getting darker, not as a band laid over it.
-function scrimOf(where, strength) {
-  const s = SCRIM[strength];
-  const k = (a) => `rgba(0,0,0,${(s * a).toFixed(3)})`;
-  const fade = (dir, end) => {
-    const stops = [[1, 0], [0.96, 0.3], [0.82, 0.5], [0.55, 0.68], [0.25, 0.83], [0.07, 0.93], [0, 1]];
-    return `linear-gradient(${dir}, ${stops.map(([a, at]) => `${k(a)} ${(at * end).toFixed(1)}%`).join(", ")})`;
-  };
-  if (where === "top") return fade("180deg", 90);
-  if (where === "bottom") return fade("0deg", 90);
-  if (where === "both") return `${fade("180deg", 48)}, ${fade("0deg", 48)}`;
-  if (where === "full") return k(0.75);
-  return "none";
+// On the kiosk, the display notices which pieces its hardware cannot keep up
+// with and leaves them out. A showing that runs well under its frame rate is a
+// strike; three strikes within a week and the piece is skipped until they
+// expire, when it gets another chance. `?forgive=1` clears the record.
+const SLOW_KEY = "clock-tower:slow:v1";
+const SLOW_WINDOW_MS = 7 * 24 * 3600 * 1000;
+const SLOW_STRIKES = 3;
+function readStrikes() {
+  try {
+    const all = JSON.parse(localStorage.getItem(SLOW_KEY) || "{}");
+    const out = {};
+    for (const [id, times] of Object.entries(all && typeof all === "object" ? all : {})) {
+      const recent = (Array.isArray(times) ? times : []).filter((t) => typeof t === "number" && Date.now() - t < SLOW_WINDOW_MS);
+      if (recent.length) out[id] = recent;
+    }
+    return out;
+  } catch {
+    return {};
+  }
 }
-
-function themeOf(l) {
-  const d = FONTS[l.display_font];
-  const b = FONTS[l.body_font];
-  const comp = l.composition;
-  const masthead = comp === "masthead";
-  const monument = comp === "monument";
-  const k = comp === "caption" ? 0.7 : 1; // the caption is the same design, smaller
-  const italic = l.italic && Boolean(b.italic);
-  return {
-    comp,
-    masthead,
-    monument,
-    display: d.stack,
-    body: b.stack,
-    timeWeight: d.weights[WEIGHT[l.time_weight]],
-    bodyWeight: b.weights[WEIGHT[l.body_weight]],
-    // Masthead fills the width from this size; monument stacks two huge lines.
-    timeSize: monument ? Math.min(l.time_size * 2.2, 600) : comp === "caption" ? Math.min(l.time_size, 250) * k * 1.12 : l.time_size * 1.12,
-    fill: masthead,
-    tempSize: l.time_size * 0.66 * k,
-    colon: d.colon ?? 0.06,
-    vary: d.opsz ? `"opsz" ${d.opsz}` : "normal",
-    ghost: Boolean(d.ghost),
-    ampm: d.digits ? b.stack : "inherit", // a digits-only face can't spell AM
-    effect: l.effect,
-    tilt: l.tilt || 0,
-    upper: l.uppercase,
-    italic,
-    // The fact reads as a pull quote where the face has an italic.
-    quote: Boolean(b.italic) && !l.uppercase,
-    caps: b.caps !== false,
-    track: TRACK[l.tracking],
-    timeTrack: TIME_TRACK[l.tracking],
-    s: b.scale * k,
-    k,
-    align: masthead ? "left" : l.align,
-    items: masthead ? "stretch" : FLEX[l.align],
-    flex: masthead ? "space-between" : FLEX[l.align],
-    side: l.align === "right" ? "right" : "left",
-    direction: monument && l.arrangement === "stack_bottom" ? "column-reverse" : "column",
-    justify: monument ? "space-between" : JUSTIFY[l.arrangement],
-    apart: monument || l.arrangement === "split",
-    // Big figures are hung a hair outside the margin so their stems line up
-    // optically with the small text under them.
-    hang: !masthead && !monument && l.align !== "center",
-    ink: l.ink,
-    accent: l.accent,
-    scrim: scrimOf(l.scrim, l.scrim_strength),
-  };
+function addStrike(id) {
+  const all = readStrikes();
+  all[id] = [...(all[id] || []), Date.now()].slice(-SLOW_STRIKES);
+  try {
+    localStorage.setItem(SLOW_KEY, JSON.stringify(all));
+  } catch {}
 }
+const slowPieces = () => new Set(Object.entries(readStrikes()).filter(([, times]) => times.length >= SLOW_STRIKES).map(([id]) => id));
 
-// Dark backdrop fills the browser; the stage is centered within it.
+const params = new URLSearchParams(window.location.search);
+const onDevice = params.get("onDevice") === "true";
+const debug = params.get("debug") === "1";
+const pinned = IDS.includes(params.get("viz")) ? params.get("viz") : null;
+if (params.get("forgive") === "1") {
+  try {
+    localStorage.removeItem(SLOW_KEY);
+  } catch {}
+}
+const sim = resolveSim(params);
+const rate = params.has("rate") ? Number(params.get("rate")) || 1 : 1;
+const simulatedClock = (sim && sim.ms != null) || rate !== 1;
+const clockBase = sim?.ms ?? Date.now();
+const clockStart = performance.now();
+const clockNow = simulatedClock ? () => clockBase + (performance.now() - clockStart) * rate : () => Date.now();
+
+// On the kiosk each piece is loaded from another of this machine's own names
+// (127.0.0.1 and 127.0.0.2 when this page is on localhost). To the browser each
+// name is a different site, and every site gets a process of its own, so a
+// piece that hangs or is slow to start can stall neither this page nor the
+// piece beside it: the clock, the schedule and the check that everybody is
+// still answering keep running, and a hung piece is taken off. A name that
+// never answers is given up on; with none left, pieces are loaded from this
+// page's own address, as they are everywhere else. `?isolate=0` turns it off.
+const OTHER_ORIGINS = (() => {
+  const { protocol, hostname, port } = window.location;
+  if (!onDevice || params.get("isolate") === "0" || !/^(localhost|127(\.\d{1,3}){3})$/.test(hostname)) return [];
+  return ["127.0.0.1", "127.0.0.2", "localhost"]
+    .filter((name) => name !== hostname)
+    .slice(0, 2)
+    .map((name) => `${protocol}//${name}${port ? `:${port}` : ""}`);
+})();
+
+// Dark surround fills the browser; the stage is centered within it.
 const Viewport = styled.div`
   position: fixed;
   inset: 0;
@@ -101,12 +99,12 @@ const Viewport = styled.div`
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background: #333;
-  cursor: ${(p) => (p.$onDevice ? "none" : "auto")};
+  background: #111;
+  cursor: ${onDevice ? "none" : "auto"};
 `;
 
-// The 1080x1920 canvas. It's always rendered at full size and scaled with a
-// transform so layout math inside never has to think about the screen size.
+// The 1080x1920 canvas. It is always laid out at full size and scaled with a
+// transform, so nothing inside ever has to think about the screen size.
 const Stage = styled.div`
   position: relative;
   width: ${STAGE_W}px;
@@ -115,429 +113,82 @@ const Stage = styled.div`
   transform: scale(${(p) => p.$scale});
   transform-origin: center center;
   background: #000;
-  color: #f5f6fa;
   overflow: hidden;
   user-select: none;
 `;
 
-// Every line is trimmed to its letters (cap height to baseline), so a margin
-// is exactly the visible gap, whatever the typeface or size: one gap between
-// all elements, and a smaller one between a label and its value.
-const trim = css`
-  text-box: trim-both cap alphabetic;
-`;
-const GAP = 60;
-const LABEL_GAP = 18;
-
-// Type effects that belong to a style's own lettering (STYLE_TYPE). Set on
-// every element so the em lengths follow each one's own size.
-const EFFECT = {
-  // Lit from within: LED segments, phosphor, neon.
-  glow: css`
-    &,
-    & * {
-      text-shadow: 0 0 0.05em currentColor, 0 0 0.22em currentColor, 0 0 0.6em currentColor;
-    }
-  `,
-  // Comic-book lettering: black outline with a hard drop.
-  comic: css`
-    &,
-    & * {
-      -webkit-text-stroke: 0.09em #111;
-      paint-order: stroke fill;
-      text-shadow: 0.055em 0.055em 0 #111;
-    }
-  `,
-  // Ink or graphite on paper: the type takes on the sheet's grain.
-  ink: css`
-    mix-blend-mode: multiply;
-  `,
-};
-
-// A seven-segment face shows its unlit segments faintly behind the lit ones.
-const ghostDigits = css`
-  b {
-    position: relative;
-    display: inline-block;
-    font-weight: inherit;
-  }
-  b::before {
-    content: attr(data-ghost);
-    position: absolute;
-    top: 0;
-    right: 0;
-    opacity: 0.13;
-    text-shadow: none;
-  }
+const Frame = styled.iframe`
+  position: absolute;
+  inset: 0;
+  width: ${STAGE_W}px;
+  height: ${STAGE_H}px;
+  border: 0;
+  background: #000;
+  pointer-events: none;
 `;
 
-// The readouts: a clock block and a weather block, composed and placed as the
-// layout says (see ENUMS.composition in src/lib/layout.js).
-const Content = styled.div`
+// What is on screen when no piece is: the bare readouts. Seen at start-up
+// until the first piece has drawn, and for as long as it takes if every piece
+// fails. It sits above a piece that is still loading and below the one showing.
+const Plain = styled.div`
   position: absolute;
   inset: 0;
   z-index: 1;
-  display: flex;
-  flex-direction: ${(p) => p.$t.direction};
-  justify-content: ${(p) => p.$t.justify};
-  padding: ${PAD_Y}px ${PAD_X}px;
-  font-family: ${(p) => p.$t.body};
-  font-weight: ${(p) => p.$t.bodyWeight};
-  font-style: ${(p) => (p.$t.italic ? "italic" : "normal")};
-  color: ${(p) => p.$t.ink};
-  text-transform: ${(p) => (p.$t.upper ? "uppercase" : "none")};
-  letter-spacing: ${(p) => p.$t.track}em;
-  font-variant-numeric: lining-nums tabular-nums;
-  font-optical-sizing: auto;
-  text-rendering: optimizeLegibility;
-  transform: ${(p) => (p.$t.tilt ? `rotate(${p.$t.tilt}deg)` : "none")};
-  ${(p) => EFFECT[p.$t.effect]}
-`;
-
-const Block = styled.div`
-  display: flex;
-  flex-direction: column;
-  align-items: ${(p) => p.$t.items};
-  text-align: ${(p) => p.$t.align};
-`;
-
-// The time. Proportional figures (tabular ones leave holes around the 1s at
-// this size), the colon lifted to sit centered on them, and AM/PM hung small
-// at the top of the figures.
-const Time = styled.div`
-  font-family: ${(p) => p.$t.display};
-  font-weight: ${(p) => p.$t.timeWeight};
-  font-style: normal;
-  font-variant-numeric: lining-nums proportional-nums;
-  font-variation-settings: ${(p) => p.$t.vary};
-  letter-spacing: ${(p) => p.$t.timeTrack}em;
-  line-height: 1;
-  white-space: nowrap;
-  /* The figures' own measured height, not the font's nominal cap height. */
-  ${(p) => !p.$t.monument && `margin-top: ${-p.$t.figTop}em; margin-bottom: ${-p.$t.figBottom}em;`}
-  gap: 0.13em; /* monument: between the hour and the minutes */
-  align-self: ${(p) => (p.$t.masthead ? "flex-start" : "auto")};
-  ${(p) => p.$t.hang && `margin-${p.$t.side}: -0.03em;`}
-  display: ${(p) => (p.$t.monument ? "flex" : "block")};
-  flex-direction: column;
-  align-items: ${(p) => p.$t.items};
-
-  i {
-    font-style: normal;
-    position: relative;
-    top: ${(p) => -p.$t.colon}em;
-    margin: 0 0.02em;
-  }
-
-  small {
-    display: inline-block;
-    font-size: 0.19em;
-    font-family: ${(p) => p.$t.ampm};
-    font-weight: inherit;
-    line-height: 1;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: ${(p) => p.$t.accent};
-    vertical-align: top;
-    position: relative;
-    top: 0.72em;
-    margin-left: 0.4em;
-  }
-
-  /* Monument: hour over minutes, AM/PM hung outside the hour. */
-  span {
-    display: block;
-    position: relative;
-    margin-top: ${(p) => -p.$t.figTop}em;
-    margin-bottom: ${(p) => -p.$t.figBottom}em;
-  }
-  span small {
-    position: absolute;
-    top: 1.5em;
-    font-size: 0.1em;
-    margin: 0 1em;
-    ${(p) => (p.$t.side === "right" ? "right: 100%;" : "left: 100%;")}
-  }
-  ${ghostDigits}
-`;
-
-// Below the time everything is set in three sizes only: a secondary size (the
-// date and the condition), a data size (values) and the label size. Capitals
-// run large, so an all-caps layout sets each a step smaller.
-const SECONDARY = (t) => (t.upper ? 48 : 60) * t.s;
-const DATA = (t) => (t.upper ? 38 : 46) * t.s;
-const LABEL = (t) => (t.caps ? 26 : 33) * t.s;
-const DateLine = styled.div`
-  ${trim}
-  margin-top: ${(p) => GAP * p.$t.k}px;
-  font-size: ${(p) => SECONDARY(p.$t)}px;
-  line-height: 1.15;
-  white-space: nowrap;
-  display: flex;
-  justify-content: ${(p) => p.$t.flex};
-  ${(p) => p.$t.monument && `order: -1; margin: 0 0 ${GAP * 0.6}px; font-size: ${DATA(p.$t)}px; color: ${p.$t.accent};`}
-`;
-
-const Now = styled.div`
-  margin-top: ${(p) => (p.$t.apart ? 0 : GAP * p.$t.k)}px;
-  display: flex;
-  align-items: baseline;
-  justify-content: ${(p) => p.$t.flex};
-  flex-wrap: wrap;
-  gap: 0 ${(p) => 40 * p.$t.k}px;
-  line-height: 1;
-`;
-
-const Temp = styled.span`
-  line-height: 1;
-  margin-top: ${(p) => -p.$t.figTop}em;
-  margin-bottom: ${(p) => -p.$t.figBottom}em;
-  font-family: ${(p) => p.$t.display};
-  font-style: normal;
-  font-variant-numeric: lining-nums proportional-nums;
-  font-variation-settings: ${(p) => p.$t.vary};
-  font-size: ${(p) => p.$t.tempSize}px;
-  font-weight: ${(p) => p.$t.timeWeight};
-  letter-spacing: ${(p) => p.$t.timeTrack}em;
-  ${(p) => p.$t.hang && `margin-${p.$t.side}: -0.03em;`}
-  ${ghostDigits}
-`;
-
-// Measured like the figures rather than trimmed in CSS, so it still lines up
-// on the temperature's baseline.
-const Cond = styled.span`
-  line-height: 1;
-  margin-top: ${(p) => -p.$t.capTop}em;
-  margin-bottom: ${(p) => -p.$t.capBottom}em;
-  font-size: ${(p) => SECONDARY(p.$t)}px;
-`;
-
-// The four figures run as one strip on a shared baseline: spread to both
-// margins in a masthead, otherwise evenly spaced from the aligned edge. If a
-// wide face makes the strip longer than the measure it falls back to two rows
-// of two (data-grid is set by useStrip).
-const Stats = styled.div`
-  margin-top: ${(p) => GAP * p.$t.k}px;
-  display: flex;
-  justify-content: ${(p) => p.$t.flex};
-  gap: 0 ${(p) => (p.$t.masthead ? 34 : 54) * p.$t.k}px; /* a floor: the masthead spreads them wider */
-
-  &[data-grid] {
-    display: grid;
-    grid-template-columns: ${(p) => (p.$t.masthead ? "1fr 1fr" : "repeat(2, max-content)")};
-    gap: ${(p) => `${GAP * 0.75 * p.$t.k}px ${96 * p.$t.k}px`};
-  }
-`;
-
-// A small label over a value. Labels are always upright tracked capitals (where
-// the face can carry them), whatever the rest of the text is doing.
-const Stat = styled.div`
-  span {
-    ${trim}
-    display: block;
-    font-size: ${(p) => LABEL(p.$t)}px;
-    font-style: normal;
-    line-height: 1.2;
-    white-space: nowrap;
-    text-transform: ${(p) => (p.$t.caps ? "uppercase" : "none")};
-    letter-spacing: ${(p) => (p.$t.caps ? 0.16 : 0.03)}em;
-    color: ${(p) => p.$t.accent};
-    margin-bottom: ${(p) => LABEL_GAP * p.$t.k}px;
-  }
-  b {
-    ${trim}
-    display: block;
-    font-weight: inherit;
-    font-size: ${(p) => DATA(p.$t)}px;
-    line-height: 1.15;
-    white-space: nowrap;
-  }
-`;
-
-// The "today" fact: set like a stat, but its value may wrap. Held to a
-// comfortable line length rather than the full measure.
-const Fact = styled(Stat)`
-  margin-top: ${(p) => GAP * p.$t.k}px;
-  max-width: ${(p) => (p.$t.masthead ? "100%" : `${840 * p.$t.k}px`)};
-  b {
-    font-style: ${(p) => (p.$t.quote ? "italic" : "inherit")};
-    line-height: 1.22;
-    white-space: normal;
-    text-wrap: balance;
-  }
-`;
-
-// Full-stage backdrop: the AI-generated image for the current 15-minute slot
-// (see visuals.js on the server). The layout's scrim darkens it behind the
-// readouts where needed. Swaps are a hard cut, so
-// the change on the quarter-hour is visible.
-const Backdrop = styled.div`
-  position: absolute;
-  inset: 0;
-  z-index: 0;
   background: #000;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 36px;
+  padding: 0 88px;
+  color: #f2f1ec;
+  font-family: "Space Grotesk", system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
 
-  img {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
+  b {
+    font-size: 250px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: -0.04em;
   }
+  b small {
+    font-size: 0.2em;
+    letter-spacing: 0.06em;
+    margin-left: 0.4em;
+    color: #a9a7a0;
+  }
+  span {
+    font-size: 54px;
+    font-weight: 500;
+    color: #cfcdc6;
+  }
+`;
 
-  &::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background: ${(p) => p.$scrim};
-  }
+const Hud = styled.div`
+  position: fixed;
+  left: 10px;
+  top: 10px;
+  z-index: 10;
+  font: 13px/1.4 ui-monospace, monospace;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.65);
+  padding: 6px 10px;
+  border-radius: 6px;
+  white-space: pre;
+  pointer-events: none;
 `;
 
 // Scale the stage so it fits inside the current viewport while preserving the
 // 1080x1920 aspect ratio.
 function useStageScale() {
-  const [scale, setScale] = useState(1);
+  // Worked out before the first render, so the first piece is told the real size of the screen.
+  const [scale, setScale] = useState(() => Math.min(window.innerWidth / STAGE_W, window.innerHeight / STAGE_H) || 1);
   useEffect(() => {
-    const update = () => {
-      setScale(Math.min(window.innerWidth / STAGE_W, window.innerHeight / STAGE_H));
-    };
+    const update = () => setScale(Math.min(window.innerWidth / STAGE_W, window.innerHeight / STAGE_H) || 1);
     update();
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);
   }, []);
   return scale;
-}
-
-function useNow(off) {
-  const [now, setNow] = useState(new Date());
-  useEffect(() => {
-    if (off) return;
-    const id = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(id);
-  }, [off]);
-  return now;
-}
-
-// Fetch current conditions on mount and refresh every 10 minutes.
-function useWeather(off) {
-  const [weather, setWeather] = useState(null);
-  useEffect(() => {
-    if (off) return;
-    let active = true;
-    const load = async () => {
-      try {
-        const w = await fetchWeather();
-        if (active) setWeather(w);
-      } catch {
-        // Leave previous reading in place on a failed refresh.
-      }
-    };
-    load();
-    const id = setInterval(load, 10 * 60 * 1000);
-    return () => {
-      active = false;
-      clearInterval(id);
-    };
-  }, [off]);
-  return weather;
-}
-
-// Today's facts (holidays, events on this date, plants in bloom), refreshed
-// hourly so they roll over with the date.
-function useToday(off) {
-  const [facts, setFacts] = useState([]);
-  useEffect(() => {
-    if (off) return;
-    let active = true;
-    const load = () => fetchToday().then((f) => active && f.length && setFacts(f)).catch(() => {});
-    load();
-    const id = setInterval(load, 60 * 60 * 1000);
-    return () => {
-      active = false;
-      clearInterval(id);
-    };
-  }, [off]);
-  return facts;
-}
-
-// Ask the browser to fetch every typeface up front, so the first time a layout
-// uses one its text doesn't flash in a fallback font. Returns a counter that
-// bumps when fonts finish loading (text widths change then).
-function useFonts() {
-  const [loaded, setLoaded] = useState(0);
-  useEffect(() => {
-    if (!document.fonts?.load) return;
-    const bump = () => setLoaded((n) => n + 1);
-    document.fonts.addEventListener?.("loadingdone", bump);
-    for (const f of Object.values(FONTS)) {
-      for (const w of new Set(f.weights)) {
-        document.fonts.load(`${w} 40px ${f.stack}`).catch(() => {});
-        if (f.italic) document.fonts.load(`italic ${w} 40px ${f.stack}`).catch(() => {});
-      }
-    }
-    return () => document.fonts.removeEventListener?.("loadingdone", bump);
-  }, []);
-  return loaded;
-}
-
-// Sets an element's font size, shrinking it if the line would be wider than
-// the measure (a wide face at "12:00 PM" can otherwise run off the edge). With
-// `fill` it is scaled, up or down, to span the measure exactly.
-const FILL_MAX = 430;
-function useFitFontSize(size, fill, deps) {
-  const ref = useRef(null);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.style.fontSize = `${size}px`;
-    const w = el.offsetWidth;
-    if (!w) return;
-    if (fill) el.style.fontSize = `${Math.min(Math.floor((size * MEASURE) / w), FILL_MAX)}px`;
-    else if (w > MEASURE) el.style.fontSize = `${Math.floor((size * MEASURE) / w)}px`;
-  }, [size, fill, ...deps]); // eslint-disable-line react-hooks/exhaustive-deps
-  return ref;
-}
-
-// How much empty space a line of figures carries above and below the digits
-// themselves, in em, at line-height 1. Measured from the face (the nominal cap
-// height is no guide: handwriting and pixel faces draw their digits well short
-// of it), so the gaps around the time and temperature come out exact.
-function useInkTrim(stack, weight, loaded, sample = "0123456789") {
-  return useMemo(() => {
-    const none = { top: 0, bottom: 0 };
-    try {
-      const size = 200;
-      const ctx = document.createElement("canvas").getContext("2d");
-      ctx.font = `${weight} ${size}px ${stack}`;
-      const m = ctx.measureText(sample);
-      const asc = m.fontBoundingBoxAscent;
-      const desc = m.fontBoundingBoxDescent;
-      if (!asc || !m.actualBoundingBoxAscent) return none;
-      const toBaseline = (size - (asc + desc)) / 2 + asc;
-      return {
-        top: (toBaseline - m.actualBoundingBoxAscent) / size,
-        bottom: (size - toBaseline - Math.max(0, m.actualBoundingBoxDescent)) / size,
-      };
-    } catch {
-      return none;
-    }
-  }, [stack, weight, loaded, sample]);
-}
-
-// Lays the stats out as one strip, or as two rows of two when the strip would
-// not fit the measure in this face.
-function useStrip(deps) {
-  const ref = useRef(null);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    delete el.dataset.grid;
-    const gap = parseFloat(getComputedStyle(el).columnGap) || 0;
-    const kids = [...el.children];
-    const width = kids.reduce((w, k) => w + k.offsetWidth, 0) + gap * Math.max(0, kids.length - 1);
-    if (width > MEASURE) el.dataset.grid = "";
-  }, deps); // eslint-disable-line react-hooks/exhaustive-deps
-  return ref;
 }
 
 // If the server is running a newer build than this page, reload once to pick
@@ -553,207 +204,371 @@ function reloadIfNewBuild(serverBuild) {
   if (already !== serverBuild) window.location.reload();
 }
 
-// Polls /api/visual (which also tells the server someone is watching, so it
-// keeps generating), preloads the next slot's image, and returns the one that
-// should be on screen right now. The swap happens on the client's own clock
-// the moment the slot boundary passes, so it's instant rather than waiting for
-// the next poll. Polling pauses while the tab is hidden, and never starts when
-// `off` (a ?preview page must not count as a viewer and trigger generation).
-function useBackdrop(now, off) {
-  const [visual, setVisual] = useState(null);
-  const [ready, setReady] = useState({}); // url -> true once decoded
-
+function useBuildWatch() {
   useEffect(() => {
-    if (off) return;
-    let active = true;
     const poll = async () => {
       if (document.visibilityState === "hidden") return;
       try {
-        const res = await fetch("/api/visual", { cache: "no-store" });
-        const v = await res.json();
-        reloadIfNewBuild(v.build);
-        if (active) setVisual(v);
+        const res = await fetch("/api/build", { cache: "no-store" });
+        reloadIfNewBuild((await res.json()).build);
       } catch {
-        // Keep showing whatever we have.
+        // No server (vite dev) or offline: nothing to do.
       }
     };
     poll();
     const id = setInterval(poll, 30 * 1000);
-    document.addEventListener("visibilitychange", poll);
-    return () => {
-      active = false;
-      clearInterval(id);
-      document.removeEventListener("visibilitychange", poll);
-    };
-  }, [off]);
-
-  // Decode both images ahead of time so the cut is clean.
-  useEffect(() => {
-    for (const m of [visual?.current, visual?.next]) {
-      if (!m || ready[m.url]) continue;
-      const img = new Image();
-      img.onload = () => setReady((r) => ({ ...r, [m.url]: true }));
-      img.src = m.url;
-    }
-  }, [visual]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const { current, next } = visual || {};
-  const shown = next && now.getTime() >= next.slot && ready[next.url] ? next : current;
-  return shown && ready[shown.url] ? shown : null;
+    return () => clearInterval(id);
+  }, []);
 }
 
-// ?preview=<name> shows generated/preview/<name>.json (made by
-// `npm run visual:preview` or the /styles page) instead of the live slot, to
-// look at one image and its layout on its own. ?show=<path> does the same for
-// any generation's .json under /generated/ (the /gallery page links here).
-function usePreview(name, path) {
-  const [meta, setMeta] = useState(null);
-  const src = name ? `/generated/preview/${name}.json` : /^\/generated\/[\w./-]+\.json$/.test(path || "") && !path.includes("..") ? path : null;
+let serial = 0;
+// Worked out once, when the frame is created: changing an iframe's src reloads it.
+const frameUrl = (f, scale) => {
+  const q = new URLSearchParams({ id: f.id, embed: "1", key: f.key, slot: String(f.slot), scale: String(scale) });
+  if (onDevice) q.set("onDevice", "true");
+  if (debug) q.set("hud", "1");
+  // Simulated conditions carry through to the piece, starting from this page's clock.
+  for (const k of ["scenario", "wx", "seed", "fps"]) if (params.get(k)) q.set(k, params.get(k));
+  if (simulatedClock) {
+    // What this page's clock read, and when, so the piece's clock follows this one.
+    q.set("at", String(Math.round(f.startedAtClock)));
+    q.set("atWall", String(f.startedAtWall));
+    if (rate !== 1) q.set("rate", String(rate));
+  }
+  const elsewhere = f.origin !== window.location.origin;
+  if (elsewhere) q.set("host", window.location.origin);
+  return `${elsewhere ? f.origin : ""}/visual.html?${q}`;
+};
+
+// The rotation: which iframe is showing, which is warming up behind it.
+function useRotation(dataRef, scaleRef) {
+  const [view, setView] = useState({ shown: null, pending: null, stats: null });
+  const R = useRef({
+    shown: null,
+    pending: null,
+    bad: new Map(), // piece id -> when it failed (performance.now())
+    fails: 0, // failures in a row, for the back-off
+    up: new Set(), // the machine's other names that have answered
+    down: new Map(), // ...and those given up on -> when (performance.now()); each gets another chance after an hour
+    quiet: new Map(), // name -> how many frames in a row said nothing from it
+    turn: 0,
+    offset: 0,
+    jump: false,
+    stats: null,
+    retryAt: 0,
+    lastTick: 0,
+  }).current;
+
   useEffect(() => {
-    if (!src) return;
-    fetch(src, { cache: "no-store" })
-      .then((r) => r.json())
-      .then(setMeta)
-      .catch(() => {});
-  }, [src]);
-  return meta;
+    const publish = () => setView({ shown: R.shown, pending: R.pending, stats: R.stats });
+    // With ?debug=1 the console keeps a record of what the rotation did and why.
+    const say = debug ? (...words) => console.log(`[display ${(performance.now() / 1000).toFixed(1)}s]`, ...words) : () => {};
+    const post = (f, message) => {
+      try {
+        f?.win?.postMessage(message, f.origin);
+      } catch {}
+    };
+
+    // Where the next piece is loaded from: the machine's other names in turn,
+    // and never the one the piece on screen is using (two pieces under one
+    // name share a process, and would stall together).
+    const pickOrigin = () => {
+      const nowP = performance.now();
+      for (const [o, at] of R.down) {
+        if (nowP - at > BAD_FOR_MS) {
+          R.down.delete(o);
+          R.quiet.delete(o);
+        }
+      }
+      const usable = OTHER_ORIGINS.filter((o) => !R.down.has(o));
+      if (!usable.length) return window.location.origin;
+      const free = usable.filter((o) => o !== R.shown?.origin);
+      const from = free.length ? free : usable;
+      return from[R.turn++ % from.length];
+    };
+
+    const begin = (slot, immediate) => {
+      if (!IDS.length) return;
+      const nowP = performance.now();
+      for (const [id, at] of R.bad) if (nowP - at > BAD_FOR_MS) R.bad.delete(id);
+      const bad = new Set(R.bad.keys());
+      // Never the piece already showing (the schedule never repeats one; skipping
+      // must not either). Leave out what has failed lately and, on the kiosk,
+      // what this machine runs badly, as long as that leaves something.
+      const not = R.shown?.id ?? null;
+      const skip = onDevice ? new Set([...bad, ...slowPieces()]) : bad;
+      let id = pinned || pieceForSkipping(slot, IDS, skip, not) || pieceForSkipping(slot, IDS, skip, null) || pieceForSkipping(slot, IDS, bad, not);
+      if (!id) {
+        // Everything has failed lately: forgive and try again.
+        R.bad.clear();
+        id = pieceForSkipping(slot, IDS, new Set(), null);
+      }
+      const f = {
+        key: `f${++serial}`,
+        id,
+        slot,
+        ready: false,
+        immediate,
+        startedAt: nowP,
+        startedAtClock: clockNow(),
+        startedAtWall: Date.now(),
+        origin: pickOrigin(),
+        win: null, // its window, once it has said hello
+        heardAt: 0, // when it last said anything
+        pingedAt: 0, // when the oldest question it has not answered was asked
+        lastPing: 0,
+      };
+      f.url = frameUrl(f, scaleRef.current);
+      R.pending = f;
+      say(`loading ${id} for slot ${slot}${immediate ? " (to show at once)" : ""} from ${f.origin}`);
+      // From here the piece on screen shares the machine with the one starting
+      // up, so its frame rate no longer says anything about it.
+      post(R.shown, { type: "ct:leaving" });
+      publish();
+    };
+    // After a failure, wait before trying anything else, and longer each time
+    // (4 s, 8, 16 ... up to five minutes), so a display on which nothing will
+    // load, or nothing stays up, is not forever starting pieces. The count
+    // starts again once a piece has stayed up for a minute (see tick).
+    const backOff = () => {
+      R.fails += 1;
+      R.retryAt = performance.now() + Math.min(4000 * 2 ** (R.fails - 1), 5 * 60 * 1000);
+    };
+    // Take a frame off: it failed, never drew, or stopped answering. If it was
+    // the one showing, the plain clock shows until another is up.
+    const drop = (frame, why) => {
+      say(`taking off ${frame.id}: ${why}`);
+      if (!pinned) R.bad.set(frame.id, performance.now());
+      if (R.pending === frame) R.pending = null;
+      else if (R.shown === frame) {
+        R.shown = null;
+        R.stats = null;
+      }
+      backOff();
+      publish();
+    };
+
+    const tick = () => {
+      const now = clockNow();
+      const nowP = performance.now();
+      const slot = slotOf(now) + R.offset;
+      // A piece counts as working once it has stayed up a minute, not when it is cut to.
+      if (R.fails && R.shown && nowP - (R.shown.shownAt || nowP) > 60 * 1000) R.fails = 0;
+
+      // Is everybody still answering? A piece in a process of its own can hang
+      // without taking this page with it; one that leaves a question unanswered
+      // for SILENT_MS is taken off. (If this page was itself stalled or asleep,
+      // or is in a background tab, nobody's silence counts.)
+      const stalled = nowP - R.lastTick > 3000 || document.visibilityState !== "visible";
+      R.lastTick = nowP;
+      // ...nor does time this page lost count against a frame that has yet to say hello.
+      if (stalled && R.pending && !R.pending.heardAt) R.pending.startedAt = nowP;
+      for (const f of [R.shown, R.pending]) {
+        if (!f || !f.win) continue;
+        if (stalled) f.pingedAt = 0;
+        else if (f.pingedAt && f.heardAt < f.pingedAt && nowP - f.pingedAt > SILENT_MS) {
+          // A frame under the same name shares its process and is stuck with
+          // it: that one goes too (without blame), so the process can end.
+          const mate = [R.shown, R.pending].find((g) => g && g !== f && g.origin === f.origin);
+          drop(f, `no answer for ${Math.round((nowP - f.heardAt) / 1000)} s`);
+          if (mate) {
+            say(`and ${mate.id}, which was in the same process`);
+            if (R.pending === mate) R.pending = null;
+            else if (R.shown === mate) R.shown = null;
+            publish();
+          }
+          continue;
+        }
+        if (nowP - f.lastPing >= PING_MS) {
+          f.lastPing = nowP;
+          if (!f.pingedAt || f.heardAt >= f.pingedAt) f.pingedAt = nowP; // otherwise an earlier question is still open
+          post(f, { type: "ct:ping" });
+        }
+      }
+
+      const p = R.pending;
+      if (p) {
+        const due = p.immediate || !R.shown || now >= (p.slot - R.offset) * SLOT_MS;
+        if (p.ready && due) {
+          p.shownAt = nowP;
+          R.shown = p;
+          R.pending = null;
+          R.jump = false;
+          R.stats = null;
+          post(p, { type: "ct:shown" });
+          say(`showing ${p.id}`);
+          publish();
+        } else if (!p.heardAt && !R.up.has(p.origin) && p.origin !== window.location.origin && nowP - p.startedAt > HELLO_TIMEOUT_MS) {
+          // Not a word from that name, now or ever: it probably does not reach
+          // this server. Stop using it for an hour: the second time, or at once
+          // if no other name has answered either (so a machine where none of
+          // them work is not kept waiting), though never at once in the first
+          // minute, when the machine may just be busy starting up. The piece
+          // is tried again elsewhere.
+          const times = (R.quiet.get(p.origin) || 0) + 1;
+          R.quiet.set(p.origin, times);
+          const giveUp = times >= 2 || (!R.up.size && nowP > 60 * 1000);
+          if (giveUp) R.down.set(p.origin, nowP);
+          say(`nothing answers from ${p.origin}${giveUp ? ": not using it for the next hour" : ""}`);
+          R.pending = null;
+          publish();
+        } else if (!p.ready && nowP - p.startedAt > LOAD_TIMEOUT_MS) {
+          drop(p, `not drawn after ${LOAD_TIMEOUT_MS / 1000} s`);
+        }
+        return;
+      }
+      if (nowP < R.retryAt) return;
+      if (!R.shown) return begin(slot, true);
+      if (pinned) return;
+      if (R.jump || R.shown.slot < slot || R.shown.slot > slot + 1) return begin(slot, true); // skipped by hand, or the clock moved under us
+      if (R.shown.slot === slot && (slot - R.offset + 1) * SLOT_MS - now <= PRELOAD_MS) begin(slot + 1, false);
+    };
+
+    const onMessage = (e) => {
+      const m = e.data;
+      if (!m || typeof m.type !== "string" || !m.type.startsWith("ct:")) return;
+      const frame = [R.shown, R.pending].find((f) => f && f.key === m.key);
+      if (!frame || e.origin !== frame.origin) return;
+      frame.heardAt = performance.now();
+      R.up.add(frame.origin);
+      R.quiet.delete(frame.origin);
+      if (m.type === "ct:hello") {
+        frame.win = e.source;
+        // The scale first: it may have changed since the frame's address was
+        // made, and the piece mounts as soon as it has its data.
+        post(frame, { type: "ct:scale", scale: scaleRef.current });
+        post(frame, { type: "ct:data", data: dataRef.current });
+      } else if (m.type === "ct:ready") {
+        frame.ready = true;
+      } else if (m.type === "ct:error") {
+        drop(frame, `it failed (${m.message || "error"})`);
+      } else if (m.type === "ct:stats" && R.shown === frame) {
+        R.stats = m;
+        // Count how the showing is going, once it has had 20 s to settle, and
+        // not while the next piece is starting up beside it.
+        if (m.clean !== false && !R.pending && m.target > 0 && performance.now() - (frame.shownAt || 0) > 20000) {
+          frame.samples = (frame.samples || 0) + 1;
+          if (m.fps < m.target * 0.55) frame.slow = (frame.slow || 0) + 1;
+          // A minute or more of readings, most of them slow: a strike (once per showing).
+          if (onDevice && !pinned && !frame.struck && frame.samples >= 30 && frame.slow > frame.samples * 0.7) {
+            frame.struck = true;
+            addStrike(frame.id);
+          }
+        }
+        if (debug) publish();
+      }
+    };
+
+    const step = (by) => {
+      if (pinned || onDevice || IDS.length < 2) return;
+      R.offset += by;
+      R.jump = true;
+      R.pending = null;
+      tick();
+    };
+    const onKey = (e) => {
+      if (e.key === "ArrowRight" || e.key === " ") step(1);
+      else if (e.key === "ArrowLeft") step(-1);
+      else if (e.key === "g" || e.key === "G") window.location.href = "/gallery";
+    };
+    const onClick = () => step(1);
+
+    R.broadcast = (message) => {
+      for (const f of [R.shown, R.pending]) post(f, message);
+    };
+
+    tick();
+    const id = setInterval(tick, 200);
+    window.addEventListener("message", onMessage);
+    if (!onDevice) {
+      window.addEventListener("keydown", onKey);
+      window.addEventListener("click", onClick);
+    }
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("message", onMessage);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("click", onClick);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return { view, broadcast: (m) => R.broadcast?.(m) };
 }
 
 function App() {
   const scale = useStageScale();
-  const params = new URLSearchParams(window.location.search);
-  const pinned = Boolean(params.get("preview") || params.get("show"));
-  const previewed = usePreview(params.get("preview"), params.get("show"));
-  // A generation opened from the gallery (?show=) is shown as it was when it
-  // was made: its saved time, weather and fact stand in for the live ones.
-  // (Images made before readouts were saved show the time they were made, with
-  // live weather.)
-  const showing = Boolean(params.get("show"));
-  const saved = showing ? previewed?.readout : null;
-  const still = showing && (!previewed || Boolean(saved)); // no live data needed, or not yet known
-  const madeAt = saved?.at || (showing && previewed?.createdAt) || null;
-  const liveNow = useNow(still || Boolean(madeAt));
-  const liveWeather = useWeather(still);
-  const liveFacts = useToday(still);
-  const now = madeAt ? new Date(madeAt) : liveNow;
-  const weather = saved ? saved.weather : liveWeather;
-  const live = useBackdrop(now, pinned);
-  const backdrop = pinned ? previewed : live;
-  const fontsLoaded = useFonts();
-  // One fact per image: it changes when the backdrop does.
-  const fact = saved ? saved.fact : factFor(liveFacts, backdrop?.slot ?? now.getTime());
-  const onDevice = params.get("onDevice") === "true";
-  // The layout designed for this image, or the built-in one for its style.
-  // ?theme=neon previews a built-in layout on whatever image is showing.
-  const preview = params.get("theme");
-  // ?composition=masthead (etc.) forces one composition, to compare them.
-  const layout = resolveLayout(preview ? null : backdrop?.layout, preview || backdrop?.style);
-  if (ENUMS.composition.includes(params.get("composition"))) layout.composition = params.get("composition");
-  const t = themeOf(layout);
-  const fig = useInkTrim(t.display, t.timeWeight, fontsLoaded);
-  const cap = useInkTrim(t.body, t.bodyWeight, fontsLoaded, "H");
-  Object.assign(t, { figTop: fig.top, figBottom: fig.bottom, capTop: cap.top, capBottom: cap.bottom });
+  useBuildWatch();
 
-  const [clock, ampm] = now
-    .toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
-    .split(/\s+/);
-  const [hh, mm] = clock.split(":");
-  const weekday = now.toLocaleDateString("en-US", { weekday: "long" });
-  const monthDay = now.toLocaleDateString("en-US", { month: "long", day: "numeric" });
+  // Live data, fetched once here and handed to whichever piece is running.
+  // (With simulated conditions each piece makes its own.)
+  const dataRef = useRef(null);
+  const [data, setData] = useState(null);
+  // Real pixels per stage unit, so pieces can size their canvases for the panel.
+  const pixelScale = Math.round(scale * (window.devicePixelRatio || 1) * 1000) / 1000;
+  const scaleRef = useRef(pixelScale);
+  scaleRef.current = pixelScale;
+  const { view, broadcast } = useRotation(dataRef, scaleRef);
+  useEffect(() => {
+    if (sim && sim.wx !== "live") return;
+    const hub = createHub({
+      onChange: (d) => {
+        dataRef.current = d;
+        setData(d);
+        broadcast({ type: "ct:data", data: d });
+      },
+    });
+    dataRef.current = hub.data;
+    setData(hub.data);
+    return hub.start();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Figures in a seven-segment face sit over a ghost of all their segments.
-  const digits = (v) => (t.ghost ? <b data-ghost={String(v).replace(/\d/g, "8")}>{v}</b> : v);
+  useEffect(() => {
+    broadcast({ type: "ct:scale", scale: pixelScale });
+  }, [pixelScale]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const timeRef = useFitFontSize(t.timeSize, t.fill, [clock, ampm, t.comp, t.display, t.timeWeight, t.timeTrack, fontsLoaded]);
+  // The plain clock underneath.
+  const [now, setNow] = useState(clockNow());
+  useEffect(() => {
+    const id = setInterval(() => setNow(clockNow()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const z = zoned(now);
+  const wx = data?.weather && Math.abs(now - data.weather.at) < 3 * 3600 * 1000 ? data.weather.current : null;
 
-  const statsRef = useStrip([t.comp, t.body, t.bodyWeight, t.upper, t.s, t.track, fontsLoaded, Boolean(weather), now.getMinutes()]);
-
-  const [, label] = (weather && WMO[weather.weather_code]) || ["", ""];
-  const sun = weather && nextSunEvent(weather.daily, now);
-  const moon = moonPhase(now);
+  const { shown, pending, stats } = view;
+  const frames = [shown, pending].filter(Boolean);
+  const toNext = SLOT_MS - (((now % SLOT_MS) + SLOT_MS) % SLOT_MS);
 
   return (
-    <Viewport $onDevice={onDevice}>
+    <Viewport>
       <Stage $scale={scale}>
-        <Backdrop $scrim={t.scrim}>{backdrop && <img key={backdrop.url} src={backdrop.url} alt="" />}</Backdrop>
-        <Content $t={t}>
-          <Block $t={t}>
-            <Time $t={t} ref={timeRef}>
-              {t.monument ? (
-                <>
-                  <span>
-                    {digits(hh)}
-                    <small>{ampm}</small>
-                  </span>
-                  <span>{digits(mm)}</span>
-                </>
-              ) : (
-                <>
-                  {digits(hh)}
-                  <i>:</i>
-                  {digits(mm)}
-                  <small>{ampm}</small>
-                </>
-              )}
-            </Time>
-            <DateLine $t={t}>
-              {t.masthead ? (
-                <>
-                  <span>{weekday}</span>
-                  <span>{monthDay}</span>
-                </>
-              ) : (
-                `${weekday}, ${monthDay}`
-              )}
-            </DateLine>
-          </Block>
-          <Block $t={t}>
-            {weather ? (
-              <>
-                <Now $t={t}>
-                  <Temp $t={t}>{digits(Math.round(weather.temperature_2m))}°</Temp>
-                  <Cond $t={t}>{label}</Cond>
-                </Now>
-                <Stats $t={t} ref={statsRef}>
-                  {sun && (
-                    <Stat $t={t}>
-                      <span>{sun.label} in</span>
-                      <b>
-                        {sun.h > 0 ? `${sun.h}h ` : ""}
-                        {sun.m}m
-                      </b>
-                    </Stat>
-                  )}
-                  <Stat $t={t}>
-                    <span>Moon</span>
-                    <b>{moon}</b>
-                  </Stat>
-                  {weather.aqi != null && (
-                    <Stat $t={t}>
-                      <span>Air quality</span>
-                      <b>{weather.aqi}</b>
-                    </Stat>
-                  )}
-                  {weather.uv_index != null && (
-                    <Stat $t={t}>
-                      <span>UV index</span>
-                      <b>{Math.round(weather.uv_index)}</b>
-                    </Stat>
-                  )}
-                </Stats>
-                {fact && (
-                  <Fact $t={t}>
-                    <span>{fact.label}</span>
-                    <b>{fact.value}</b>
-                  </Fact>
-                )}
-              </>
-            ) : (
-              <Cond $t={t}>Loading weather…</Cond>
-            )}
-          </Block>
-        </Content>
+        <Plain>
+          <b>
+            {z.hour % 12 || 12}:{String(z.minute).padStart(2, "0")}
+            <small>{z.hour < 12 ? "AM" : "PM"}</small>
+          </b>
+          <span>
+            {WEEKDAYS[z.weekday]}, {MONTHS[z.month - 1]} {z.day}
+          </span>
+          {wx && (
+            <span>
+              {Math.round(wx.temp)}° {labelOf(wx.code)}
+            </span>
+          )}
+        </Plain>
+        {frames.map((f) => (
+          <Frame key={f.key} title={f.id} src={f.url} style={{ zIndex: f === shown ? 2 : 0 }} />
+        ))}
       </Stage>
+      {debug && (
+        <Hud>
+          {`showing  ${shown ? shown.id : "(plain clock)"}${pinned ? "  [held]" : ""}\n`}
+          {`next     ${pending ? `${pending.id}${pending.ready ? " (ready)" : " (loading)"}` : "-"}  in ${Math.floor(toNext / 60000)}:${String(Math.floor((toNext % 60000) / 1000)).padStart(2, "0")}\n`}
+          {`library  ${IDS.length} pieces${onDevice && slowPieces().size ? `  (too slow here, skipped: ${[...slowPieces()].join(", ")})` : ""}\n`}
+          {onDevice && shown ? `process  ${shown.origin !== window.location.origin ? `its own (${shown.origin.replace(/^.*\/\//, "")})` : "this page's"}, last heard from ${Math.round((performance.now() - shown.heardAt) / 1000)} s ago\n` : ""}
+          {stats ? `${stats.fps} fps  frame ${stats.avgMs} ms  quality ${stats.quality}` : ""}
+        </Hud>
+      )}
     </Viewport>
   );
 }

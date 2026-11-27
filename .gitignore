@@ -6,6 +6,8 @@ dist/
 *.sqlite-wal
 .DS_Store
 
-# AI-generated backdrops are written at runtime, never committed.
-generated/
+# Screenshots from scripts/shoot.js.
+shots/
 
+# Left over on devices from when the backdrops were generated images.
+generated/

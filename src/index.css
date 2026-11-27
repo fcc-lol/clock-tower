@@ -7,13 +7,8 @@ body,
 }
 
 body {
-  background: #333;
+  background: #111;
   font-family: "Space Grotesk", sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
-
-code {
-  font-family: "Space Grotesk", sans-serif;
-}
-
