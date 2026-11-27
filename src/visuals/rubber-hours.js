@@ -33,10 +33,10 @@ import {
 // ---------------------------------------------------------------------------
 const TUBE = 130; // tube thickness
 const SK_W = 318; // extent of a numeral's centreline
-const SK_H = 424;
+const SK_H = 400; // a little shorter than they could be: the tags below must hang clear even over a two-line fact
 const LEFT = 82;
-const ROW_H = 60; // top of the hours row (outer edge of the tubes)
-const ROW_M = 672; // top of the minutes row: clear air between the two rows of the time
+const ROW_H = 68; // top of the hours row (outer edge of the tubes)
+const ROW_M = 656; // top of the minutes row: clear air between the two rows of the time
 const CELL = SK_W + TUBE;
 const CELL_GAP = 20;
 const NN = 14; // nodes per numeral
@@ -50,7 +50,7 @@ const STK_GAP = 50;
 const SUN_W = 384;
 const MOON_W = 490;
 const SUN_COL = SUN_W - 44 - STK_GAP - STK; // room for the sun countdown beside its sticker
-const LAW_AIR = 72; // clear ground kept between those tags and the label at the foot
+const LAW_AIR = 64; // clear ground kept between those tags and the label at the foot
 
 // Light comes from the upper left: each tone of the tube is the same path,
 // thinner and shifted further toward the light.
