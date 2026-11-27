@@ -1412,7 +1412,7 @@ export default {
       }
 
       // a slow glow behind the cloud sheets in a storm
-      if (false) {
+      if (w.kind === "storm") {
         const cyc = t / 19 + 0.31;
         const k = Math.floor(cyc), p = cyc - k;
         const env = smoothstep(0, 0.16, p) * (1 - smoothstep(0.16, 0.62, p));
@@ -1662,6 +1662,7 @@ export default {
       ctx.fill();
 
       // rain: threads hung from above, leaning with the wind
+      if (s.frame > 3) { ctx.restore(); return; }
       if (w.falling && w.falling !== "snow" && w.intensity > 0.01) {
         const nThreads = Math.min(NR, Math.round(30 + 120 * w.intensity));
         const slant = clamp(lat * w.wind * 0.012, -0.38, 0.38);
