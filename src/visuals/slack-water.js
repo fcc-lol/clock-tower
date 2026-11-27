@@ -79,11 +79,12 @@ const HOUR_TOP = HOUR_BASE - DIG_H;
 const FLANK_BASE = HOUR_BASE - 10; // the flanks' lowest baseline, level with the foot of the hours
 const LB_PX = 26; // small labels (DM Mono caps)
 const DATE_PX = 70;
-const FACT_PX = 44, FACT_LH = 54, FACT_GAP = 12;
-const HEAD_GAP = 100; // clear air between the top band and the hours' cap line
+const FACT_PX = 44, FACT_LH = 84, FACT_GAP = -2; // a wrapped fact keeps 40 px of air between its lines
+const HEAD_GAP = 104; // clear air between the top band's ink and the hours' cap line
+const HEAD_GAP2 = 80; // the same under a two-line fact, so the date keeps clear of the top edge
 const TEMP_PX = 158;
-const COND_PX = 44, COND_LH = 60;
-const VAL_PX = 48, VAL_LH = 64;
+const COND_PX = 44, COND_LH = 78;
+const VAL_PX = 48, VAL_LH = 80;
 const AIR_PX = 64; // AQI and UV, hung from the minutes' cap line
 const MIN_TOP = MIN_BASE - DIG_H;
 const SUN_PX = 74;
@@ -134,11 +135,11 @@ const CSS = `
 .sw-temp { left: 60px; font: 900 ${TEMP_PX}px/${TEMP_PX}px "Big Shoulders Display", sans-serif; white-space: nowrap; }
 .sw-cond { left: 64px; font-weight: 700; font-size: ${COND_PX}px; line-height: ${COND_LH}px; text-transform: uppercase; letter-spacing: 0.03em; }
 .sw-air { left: 64px; display: flex; gap: 48px; font-weight: 800; font-size: ${AIR_PX}px; white-space: nowrap; }
-.sw-air .vl { line-height: 1; }
+.sw-air .vl { line-height: 1; margin-top: 18px; }
 .sw-sun { right: 64px; text-align: right; }
-.sw-sun .vl { font-weight: 800; font-size: ${SUN_PX}px; line-height: ${SUN_PX}px; text-transform: uppercase; white-space: nowrap; letter-spacing: 0.01em; }
+.sw-sun .vl { margin-top: 14px; font-weight: 800; font-size: ${SUN_PX}px; line-height: ${SUN_PX}px; text-transform: uppercase; white-space: nowrap; letter-spacing: 0.01em; }
 .sw-moon { right: 64px; text-align: right; }
-.sw-moon .vl { font-weight: 800; font-size: ${VAL_PX}px; line-height: ${VAL_LH}px; text-transform: uppercase; letter-spacing: 0.02em; }
+.sw-moon .vl { margin-top: -1px; font-weight: 800; font-size: ${VAL_PX}px; line-height: ${VAL_LH}px; text-transform: uppercase; letter-spacing: 0.02em; }
 `;
 
 export default {
@@ -322,8 +323,8 @@ export default {
       setSlab(slabX0, slabX1);
       ampmX = Math.round(CX + wm / 2 + 26);
       // the flanks of the upper storey hold the readouts: as wide as the hours allow
-      flankL = Math.floor(CX - wh / 2 - EX - 40 - 64);
-      flankR = Math.floor(W - 64 - (CX + wh / 2 + 40));
+      flankL = Math.floor(CX - wh / 2 - EX - 48 - 64);
+      flankR = Math.floor(W - 64 - (CX + wh / 2 + 48));
       for (const n of [nTemp, nCond]) n.style.width = `${flankL}px`;
       nSun.style.width = `${flankR}px`;
       // the moon stands level with the slab, so it keeps clear of the slab's end;
@@ -370,6 +371,7 @@ export default {
     grain(wrap, { opacity: 0.05 });
 
     // Place every line by its baseline, from the fonts' own metrics (once).
+    let factOff = 0, dateOff = 0; // from the bottom of the fact's (or the date's) line box up to its lowest ink
     {
       const m = document.createElement("canvas").getContext("2d");
       const metric = (font, lh) => { // offset from the top of a line box to its baseline, and the cap height
@@ -383,15 +385,19 @@ export default {
       const tp = metric(`900 ${TEMP_PX}px "Big Shoulders Display"`, TEMP_PX);
       const cd = metric(`700 ${COND_PX}px ${TXT}`, COND_LH);
       const vw = metric(`800 ${VAL_PX}px ${TXT}`, VAL_LH);
+      const fv = metric(`700 ${FACT_PX}px ${TXT}`, FACT_LH);
+      m.font = `700 ${FACT_PX}px ${TXT}`;
+      factOff = FACT_LH - fv.base - m.measureText("gjpqy,").actualBoundingBoxDescent;
+      dateOff = DATE_PX - dt.base;
       const px = (v) => `${Math.round(v)}px`;
       // top band: one column standing on the hours' cap line (it grows upward
       // with a two-line fact, and the date settles onto it when there is none);
-      // 44 px of air between the date's baseline and the fact label's caps
-      nFact.style.marginTop = px(44 - (DATE_PX - dt.base) - (lb.base - lb.cap));
+      // 66 px of air between the date's baseline and the fact label's caps
+      nFact.style.marginTop = px(66 - (DATE_PX - dt.base) - (lb.base - lb.cap));
       // left flank
       const tempBase = HOUR_TOP + tp.cap;
       nTemp.style.top = px(tempBase - tp.base);
-      nCond.style.top = px(tempBase + 36 + cd.cap - cd.base);
+      nCond.style.top = px(tempBase + 52 + cd.cap - cd.base);
       nAir.style.top = px(MIN_TOP + lb.cap - lb.base);
       // right flank
       const sunLbBase = HOUR_TOP + lb.cap;
@@ -841,8 +847,13 @@ export default {
       if (put("sunV", nSunV, s.text.sunValue)) fitText(nSunV, flankR, SUN_PX);
       put("moon", nMoonV, s.text.moon);
       if (put("aqi", nAqi, s.text.aqi) | put("uv", nUv, s.text.uv)) fitText(nAir, airW, AIR_PX); // a three-digit AQI beside wide minutes
-      put("fl", nFl, s.text.factLabel); put("fv", nFv, s.text.factValue);
+      put("fl", nFl, s.text.factLabel);
+      const fvNew = put("fv", nFv, s.text.factValue);
       setStyle("factShow", nFact, "display", s.text.factValue ? "block" : "none");
+      if (fvNew) { // the top band stands on its lowest ink: a little nearer the hours when the fact wraps
+        const two = s.text.factValue !== "" && nFv.clientHeight > FACT_LH * 1.5;
+        nHead.style.bottom = `${Math.round(H - (HOUR_TOP - (two ? HEAD_GAP2 : HEAD_GAP) + (s.text.factValue ? factOff : dateOff)))}px`;
+      }
 
       const key = `${palKey}|${snowKey}`;
       if (key !== sceneKey) {

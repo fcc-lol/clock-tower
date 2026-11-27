@@ -42,6 +42,12 @@ const X0 = 44, Y0 = 44, X1 = 1036, Y1 = 1724;
 const PW = X1 - X0, PH = Y1 - Y0;
 const HY = 1172;
 const LX = 92, RX = 988; // inner edges that type keeps to
+// The cartouches hang from just under the top of the print; the date's may
+// run down no further than TZ_END, a clear line's height above the
+// temperature's figures (their tops sit at about y 741).
+const TZ_TOP = 72, TZ_PAD = 30, TZ_END = 698;
+// The fact's lines are set wide apart: about 40 px clear between them, ink to ink.
+const FACT_LH = 2.1;
 
 const PAPER_D = "#eee3c7", PAPER_N = "#101219", PAPER_DUSK = "#262b44";
 const SUMI = "#191514", CREAM_N = "#d9cfb3";
@@ -264,18 +270,18 @@ export default {
       .er .mist.deck i { background: var(--deck); }
       .er .cloud { position: absolute; left: 0; top: 0; overflow: visible; transform-origin: 50% 100%; will-change: transform, opacity; }
       .er .num { font-family: "Abril Fatface", "Playfair Display", Georgia, serif; fill: var(--timeInk); stroke: var(--timeKey); stroke-width: 7px; paint-order: stroke fill; stroke-linejoin: round; }
-      .er .tz { position: absolute; top: 84px; width: 100px; box-sizing: border-box; padding: 34px 0 36px; background: var(--beni); color: var(--cream);
+      .er .tz { position: absolute; top: ${TZ_TOP}px; width: 100px; box-sizing: border-box; padding: ${TZ_PAD}px 0; background: var(--beni); color: var(--cream);
         writing-mode: vertical-rl; font-size: 48px; line-height: 100px; letter-spacing: 0.05em; white-space: nowrap; }
       .er .tz::after, .er .seal::after { content: ""; position: absolute; inset: 7px; border: 1.5px solid var(--cream); opacity: 0.5; }
       .er .seal { position: absolute; top: 572px; width: 94px; height: 94px; background: var(--beni); color: var(--cream);
         font: 400 44px/94px "Abril Fatface", Georgia, serif; text-align: center; letter-spacing: 0.02em; }
-      .er .fact { position: absolute; left: ${LX}px; bottom: ${H - 1680}px; width: fit-content; min-width: 360px; max-width: 640px; box-sizing: border-box; padding: 20px 34px 26px 30px; background: var(--paper); color: var(--ink); border: 2px solid var(--ink); }
+      .er .fact { position: absolute; left: ${LX}px; bottom: ${H - 1680}px; width: fit-content; min-width: 360px; max-width: 640px; box-sizing: border-box; padding: 20px 34px 8px 30px; background: var(--paper); color: var(--ink); border: 2px solid var(--ink); }
       .er .fact::after { content: ""; position: absolute; inset: 6px; border: 1px solid var(--ink); opacity: 0.45; }
       .er .fact .lab { font-size: 28px; letter-spacing: 0.08em; color: var(--beniText); }
-      .er .fact .val { font-size: 40px; line-height: 1.2; margin-top: 4px; }
-      .er .colo { position: absolute; left: ${LX}px; width: ${RX - LX}px; top: 1756px; display: flex; justify-content: space-between; align-items: flex-start; white-space: nowrap; }
+      .er .fact .val { font-size: 40px; line-height: ${FACT_LH}; margin-top: -4px; }
+      .er .colo { position: absolute; left: ${LX}px; width: ${RX - LX}px; top: 1748px; display: flex; justify-content: space-between; align-items: flex-start; white-space: nowrap; }
       .er .colo .lab { font-size: 30px; letter-spacing: 0.07em; color: var(--beniText); line-height: 36px; }
-      .er .colo .val { font-size: 50px; line-height: 56px; margin-top: 2px; }
+      .er .colo .val { font-size: 50px; line-height: 56px; margin-top: 10px; }
       .er .edge { position: absolute; left: ${X0}px; top: ${Y0}px; width: ${PW}px; height: ${PH}px; box-sizing: border-box; border: 2px solid var(--edge); pointer-events: none; }
     `);
 
@@ -699,7 +705,7 @@ export default {
     const fitTall = (node, maxH) => {
       node.style.fontSize = "48px";
       const h = node.offsetHeight;
-      if (h > maxH) node.style.fontSize = `${Math.max(44, Math.floor((48 * (maxH - 70)) / (h - 70)))}px`;
+      if (h > maxH) node.style.fontSize = `${Math.max(44, Math.floor((48 * (maxH - 2 * TZ_PAD)) / (h - 2 * TZ_PAD)))}px`;
     };
 
     // Eased weather factors (they snap when the clock jumps).
@@ -900,8 +906,8 @@ export default {
           const len = temp.getComputedTextLength();
           if (len > 330) temp.setAttribute("font-size", Math.max(128, Math.floor((156 * 330) / len)));
         }
-        if (put("date", tzDate, tx.date)) fitTall(tzDate, 660);
-        if (put("cond", tzCond, tx.condition)) fitTall(tzCond, 600);
+        if (put("date", tzDate, tx.date)) fitTall(tzDate, TZ_END - TZ_TOP);
+        if (put("cond", tzCond, tx.condition)) fitTall(tzCond, 600 - (84 - TZ_TOP));
         put("sunL", cSun.lab, tx.sunLabel);
         put("sunV", cSun.val, tx.sunValue);
         put("moon", cMoon.val, tx.moon);
@@ -916,16 +922,16 @@ export default {
           fact.style.width = "";
           fact.style.minWidth = "";
           factVal.style.fontSize = "40px";
-          if (tx.factValue && factVal.offsetHeight > 100) {
+          if (tx.factValue && factVal.offsetHeight > 40 * FACT_LH * 2.5) {
             fact.style.maxWidth = `${RX - LX}px`;
-            if (factVal.offsetHeight > 100) factVal.style.fontSize = "36px";
+            if (factVal.offsetHeight > 40 * FACT_LH * 2.5) factVal.style.fontSize = "36px";
           }
           // Balance a two-line fact: narrow the label until one more step
           // would make a third line, so the lines come out of similar length
           // and no word is left alone on the second. Measured on change only.
           if (tx.factValue) {
             const h2 = factVal.offsetHeight;
-            const lh = parseFloat(factVal.style.fontSize) * 1.2;
+            const lh = parseFloat(factVal.style.fontSize) * FACT_LH;
             if (h2 > lh * 1.5) {
               let wpx = fact.offsetWidth;
               fact.style.minWidth = "0";

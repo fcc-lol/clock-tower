@@ -56,21 +56,26 @@ const CELL = 6; // glyph field resolution, stage px
 const PAD = 42; // empty margin around a glyph in its field
 const LEFT = 104; // left edge of both lines of numerals
 const TRACK = 12;
-const HOUR_BASE = 660;
-const MIN_BASE = 1260;
+const HOUR_BASE = 610; // the time sits as high as its top margin allows, to give the captions room
+const MIN_BASE = 1210;
 const MAX_SHEAR = 0.2;
 
 const MARGIN = 64;
 const WX0 = -40; // wires run past both edges
 const WSPAN = 1160;
 const WIRES = [
-  // parallel enough that the captions on one never crowd the next (the first
-  // sits a little higher: its descenders need clear air above the date);
+  // parallel, and far enough apart that each line of captions stands on its
+  // own: about 70 px of clear air from the lowest ink on one wire to the
+  // highest on the next (the first wire's descenders need it above the date);
   // top/bot: the band each wire and its captions live in
-  { y0: 1460, yc: 1510, y1: 1470, top: 1300, bot: 1504 },
-  { y0: 1578, yc: 1628, y1: 1588, top: 1510, bot: 1620 },
-  { y0: 1680, yc: 1720, y1: 1690, top: 1612, bot: 1722 },
+  { y0: 1413, yc: 1463, y1: 1423, top: 1253, bot: 1457 },
+  { y0: 1549, yc: 1599, y1: 1559, top: 1481, bot: 1591 },
+  { y0: 1671, yc: 1711, y1: 1681, top: 1603, bot: 1713 },
 ];
+// the fact hangs below the last wire: its highest ink here, clear of the sun's
+// countdown above it; at most two lines, its lowest ink inside the margin
+const FACT_INK = WIRES[2].y0 + 61;
+const FACT_SIZES = [[52, 1], [47, 1], [42, 2]]; // font size, lines
 const wireY = (w, x) => {
   const k = (x - WX0) / WSPAN;
   const q = WIRES[w];
@@ -112,8 +117,8 @@ export default {
       .mu .soft { font-size: 34px; font-weight: 400; }
       .mu .ampmBox { position: absolute; overflow: visible; z-index: 6; will-change: transform; }
       .mu .ampm { font-family: ${DISPLAY}; font-size: 108px; font-weight: 900; fill: currentColor; letter-spacing: 0.01em; paint-order: stroke fill; stroke-width: 12px; stroke-linejoin: round; }
-      .mu .fact { position: absolute; left: ${MARGIN}px; top: 1728px; width: ${W - 2 * MARGIN}px; z-index: 6; will-change: transform;
-        font-family: ${SERIF}; font-style: italic; font-weight: 500; font-size: 52px; line-height: 63px; max-height: 126px; overflow: hidden;
+      .mu .fact { position: absolute; left: ${MARGIN}px; top: ${FACT_INK - 20}px; width: ${W - 2 * MARGIN}px; z-index: 6; will-change: transform;
+        font-family: ${SERIF}; font-style: italic; font-weight: 500; font-size: 52px; line-height: 92px; max-height: 92px; overflow: hidden;
         font-optical-sizing: auto; text-wrap: balance; letter-spacing: 0.002em; }
     `);
     const wrap = el("div", { class: "mu" });
@@ -574,8 +579,8 @@ export default {
     // wire 1: the air now (temperature and condition at the left, air quality and UV at the right)
     const tTemp = onWire(0, "temp", "start");
     const tCond = onWire(0, "cond", "start");
-    const aqiVal = svg("tspan", { class: "val", dx: 12 });
-    const uvVal = svg("tspan", { class: "val", dx: 12 });
+    const aqiVal = svg("tspan", { class: "val", dx: 18 });
+    const uvVal = svg("tspan", { class: "val", dx: 18 });
     const tAir = onWire(0, "lab", "end", svg("tspan", { text: "AQI" }), aqiVal, svg("tspan", { text: "UV", dx: 44 }), uvVal);
     // wire 2: the calendar (date at the left, the moon at the right)
     const tDate = onWire(1, "date", "start");
@@ -583,11 +588,11 @@ export default {
     // wire 3: the fact's label at the left, the sun's countdown at the right; the fact hangs below
     const tFactLab = onWire(2, "lab", "start");
     const sunLab = svg("tspan", { class: "soft" });
-    const sunVal = svg("tspan", { class: "val", dx: 12 });
+    const sunVal = svg("tspan", { class: "val", dx: 18 });
     const tSun = onWire(2, "val", "end", sunLab, sunVal);
     // the computed text length leaves out the tspans' dx gaps: count them in
-    tAir.dx = 12 + 44 + 12;
-    tSun.dx = 12;
+    tAir.dx = 18 + 44 + 18;
+    tSun.dx = 18;
     const ampmBox = svg("svg", { class: "ampmBox", width: 320, height: 160, viewBox: `${W - MARGIN - 320} ${MIN_BASE - 130} 320 160` });
     Object.assign(ampmBox.style, { left: `${W - MARGIN - 320}px`, top: `${MIN_BASE - 130}px`, transformOrigin: "320px 130px" });
     const ampm = svg("text", { class: "ampm", "text-anchor": "end", x: W - MARGIN, y: MIN_BASE });
@@ -648,6 +653,7 @@ export default {
     }
 
     const GAP = 16;
+    const COND_GAP = 44; // temperature to condition: about 48 px of clear space, ink to ink
     const len = (t) => t.text.getComputedTextLength();
     // Narrow the sans captions on a wire (Instrument Sans has a width axis) if
     // they would not fit. Every natural width is read in one layout pass and
@@ -666,7 +672,7 @@ export default {
       for (const t of caps) t.text.style.fontStretch = "";
       for (const t of caps) t.width = len(t) + t.dx;
       const wt = tTemp.width;
-      const s1 = stretchFor([tCond, tAir], full - wt - 22 - 40);
+      const s1 = stretchFor([tCond, tAir], full - wt - COND_GAP - 4 - 40);
       const s2 = stretchFor([tDate, tMoon], full - 48);
       const s3 = stretchFor(hasFact ? [tFactLab, tSun] : [tSun], full - 48);
       tCond.text.style.fontStretch = tAir.text.style.fontStretch = s1;
@@ -675,9 +681,9 @@ export default {
       if (s1 || s2 || s3) for (const t of caps) t.width = len(t) + t.dx;
       // wire 1: the air now
       place(tTemp, MARGIN);
-      place(tCond, MARGIN + wt + 18);
+      place(tCond, MARGIN + wt + COND_GAP);
       place(tAir, W - MARGIN);
-      busy[0] = [[MARGIN - GAP, MARGIN + wt + 18 + tCond.width + GAP], [W - MARGIN - tAir.width - GAP, W - MARGIN + GAP]];
+      busy[0] = [[MARGIN - GAP, MARGIN + wt + COND_GAP + tCond.width + GAP], [W - MARGIN - tAir.width - GAP, W - MARGIN + GAP]];
       // wire 2: the calendar
       place(tDate, MARGIN);
       place(tMoon, W - MARGIN);
@@ -688,13 +694,15 @@ export default {
       if (hasFact) {
         place(tFactLab, MARGIN);
         busy[2].push([MARGIN - GAP, MARGIN + tFactLab.width + GAP]);
-        // up to two lines; a long fact steps down in size rather than overflow
-        for (const fs of [52, 47, 42]) {
-          const lh = Math.ceil(fs * 1.2);
+        // a long fact steps down in size rather than overflow, and only the
+        // smallest size wraps (to two lines, about 42 px apart ink to ink)
+        for (const [fs, lines] of FACT_SIZES) {
+          const lh = Math.ceil(fs * 0.96 + 42); // the face's ink spans about 0.96 em
           fact.style.fontSize = `${fs}px`;
           fact.style.lineHeight = `${lh}px`;
-          fact.style.maxHeight = `${2 * lh}px`;
-          if (fact.scrollHeight <= 2 * lh + 2) break;
+          fact.style.maxHeight = `${lines * lh}px`;
+          fact.style.top = `${Math.round(FACT_INK - (lh - fs) / 2)}px`;
+          if (fact.scrollHeight <= lines * lh + 2) break;
         }
       }
       seatBirds();

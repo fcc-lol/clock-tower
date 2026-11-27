@@ -50,13 +50,13 @@ const S = 30; // one seat, in stage units
 const N = COLS * ROWS;
 
 // Where things sit (64 rows of 30 px fill the 1920 px frame exactly). The
-// digits are 18 rows each; the banners are placed in stage pixels so that
-// each keeps at least 50 px of crowd between itself and the digits.
-const ROW_HOUR = 6; // rows 6-23: y 180-720
-const ROW_MIN = 31; // rows 31-48: y 930-1470
-const DATE_TOP = 0, DATE_H = 154; // the ribbon board along the roof: 0-154
-const MID_TOP = 770, MID_H = 110; // 770-880
-const TIFO_TOP = 1520; // height follows its content
+// digits are 16 rows each; every block keeps at least 64 px of clear space
+// from its neighbours.
+const ROW_HOUR = 6; // rows 6-21: y 180-660
+const ROW_MIN = 30; // rows 30-45: y 900-1380
+const DATE_TOP = 0, DATE_H = 150; // the ribbon board along the roof: 0-150
+const MID_TOP = 726, MID_H = 110; // 726-836
+const TIFO_TOP = 1444; // the scoreboard; its height follows its content
 
 // What a seat is showing.
 const F_SKY = 0, F_CLOUD = 1, F_CORE = 2, F_INK = 3, F_LIT = 4; // cards
@@ -65,11 +65,11 @@ const F_UMB = 5, F_SLEEP = 6, F_HOLD = 7, F_NONE = 8;
 const R_BG = 0, R_NUM = 1, R_MOAT = 2, R_HOLD = 3, R_COVER = 4;
 
 // ---------------------------------------------------------------------------
-// The seat font: digits 14 seats wide and 18 tall, every stroke 4 seats thick,
+// The seat font: digits 14 seats wide and 16 tall, every stroke 4 seats thick,
 // the outside of each bend rounded off by one seat. ("1" is 10 wide.)
 // ---------------------------------------------------------------------------
-const GH = 18;
-const BARS = { T: [0, 0, 14, 4], M: [0, 7, 14, 4], B: [0, 14, 14, 4], LU: [0, 0, 4, 11], LL: [0, 7, 4, 11], RU: [10, 0, 4, 11], RL: [10, 7, 4, 11] };
+const GH = 16;
+const BARS = { T: [0, 0, 14, 4], M: [0, 6, 14, 4], B: [0, 12, 14, 4], LU: [0, 0, 4, 10], LL: [0, 6, 4, 10], RU: [10, 0, 4, 10], RL: [10, 6, 4, 10] };
 function glyph(parts, cuts, w = 14) {
   const g = new Uint8Array(w * GH);
   for (const p of parts) {
@@ -80,16 +80,16 @@ function glyph(parts, cuts, w = 14) {
   return { w, g };
 }
 const GLYPHS = [
-  glyph(["T", "B", "LU", "LL", "RU", "RL"], [[0, 0], [13, 0], [0, 17], [13, 17]]),
-  glyph([[3, 0, 4, 18], [0, 0, 7, 4], [0, 14, 10, 4]], [[0, 0]], 10),
-  glyph(["T", "RU", "M", "LL", "B"], [[13, 0], [13, 10], [0, 7], [0, 17]]),
-  glyph(["T", [3, 7, 11, 4], "B", "RU", "RL"], [[13, 0], [13, 17]]),
-  glyph(["LU", "M", "RU", "RL"], [[0, 10]]),
-  glyph(["T", "LU", "M", "RL", "B"], [[0, 0], [0, 10], [13, 7], [13, 17]]),
-  glyph(["T", "LU", "LL", "M", "RL", "B"], [[0, 0], [0, 17], [13, 17], [13, 7]]),
+  glyph(["T", "B", "LU", "LL", "RU", "RL"], [[0, 0], [13, 0], [0, 15], [13, 15]]),
+  glyph([[3, 0, 4, 16], [0, 0, 7, 4], [0, 12, 10, 4]], [[0, 0]], 10),
+  glyph(["T", "RU", "M", "LL", "B"], [[13, 0], [13, 9], [0, 6], [0, 15]]),
+  glyph(["T", [3, 6, 11, 4], "B", "RU", "RL"], [[13, 0], [13, 15]]),
+  glyph(["LU", "M", "RU", "RL"], [[0, 9]]),
+  glyph(["T", "LU", "M", "RL", "B"], [[0, 0], [0, 9], [13, 6], [13, 15]]),
+  glyph(["T", "LU", "LL", "M", "RL", "B"], [[0, 0], [0, 15], [13, 15], [13, 6]]),
   glyph(["T", "RU", "RL"], [[13, 0]]),
-  glyph(["T", "M", "B", "LU", "LL", "RU", "RL"], [[0, 0], [13, 0], [0, 17], [13, 17]]),
-  glyph(["T", "LU", "M", "RU", "RL", "B"], [[0, 0], [13, 0], [13, 17], [0, 10]]),
+  glyph(["T", "M", "B", "LU", "LL", "RU", "RL"], [[0, 0], [13, 0], [0, 15], [13, 15]]),
+  glyph(["T", "LU", "M", "RU", "RL", "B"], [[0, 0], [13, 0], [13, 15], [0, 9]]),
 ];
 
 const SKIN = ["#f3cfad", "#e3b188", "#c98f62", "#a56c47", "#7b4c31", "#f6dcc4"];
@@ -114,19 +114,19 @@ const CSS = `
   border-top: 4px solid var(--hem); border-bottom: 4px solid var(--hem); }
 .cs .tx { position: absolute; inset: 0; color: var(--paint); }
 .cs .g { display: inline-block; white-space: pre; }
-.cs i { font-style: normal; font-size: 28px; color: var(--soft); margin-right: 12px; }
-.cs .date .tx { display: flex; align-items: center; justify-content: center; padding-top: 34px; font-size: 58px; line-height: 1; white-space: nowrap; }
-.cs .mid .tx { display: flex; align-items: center; padding: 0 30px 0 34px; gap: 44px; }
+.cs i { font-style: normal; font-size: 28px; color: var(--soft); margin-right: 18px; }
+.cs .date .tx { display: flex; align-items: center; justify-content: center; padding-top: 30px; font-size: 48px; line-height: 1; white-space: nowrap; }
+.cs .mid .tx { display: flex; align-items: center; padding: 0 30px 0 34px; gap: 52px; }
 .cs .temp { flex: none; font-size: 104px; line-height: 1; margin-top: -2px; }
 .cs .stack { flex: 1; min-width: 0; }
 .cs .cond { font-size: 54px; line-height: 1; white-space: nowrap; }
 .cs .ampm { flex: none; background: var(--accent); color: var(--on); font-size: 50px; line-height: 1; padding: 12px 16px 15px; border-radius: 10px; }
-.cs .col { position: absolute; left: 0; right: 0; top: 0; padding: 21px 34px 24px; display: flex; flex-direction: column; }
-.cs .row1 { display: flex; justify-content: space-between; align-items: baseline; gap: 44px; font-size: 42px; line-height: 1; white-space: nowrap; }
-.cs .row2 { display: flex; align-items: baseline; gap: 56px; margin-top: 24px; font-size: 42px; line-height: 1; white-space: nowrap; }
-.cs .rule { height: 3px; margin-top: 28px; border-radius: 2px; background: var(--soft); opacity: 0.5; }
-.cs .flabel { margin-top: 26px; font-size: 28px; line-height: 1; color: var(--soft); white-space: nowrap; }
-.cs .fvalue { margin-top: 10px; font-size: 50px; line-height: 1.2; text-wrap: balance; }
+.cs .col { position: absolute; left: 0; right: 0; top: 0; padding: 22px 34px 22px; display: flex; flex-direction: column; }
+.cs .row1 { display: flex; justify-content: space-between; align-items: baseline; gap: 56px; font-size: 40px; line-height: 1; white-space: nowrap; }
+.cs .row2 { display: flex; align-items: baseline; gap: 64px; margin-top: 44px; font-size: 40px; line-height: 1; white-space: nowrap; }
+.cs .rule { height: 3px; margin-top: 34px; border-radius: 2px; background: var(--soft); opacity: 0.5; }
+.cs .flabel { margin-top: 34px; font-size: 28px; line-height: 1; color: var(--soft); white-space: nowrap; }
+.cs .fvalue { margin-top: 12px; font-size: 44px; line-height: 1.4; text-wrap: balance; }
 .cs .flash { position: absolute; inset: 0; z-index: 4; background: #c9d4ff; opacity: 0; pointer-events: none; }
 `;
 
@@ -255,7 +255,7 @@ export default {
 
     // ----- palette (rebuilt when the light or the sky changes) ---------------
     const P = {
-      stand: "#05060a", eye: "#17181c", snow: "#f5f7fb", flake: "#f5f7fb", rain: "#dfe7f5", loose: "#e9e3d4", straw: "#e6cd8a",
+      stand: "#05060a", eye: "#17181c", snow: "#f5f7fb", flake: "#f5f7fb", rain: "#dfe7f5", loose: "#e9e3d4", loose2: "#9fb6d6", straw: "#e6cd8a",
       sky: new Array(COLS * 3), alt: new Array(COLS * 3), cloud: new Array(COLS * 3), core: new Array(COLS * 3), lap: new Array(COLS),
       lit: new Array(4), litSeam: "#000", ink: new Array(4), inkSeam: "#000", umbHi: new Array(6), skin: new Array(6), skinLit: new Array(6), skinMoat: new Array(6), hair: new Array(8), shirt: new Array(8),
       beanie: new Array(6), umb: new Array(6), umbDark: new Array(6), veil: new Array(ROWS), veilNum: new Array(ROWS),
@@ -361,6 +361,7 @@ export default {
       P.flake = mix(P.stand, "#f8f9fc", 0.62 + 0.38 * pl); // falling flakes catch the stadium lights
       P.rain = mix(P.stand, "#dfe7f5", 0.75 + 0.25 * dayK);
       P.loose = mix(P.stand, "#e9e3d4", 0.42 + 0.58 * dayK); // a card on the loose catches the light
+      P.loose2 = mix(P.stand, mix(rawMid, "#ffffff", 0.3), 0.42 + 0.58 * dayK);
 
       // Fog and haze take the back rows (the top of the stand) first.
       // Heat does the same in a warm shimmer of haze.
@@ -546,17 +547,17 @@ export default {
 
     function layout(tx) {
       // The date strip is cut to the length of the date.
-      dateLine.style.fontSize = "58px";
+      dateLine.style.fontSize = "48px";
       let w = dateLine.offsetWidth;
       if (w > 880) {
-        dateLine.style.fontSize = `${Math.max(44, Math.floor((58 * 880) / w))}px`;
+        dateLine.style.fontSize = `${Math.max(44, Math.floor((48 * 880) / w))}px`;
         w = dateLine.offsetWidth;
       }
       let moved = placeBanner(bDate, 0, COLS - 1, DATE_TOP, DATE_H);
 
       // So is the temperature strip, to the length of what it says.
       condEl.style.fontSize = "54px";
-      const natural = tempEl.offsetWidth + condEl.scrollWidth + ampmEl.offsetWidth + 88 + 70;
+      const natural = tempEl.offsetWidth + condEl.scrollWidth + ampmEl.offsetWidth + 104 + 70;
       const mseats = clamp(Math.ceil(natural / 60) * 2, 16, 34);
       moved = placeBanner(bMid, (COLS - mseats) / 2, (COLS - mseats) / 2 + mseats - 1, MID_TOP, MID_H) || moved;
       const cw = condEl.scrollWidth;
@@ -567,16 +568,22 @@ export default {
       const hasFact = tx.factValue !== "";
       moved = placeBanner(bTifo, 1, 34, TIFO_TOP, bTifo.h > 0 ? bTifo.h : 300) || moved; // its width, before measuring
       rule.style.display = fLabel.style.display = fValue.style.display = hasFact ? "" : "none";
-      row1.style.fontSize = "42px";
+      row1.style.fontSize = "40px";
       const inner = 1020 - 12 - 68;
-      const rw = sun.node.offsetWidth + moon.node.offsetWidth + 44;
-      if (rw > inner) row1.style.fontSize = `${Math.max(36, Math.floor((42 * inner) / rw))}px`;
+      const rw = sun.node.offsetWidth + moon.node.offsetWidth + 56;
+      if (rw > inner) row1.style.fontSize = `${Math.max(36, Math.floor((40 * inner) / rw))}px`;
       if (hasFact) {
-        // As large as fits in two lines and keeps the banner 64 px off the bottom.
-        for (const size of [56, 50, 46, 44, 42, 40, 38, 36]) {
+        // As large as fits in two lines and keeps the board's type 64 px off the
+        // bottom. The lines of a wrapped fact keep about 42 px of clear space
+        // between them, ink to ink (the ink of a line is about 1.03 em tall);
+        // the margin takes back the extra leading above the first line.
+        for (const size of [54, 50, 46, 44, 42, 40, 38, 36]) {
+          const pitch = Math.round(size * 1.03 + 42);
           fValue.style.fontSize = `${size}px`;
+          fValue.style.lineHeight = `${pitch}px`;
+          fValue.style.marginTop = `${Math.round(14 - (pitch - size * 1.4) / 2)}px`;
           const fh = fValue.offsetHeight;
-          if (fh <= Math.ceil(size * 1.2 * 2) + 2 && fh <= 112) break;
+          if (fh <= pitch * 2 + 2 && pitch * 2 <= 176) break;
         }
       }
       moved = placeBanner(bTifo, 1, 34, TIFO_TOP, col.offsetHeight + 12) || moved;
@@ -1033,7 +1040,7 @@ export default {
         const c = Math.cos(a);
         const sn = Math.sin(a);
         g.setTransform(c, sn, -sn * q, c * q, lx[k], ly[k]);
-        g.fillStyle = (k & 1) ? P.loose : P.sky[((k * 11) % COLS) * 3 + 2];
+        g.fillStyle = (k & 1) ? P.loose : P.loose2;
         g.fillRect(-13, -9.5, 26, 19);
       }
       g.setTransform(1, 0, 0, 1, 0, 0);

@@ -52,12 +52,15 @@ const ROOF = 214; // top of the parapet
 const GX = 54, CW = 108, CH = 100; // window grid: 9 columns, 10 floors
 const WW = 90, WH = 80, FR = 5; // window opening and frame width
 const HOURS_Y = 336, MINS_Y = 872;
-const SHOP = 1378, FASCIA = 1394, FRONT = 1518, WALK = 1800;
+// (the fascia, awning and shopfronts were made taller, and the sidewalk narrower,
+// so the two-line bar name and the awning's temperature and condition have room)
+const SHOP = 1378, FASCIA = 1394, FRONT = 1544, WALK = 1830, CURB = 1886;
 const NWIN = 90;
 const colX = (c) => GX + c * CW + (CW - WW) / 2;
 const rowY = (r) => (r < 5 ? HOURS_Y + r * CH : MINS_Y + (r - 5) * CH) + 12;
-const BOARD_X = 236, BOARD_Y = 44, BOARD_W = 780, BOARD_H = 160;
-const AWN_X0 = 336, AWN_X1 = 744, AWN_T = FRONT + 2, AWN_B = 1700;
+const BOARD_X = 236, BOARD_Y = 44, BOARD_W = 780, BOARD_H = 168;
+const AWN_X0 = 336, AWN_X1 = 744, AWN_T = FRONT + 2, AWN_B = 1754;
+const LED_Y = FRONT + 48, AQI_X = 778, UV_X = 910; // the two lotto panels
 
 // ---- palette ------------------------------------------------------------------
 const BRICK = "#84402e", MORTAR = "#9b6c5a", BRICK_AVG = "#874736";
@@ -209,18 +212,18 @@ export default {
       .lo .lay { position: absolute; left: 0; width: ${W}px; pointer-events: none; }
       .lo .tx { position: absolute; white-space: nowrap; text-align: center; line-height: 1; }
       .lo .date { left: 64px; width: 952px; top: 254px; height: 68px; font: 600 46px/68px "Cinzel", serif; letter-spacing: 0.13em; padding-left: 0.13em; box-sizing: border-box; text-transform: uppercase; color: var(--date); text-shadow: 0 2px 0 rgba(0,0,0,0.55); }
-      .lo .fact { position: absolute; left: ${BOARD_X + 22}px; top: 62px; width: ${BOARD_W - 44}px; height: 136px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; }
+      .lo .fact { position: absolute; left: ${BOARD_X + 22}px; top: 54px; width: ${BOARD_W - 44}px; height: 150px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; }
       .lo .factL { font-weight: 500; font-size: 24px; line-height: 28px; letter-spacing: 0.22em; padding-left: 0.22em; text-transform: uppercase; color: var(--gilt); white-space: nowrap; }
       .lo .factV { font-weight: 500; font-size: 38px; line-height: 43px; letter-spacing: 0.01em; color: var(--bill); margin-top: 8px; max-width: 100%; }
       .lo .moonN { left: 64px; width: 236px; font-weight: 600; font-size: 36px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--gilt); }
-      .lo .ampm { left: 348px; width: 384px; top: ${FASCIA}px; height: 116px; font-weight: 700; font-size: 100px; line-height: 116px; letter-spacing: 0.08em; padding-left: 0.08em; box-sizing: border-box; color: var(--chan); text-shadow: 3px 4px 0 rgba(0,0,0,0.6), 0 0 26px var(--chanGlow); }
-      .lo .sideL { top: ${FASCIA}px; width: 108px; height: 124px; font-weight: 600; font-size: 44px; line-height: 124px; letter-spacing: 0.06em; color: var(--gilt); }
-      .lo .led { top: 1566px; width: 108px; height: 140px; font-weight: 600; font-size: 64px; line-height: 140px; color: ${LED}; text-shadow: 0 0 14px rgba(255,80,40,0.55); }
-      .lo .neonBox { position: absolute; left: 72px; top: 1554px; width: 220px; height: 164px; box-sizing: border-box; border: 3px solid ${NEON}; border-radius: 18px; box-shadow: 0 0 12px ${NEON_GLOW}, inset 0 0 12px ${NEON_GLOW}; opacity: 0.9; }
-      .lo .sunL { left: 64px; width: 236px; top: 1576px; font-weight: 400; font-size: 34px; letter-spacing: 0.07em; color: ${NEON}; text-shadow: 0 0 8px ${NEON_GLOW}, 0 0 20px ${NEON_GLOW}; }
-      .lo .sunV { left: 64px; width: 236px; top: 1622px; font-weight: 300; font-size: 74px; letter-spacing: 0.01em; color: ${NEON}; text-shadow: 0 0 9px ${NEON_GLOW}, 0 0 26px ${NEON_GLOW}; }
-      .lo .temp { left: 348px; width: 384px; top: 1532px; font-weight: 600; font-size: 100px; padding-left: 0.22em; box-sizing: border-box; color: var(--cream); }
-      .lo .cond { left: 348px; width: 384px; top: 1650px; font-weight: 500; font-size: 44px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--cream); }
+      .lo .ampm { left: 348px; width: 384px; top: ${FASCIA + 5}px; height: 116px; font-weight: 700; font-size: 100px; line-height: 116px; letter-spacing: 0.08em; padding-left: 0.08em; box-sizing: border-box; color: var(--chan); text-shadow: 3px 4px 0 rgba(0,0,0,0.6), 0 0 26px var(--chanGlow); }
+      .lo .sideL { top: ${FASCIA}px; width: 108px; height: ${FRONT - FASCIA}px; font-weight: 600; font-size: 44px; line-height: ${FRONT - FASCIA}px; letter-spacing: 0.06em; color: var(--gilt); }
+      .lo .led { top: ${LED_Y}px; width: 108px; height: 140px; font-weight: 600; font-size: 64px; line-height: 140px; color: ${LED}; text-shadow: 0 0 14px rgba(255,80,40,0.55); }
+      .lo .neonBox { position: absolute; left: 72px; top: ${FRONT + 36}px; width: 220px; height: 164px; box-sizing: border-box; border: 3px solid ${NEON}; border-radius: 18px; box-shadow: 0 0 12px ${NEON_GLOW}, inset 0 0 12px ${NEON_GLOW}; opacity: 0.9; }
+      .lo .sunL { left: 64px; width: 236px; top: ${FRONT + 56}px; font-weight: 400; font-size: 34px; letter-spacing: 0.07em; color: ${NEON}; text-shadow: 0 0 8px ${NEON_GLOW}, 0 0 20px ${NEON_GLOW}; }
+      .lo .sunV { left: 64px; width: 236px; top: ${FRONT + 107}px; font-weight: 300; font-size: 74px; letter-spacing: 0.01em; color: ${NEON}; text-shadow: 0 0 9px ${NEON_GLOW}, 0 0 26px ${NEON_GLOW}; }
+      .lo .temp { left: 348px; width: 384px; top: ${AWN_T + 13}px; font-weight: 600; font-size: 100px; padding-left: 0.22em; box-sizing: border-box; color: var(--cream); }
+      .lo .cond { left: 348px; width: 384px; top: ${AWN_B - 60}px; font-weight: 500; font-size: 44px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--cream); }
     `);
 
     const wrap = el("div", { class: "lo" });
@@ -260,13 +263,13 @@ export default {
     const factEl = el("div", { class: "fact" }, factL, factV);
     wrap.append(factEl);
     // the bar is named for tonight's moon, on two lines
-    const moonA = tx("moonN", { top: "1408px" });
-    const moonB = tx("moonN", { top: "1466px" });
+    const moonA = tx("moonN", { top: `${FASCIA + 16}px` });
+    const moonB = tx("moonN", { top: `${FASCIA + 91}px` });
     const ampmEl = tx("ampm");
-    tx("sideL", { left: "782px" }, "AIR");
-    tx("sideL", { left: "906px" }, "UV");
-    const aqiEl = tx("led", { left: "782px" });
-    const uvEl = tx("led", { left: "906px" });
+    tx("sideL", { left: `${AQI_X}px` }, "AIR");
+    tx("sideL", { left: `${UV_X}px` }, "UV");
+    const aqiEl = tx("led", { left: `${AQI_X}px` });
+    const uvEl = tx("led", { left: `${UV_X}px` });
     wrap.append(el("div", { class: "neonBox" }));
     const sunL = tx("sunL");
     const sunV = tx("sunV");
@@ -491,7 +494,7 @@ export default {
       };
       shopWindow(48, 316);
       shopWindow(764, 1032);
-      for (const x of [782, 906]) { R("#3a3532", x - 3, 1563, 114, 146); R("#090707", x, 1566, 108, 140); }
+      for (const x of [AQI_X, UV_X]) { R("#3a3532", x - 3, LED_Y - 3, 114, 146); R("#090707", x, LED_Y, 108, 140); }
       // the deli front under the awning
       R("#10100f", 348, FRONT, 384, WALK - FRONT);
       paintDeli(ctx, false);
@@ -500,16 +503,16 @@ export default {
         R(STONE_HI, x0, FRONT, x1 - x0, 7); R(STONE_DK, x0, FRONT + 7, x1 - x0, 3); R(STONE_DK, x0, WALK - 26, x1 - x0, 26);
       }
       // sidewalk, curb, road
-      R("#89857d", 0, WALK, W, 86); R("#5f5b55", 0, WALK, W, 3);
+      R("#89857d", 0, WALK, W, CURB - WALK); R("#5f5b55", 0, WALK, W, 3);
       ctx.fillStyle = "#6d6962";
-      for (let x = 70; x < W; x += 135) ctx.fillRect(x, WALK + 3, 2, 83);
-      R("#a5a199", 0, WALK + 86, W, 9); R("#2a2a2e", 0, WALK + 95, W, H - WALK - 95);
+      for (let x = 70; x < W; x += 135) ctx.fillRect(x, WALK + 3, 2, CURB - WALK - 3);
+      R("#a5a199", 0, CURB, W, 9); R("#2a2a2e", 0, CURB + 9, W, H - CURB - 9);
     }
 
     // The deli's windows and door. Drawn dim on the facade, and again lit (on
     // the glow layer) when its lights are on.
     function paintDeli(ctx, lit) {
-      const top = AWN_B + 30, bot = WALK - 22;
+      const top = AWN_B + 18, bot = WALK - 16;
       const glass = lit ? "#f1c987" : "#1b2226";
       const frame = lit ? "#2a1c10" : IRON;
       const shelf = lit ? "#7a5226" : "#11171a";
@@ -991,14 +994,14 @@ export default {
       paintDeli(gctx, true);
       if (night > 0.02) {
         gctx.globalAlpha = night * 0.5;
-        gctx.drawImage(warmGlow, 300, 1730, 480, 190);
+        gctx.drawImage(warmGlow, 300, AWN_B + 30, 480, 190);
         gctx.globalAlpha = night * 0.55;
-        gctx.drawImage(pinkGlow, 22, 1486, 320, 300);
+        gctx.drawImage(pinkGlow, 22, FRONT - 32, 320, 300);
         gctx.globalAlpha = night * 0.4;
-        gctx.drawImage(redGlow, 764, 1530, 268, 220);
+        gctx.drawImage(redGlow, 764, FRONT + 12, 268, 220);
         gctx.globalAlpha = 1;
         gctx.fillStyle = "#090707";
-        gctx.fillRect(782, 1566, 108, 140); gctx.fillRect(906, 1566, 108, 140);
+        gctx.fillRect(AQI_X, LED_Y, 108, 140); gctx.fillRect(UV_X, LED_Y, 108, 140);
       }
       // wet pavement holds the light
       const wetK = clamp(wetness * 1.4) * (0.35 + 0.65 * night);
@@ -1281,7 +1284,7 @@ export default {
             const dir = hash(n, s.seed + 11) < 0.5 ? 1 : -1, sc = 0.94 + 0.14 * hash(n, 5);
             const dog = hash(n, s.seed + 3) < 0.4;
             const x = dir > 0 ? -120 + u * (W + 240) : W + 120 - u * (W + 240);
-            const gy = WALK + 82, st = t * 5.2, sw = Math.sin(st), bob = -Math.abs(Math.cos(st)) * 2;
+            const gy = CURB - 4, st = t * 5.2, sw = Math.sin(st), bob = -Math.abs(Math.cos(st)) * 2;
             const hip = gy - 40 * sc + bob, sho = hip - 33 * sc;
             fctx.strokeStyle = PAL.walker; fctx.fillStyle = PAL.walker; fctx.lineCap = "round"; fctx.lineJoin = "round";
             // legs, then an arm swinging against them
@@ -1395,7 +1398,7 @@ export default {
           fitText(moonA, 236); fitText(moonB, 236);
         }
         put("ampm", ampmEl, tx_.ampm);
-        if (put("aqi", aqiEl, tx_.aqi)) fitText(aqiEl, 104);
+        if (put("aqi", aqiEl, tx_.aqi)) fitText(aqiEl, 100);
         if (put("uv", uvEl, tx_.uv)) fitText(uvEl, 104);
         put("sunL", sunL, tx_.sunLabel);
         if (put("sunV", sunV, tx_.sunValue)) fitText(sunV, 196);
@@ -1416,7 +1419,8 @@ export default {
             factV.style.whiteSpace = "nowrap"; factV.style.fontSize = "52px"; factV.style.lineHeight = "60px";
             if (factV.scrollWidth > BOARD_W - 60) {
               factV.style.whiteSpace = "normal";
-              for (const size of [38, 36]) { const lh = Math.round(size * 1.24); factV.style.fontSize = `${size}px`; factV.style.lineHeight = `${lh}px`; if (factV.offsetHeight <= lh * 2 + 2) break; }
+              // a wrapped fact keeps its lines open (line height 1.44): one line at 38 px if it fits, otherwise two at 36
+              for (const size of [38, 36]) { const lh = Math.round(size * 1.44); factV.style.fontSize = `${size}px`; factV.style.lineHeight = `${lh}px`; if (factV.offsetHeight <= lh + 2) break; }
             }
           }
         }

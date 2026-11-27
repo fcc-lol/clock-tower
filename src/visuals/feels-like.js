@@ -13,11 +13,12 @@ import { W, H, TAU, clamp, lerp, remap, smoothstep, approach, mix, ramp, rgba, c
 
 const M = 96; // side margin
 const MEASURE = W - 2 * M;
-const TOP = 72;
+const TOP = 62; // the date's ink still sits 68 px from the top of the frame
 const BOTTOM = 66;
 const LABEL = 0; // (the left margin once carried each line's point size; the sheet reads better without the annotation)
 const MAX_FIGURE = 720; // largest size of the time, px
 const LH = 0.76; // line height of the time, em: the figures fill it top to bottom
+const FIG_DROP = 26; // the figures sit this much below centre, so the clear space above and below them is even
 const EDGE = 26; // how far past the measure a leaning line may reach (it stays 70 px inside the frame)
 
 // Paper and ink by temperature (deg F), day and night.
@@ -52,13 +53,15 @@ export default {
       .fl .place { font-size: 24px; text-transform: uppercase; letter-spacing: 0.16em; }
       .fl .rule { flex: 0 0 3px; background: currentColor; }
       .fl .head + .rule { margin-top: 22px; }
-      .fl .figures { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; justify-content: center; }
+      .fl .figures { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; justify-content: center; padding-top: ${FIG_DROP}px; }
       .fl .fig { line-height: ${LH}; font-variation-settings: "opsz" 144; align-self: flex-start; }
       .fl .mmrow { display: flex; align-items: flex-start; align-self: flex-start; margin-top: 30px; }
       .fl .ampm { font-size: 64px; line-height: 1; margin: 2px 0 0 22px; }
       .fl .rule + .block { margin-top: 44px; }
       .fl .row { display: flex; align-items: baseline; }
-      .fl .row + .row { margin-top: 14px; }
+      .fl .row.sun { margin-top: 58px; } /* the small readouts stand apart from the temperature */
+      .fl .row.moon { margin-top: 28px; }
+      .fl .row.air { margin-top: 42px; }
       .fl .row i { display: none; }
       .fl b { font-weight: inherit; display: block; }
       .fl .r132 { font-size: 132px; line-height: 0.9; }
@@ -66,9 +69,9 @@ export default {
       .fl .r72 { font-size: 72px; line-height: 1; }
       .fl .r56 { font-size: 56px; line-height: 1; }
       .fl .r46 { font-size: 46px; line-height: 1; }
-      .fl .row.fact { margin-top: 26px; }
-      .fl .fact u { display: block; text-decoration: none; font-size: 24px; line-height: 1; text-transform: uppercase; letter-spacing: 0.14em; margin-bottom: 12px; }
-      .fl .fact b { font-size: 40px; line-height: 1.14; white-space: normal; text-wrap: balance; max-width: ${MEASURE - LABEL - 30}px; }
+      .fl .row.fact { margin-top: 64px; }
+      .fl .fact u { display: block; text-decoration: none; font-size: 24px; line-height: 1; text-transform: uppercase; letter-spacing: 0.14em; margin-bottom: 18px; }
+      .fl .fact b { font-size: 40px; white-space: normal; text-wrap: balance; max-width: ${MEASURE - LABEL - 30}px; }
     `);
     const wrap = el("div", { class: "fl" });
     root.append(wrap);
@@ -86,7 +89,7 @@ export default {
     const row = (key, cls, ...more) => {
       rows[key] = el("b", { class: cls });
       labels[key] = el("i", { class: "mono" });
-      return el("div", { class: "row lean" }, labels[key], rows[key], ...more);
+      return el("div", { class: `row ${key} lean` }, labels[key], rows[key], ...more);
     };
     const cond = el("b", { class: "cond" });
     const factLabel = el("u", { class: "mono" });
@@ -177,11 +180,17 @@ export default {
     }
 
     // The fact may be 80 characters: step its size down until it sits in two lines.
+    // Its lines are set far enough apart that a wrapped fact leaves a clear
+    // gap of about 42 px between them; the leading above the first line and
+    // below the last is taken back, so a one-line fact takes no extra room.
     function fitFact() {
       let size = 42;
       for (; size >= 36; size -= 2) {
+        const pitch = Math.round(size * 0.94 + 42);
         factValue.style.fontSize = `${size}px`;
-        if (factValue.offsetHeight <= size * 1.14 * 2 + 2) break;
+        factValue.style.lineHeight = `${pitch}px`;
+        factValue.style.margin = `${-(pitch - size * 1.14) / 2}px 0`;
+        if (factValue.offsetHeight <= pitch * 2 + 2) break;
       }
       labels.fact.textContent = String(Math.max(36, size));
     }

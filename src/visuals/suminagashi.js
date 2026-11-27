@@ -22,7 +22,11 @@
 //                ones in the cold; below freezing the surface locks and
 //                needle cracks shear the rings.
 //   humidity/fog feather the edges of the ink, until in fog they are washes.
-//   cloud        broadens and calms the bands and greys the sky ink.
+//   cloud        broadens and calms the bands and quietens the sky ink.
+//   the day      a grey sky does not make a grey ink: the season (indigo,
+//                sakura, verdigris, persimmon), a heat wave or a hard frost,
+//                rain, storm, snow and fog all steep into the second ink, so
+//                the tray is not one mood all year; a coloured sky still wins.
 //   day/night    warm paper and black ink by day; at night it inverts to
 //                black water carrying thin pale films (brighter under a
 //                full moon), and stays dark.
@@ -30,7 +34,8 @@
 // The page: the time fills the tray from the top margin down; above it a
 // quiet head (the date, the countdown to sunrise or sunset) and below it a
 // quiet foot (temperature, condition, moon, today's fact), where the ink
-// thins away like the margins of a print. The vermilion AM/PM seal is stamped
+// thins away like the margins of a print (the thinning follows the foot's real
+// top, which rises when the fact wraps). The vermilion AM/PM seal is stamped
 // beside the minutes, with the AQI and UV seals below it down the margin.
 //
 // Layers: one fragment shader (the water and the ink; the kit's shader plus a
@@ -73,6 +78,7 @@ const SEAL_W = 100, SEAL_H = 176; // the AM/PM seal
 const SEAL_X = SEAL_COL - SEAL_W / 2; // its left edge
 const RS = 140; // the AQI and UV seals: their figures at 54 px, captions at 28
 const RS_GAP = 40;
+const FACT_LH = 1.8; // a wrapped fact: 40 px of clear space from one line's descenders to the next's ascenders
 const MORPH_S = 2.6; // seconds a changed numeral takes to melt into the next
 
 const SUMI = "#16130f";
@@ -510,7 +516,7 @@ export default {
       .sm .seal text { font-family: ${NUM_FAMILY}, serif; font-weight: 800; fill: var(--sealtext); text-anchor: middle; }
       .sm .head { position: absolute; left: 94px; right: 64px; top: 72px; white-space: nowrap; line-height: 1; }
       .sm .date { font-size: 64px; font-weight: 600; letter-spacing: 0.004em; }
-      .sm .sun { display: flex; align-items: center; margin-top: 42px; font-size: 48px; letter-spacing: 0.01em; }
+      .sm .sun { display: flex; align-items: center; margin-top: 46px; font-size: 48px; letter-spacing: 0.01em; }
       .sm .sun i { font-weight: 500; margin-right: 0.24em; }
       .sm .dot { flex: none; width: 11px; height: 11px; border-radius: 50%; background: var(--seal); margin: 4px 20px 0 2px; }
       .sm .ampm { position: absolute; }
@@ -526,7 +532,7 @@ export default {
       .sm .seal .cap { font-family: "Cormorant Garamond", serif; font-weight: 700; letter-spacing: 0.14em; }
       .sm .fact { margin-top: 78px; }
       .sm .flabel { font-weight: 700; font-size: 28px; line-height: 1; letter-spacing: 0.16em; text-transform: uppercase; }
-      .sm .fvalue { font-style: italic; font-weight: 500; font-size: 50px; line-height: 1.4; margin-top: 12px; text-wrap: balance; }
+      .sm .fvalue { font-style: italic; font-weight: 500; font-size: 50px; line-height: ${FACT_LH}; margin-top: 12px; text-wrap: balance; }
     `);
 
     const r = rng(seed);
@@ -1037,7 +1043,7 @@ export default {
         const relaid = put("cond", condNode, s.text.condition) | (shown.tempW !== s.text.temp);
         if (relaid) {
           shown.tempW = s.text.temp;
-          fitText(condNode, SEAL_COL - RS / 2 - 44 - foot.offsetLeft - condNode.parentNode.offsetLeft, 62);
+          fitText(condNode, SEAL_COL - RS / 2 - 52 - foot.offsetLeft - condNode.parentNode.offsetLeft, 62);
         }
         if (s.text.factValue !== lastFact || s.text.factLabel !== lastFactLabel) {
           const fact = s.text.factValue;
@@ -1048,7 +1054,7 @@ export default {
           fValue.textContent = s.text.factValue;
           fValue.style.fontSize = "";
           // two lines at 50 px; only a fact that would need a third steps down
-          if (fact && fValue.offsetHeight > 50 * 1.4 * 2 + 4) fValue.style.fontSize = "44px";
+          if (fact && fValue.offsetHeight > 50 * FACT_LH * 2 + 4) fValue.style.fontSize = "44px";
           shown.footTop = -1;
         }
         if (shown.footTop < 0 || relaid) {

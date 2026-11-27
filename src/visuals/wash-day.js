@@ -260,7 +260,7 @@ export default {
     // ------------------------------------------------------------------
     // The lines and the wash
     // ------------------------------------------------------------------
-    const lines = LINE_Y.map((y) => ({ y, sag: 10, bob: 0, haul: 0, phase: 0, t0: 0, dur: 1, dist: 0, full: false }));
+    const lines = LINE_Y.map((y) => ({ y, sag: 10, bob: 0, haul: 0, phase: 0, t0: 0, dur: 1, dist: 0 }));
     const lineY = (L, x) => {
       const k = (x - 540) / 496;
       return L.y + L.bob + L.sag * (1 - k * k);
@@ -1693,7 +1693,7 @@ export default {
     // ------------------------------------------------------------------
     // Rain, snow, drips, icicles: the 2D overlay
     // ------------------------------------------------------------------
-    const RN = 640;
+    const RN = 900;
     const rain = new Float32Array(RN * 3);
     const snow = new Float32Array(RN * 4);
     for (let i = 0; i < RN; i++) {
@@ -1792,7 +1792,7 @@ export default {
         ctx.stroke();
       }
       if (env.snow > 0.01) {
-        const n = Math.min(RN, Math.floor(110 + 530 * env.snow));
+        const n = Math.min(RN, Math.floor(110 + 790 * env.snow));
         const drift = windX * 7;
         ctx.strokeStyle = nt > 0.5 ? "rgba(150,162,188,0.6)" : "rgba(255,255,255,0.93)";
         ctx.lineCap = "round";

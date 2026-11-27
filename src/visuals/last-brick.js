@@ -1286,7 +1286,7 @@ export default {
       for (let k = 0; k < nCells; k++) {
         const i = cellList[k];
         cellFlag[i] = 0;
-        if (s.frame < 30) paintRange((i / COLS) | 0, i % COLS, i % COLS);
+        paintRange((i / COLS) | 0, i % COLS, i % COLS);
       }
       nCells = 0;
 
