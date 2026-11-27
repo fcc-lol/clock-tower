@@ -86,6 +86,7 @@ export const SCENARIOS = {
   "overcast-afternoon-fall": { at: "2026-11-27T14:45", wx: "overcast", temp: 51, note: "flat grey late-November afternoon" },
   "golden-partly-spring": { at: "2026-04-22T19:12", wx: "partly", temp: 63, note: "golden hour, half cloud, half an hour before sunset" },
   "rain-dusk-fall": { at: "2026-10-08T18:44", wx: "rain", temp: 55, note: "steady rain at dusk, just after sunset" },
+  "overcast-sunset-fall": { at: "2026-11-27T16:27", wx: "overcast", temp: 49, note: "the sun on the horizon, half light: where a light ground is turning dark" },
   "clear-night-fullmoon-winter": { at: "2027-01-22T21:30", wx: "cold", temp: 18, wind: 7, gust: 12, note: "clear, bitter January night under a full moon" },
   "snow-morning-winter": { at: "2027-01-08T08:10", wx: "snow", temp: 27, note: "snow falling on a January morning" },
   "storm-night-summer": { at: "2026-08-03T23:20", wx: "storm", temp: 74, note: "thunderstorm on a summer night, strong gusty wind" },
@@ -96,8 +97,8 @@ export const SCENARIOS = {
   "offline-morning": { at: "2026-05-05T10:08", wx: null, note: "no data at all: only the clock and what can be computed" },
 };
 
-// The six a new piece is checked against first, and the full list.
-export const CORE_SCENARIOS = ["clear-noon-summer", "overcast-afternoon-fall", "rain-dusk-fall", "clear-night-fullmoon-winter", "snow-morning-winter", "storm-night-summer"];
+// The ones a new piece is checked against first. (Every scenario: Object.keys(SCENARIOS).)
+export const CORE_SCENARIOS = ["clear-noon-summer", "overcast-afternoon-fall", "overcast-sunset-fall", "rain-dusk-fall", "clear-night-fullmoon-winter", "snow-morning-winter", "storm-night-summer"];
 
 const FACTS = [
   { label: "Today is", value: "National Bavarian Cream Pie Day" },
@@ -130,6 +131,7 @@ export function parseAt(value, base = Date.now()) {
   }
   const day = startOfDay(base);
   const hm = /^(\d\d?):(\d\d)$/.exec(s);
+  if (hm && (+hm[1] > 23 || +hm[2] > 59)) return null;
   if (hm) {
     const z = zoned(day + 12 * HOUR);
     return zonedToUtc(z.year, z.month, z.day, +hm[1], +hm[2]);

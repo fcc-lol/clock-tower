@@ -156,7 +156,8 @@ const Hud = styled.div`
 // Scale the stage so it fits inside the current viewport while preserving the
 // 1080x1920 aspect ratio.
 function useStageScale() {
-  const [scale, setScale] = useState(1);
+  // Worked out before the first render, so the first piece is told the real size of the screen.
+  const [scale, setScale] = useState(() => Math.min(window.innerWidth / STAGE_W, window.innerHeight / STAGE_H) || 1);
   useEffect(() => {
     const update = () => setScale(Math.min(window.innerWidth / STAGE_W, window.innerHeight / STAGE_H) || 1);
     update();

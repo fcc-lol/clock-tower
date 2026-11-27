@@ -31,7 +31,8 @@ export default {
 - `state` is the same object every frame, updated in place. Everything you may read is in it (see below). It is always complete: when live data is missing, typical values stand in, so you never have to check for null. Read `state.hours`, `state.pastHours` and `state.sky.day` from `state` each time you use them rather than keeping a reference: those arrays are rebuilt when new data arrives.
 - `seed` (also `state.seed`) is an integer that is stable for one showing and differs between showings. Use it for anything arranged at random.
 - The runner calls `frame`. The piece never calls `requestAnimationFrame`, `setTimeout` or `setInterval`, adds no listeners to `window` or `document`, makes no network requests, and stores nothing. When its 15 minutes are up the whole page is thrown away, so there is nothing to clean up.
-- **Never use `Math.random()`, `Date.now()`, `new Date()` or `performance.now()`.** Time is `state.t` (seconds of animation since mount), `state.dt` (seconds since the last frame, at most 0.1) and `state.ms` (the instant being shown). Randomness is `rng(seed)`. The same seed and the same state must give the same picture: the test harness steps time by hand, and the gallery runs the clock at other speeds.
+- **Never use `Math.random()`, `Date.now()`, `new Date()` or `performance.now()`.** Time is `state.t` (seconds of animation since mount), `state.dt` (seconds since the last frame: at most 0.1, and 0 on the first frame, so never divide by it) and `state.ms` (the instant being shown). Randomness is `rng(seed)`. The same seed and the same state must give the same picture: the test harness steps time by hand, and the gallery runs the clock at other speeds.
+- **Animate from `frame()`.** CSS `@keyframes` animations, long CSS transitions and SMIL run on the browser's own clock: the harness cannot step them, so they cannot be checked, and they ignore the rules above. Set `transform`, `opacity` and the like from `frame()` instead. (A CSS transition of a fraction of a second on a one-off change is fine.)
 - You may import from `../lib/kit.js` (the toolkit), `../lib/astro.js` and `../lib/time.js`. Nothing else, and no npm packages.
 
 ## What every piece must show
@@ -60,7 +61,8 @@ Rules for the readouts:
 
 ## The look, and living in a room
 
-- **Dark at night.** When `state.daylight` is below about 0.15 the frame must be dark overall: no large light areas (as a guide, an average brightness under about 22%). It hangs in a room and must not light it up at 2 AM. By day it may be light or dark. Move between the two continuously with `state.daylight`, never with a jump; if your ink has to flip between dark and light, flip it where the ground behind it is mid-grey (`readableOn(bg)`), so it is legible on both sides of the flip.
+- **Dark at night.** When `state.daylight` is below about 0.15 the frame must be dark overall: no large light areas (as a guide, an average brightness under about 22%). It hangs in a room and must not light it up at 2 AM. By day it may be light or dark. Move the ground between the two continuously with `state.daylight`, never with a jump.
+- **Ink switches; it never fades.** If the ground goes from light to dark, type on it has to go from dark to light, and an ink that fades along with the ground passes through the ground's own grey and vanishes for minutes at every sunrise and sunset. Switch the ink in one step where the ground is mid-grey (`readableOn(bg, light, dark)` picks the right one), and make that passage short: keep the ground out of mid-grey for as much of twilight as you can, and use near-white and near-black inks, since at the switch even those only just reach 4.5:1. The `overcast-sunset-fall` scenario sits in that passage: every readout must be legible in it.
 - **Calm but alive.** Something should always be visibly moving, and nothing should flash, strobe, jitter or race. Motion should be slow enough to live with all day. Lightning, if any, is a soft, rare brightening, not a flash.
 - **True.** A viewer should be able to feel the actual conditions: the wind in the picture is the real wind (its speed, and its direction where that makes sense), rain falls when and as hard as it is raining, cloud is as thick as the cloud, the colors of the sky are the colors measured from the tower. Make clear weather, overcast, rain, snow, storm, fog, heat and cold, and day and night, look clearly different from each other.
 - **Finished from the first frame.** The piece is cut to, not faded in. If it simulates something that needs time to build up, run that in `mount()` so the first frame already looks right.
@@ -70,12 +72,13 @@ Rules for the readouts:
 
 ## Performance
 
-It runs for hours on a Raspberry Pi driving a 4K panel. The rule of thumb: `frame()` should average under about 4 ms, with the 95th percentile under 8 ms, in the numbers `scripts/shoot.js` reports (the Pi is several times slower than that machine).
+It runs for hours on a Raspberry Pi driving a 4K panel. The rule of thumb: `frame()` should average under about 4 ms, with the 95th percentile under 8 ms, in the numbers `scripts/shoot.js` reports (the Pi is several times slower than that machine). That figure is only the JavaScript inside `frame()`; what the browser does afterwards (layout, paint, filling canvases, running a shader) shows up in the frame rate the tool reports from a few seconds of real time, which should hold at the piece's `fps`.
 
+- `mount()` must be quick: well under 100 ms on the test machine (`scripts/shoot.js` reports it). On the display the next piece is mounted while the current one is still on screen, on the same thread, so a slow mount freezes the picture people are looking at. If something needs time to build up, seed it analytically or step it coarsely, and remember it also gets about 45 seconds of unseen frames before it is cut to.
 - Canvas: at most a few thousand simple moving primitives. Batch them (one `beginPath`, many segments, one `stroke`). Keep state in typed arrays and allocate nothing inside `frame` (no arrays, objects, closures or strings in hot loops).
 - Never per frame: `shadowBlur`, `ctx.filter`, `getImageData`/`putImageData` on large areas, creating gradients or canvases, measuring text. All of those are fine once, in `mount()`: draw anything static into its own layer there.
 - DOM/SVG: animate with `transform` and `opacity` on at most a few hundred nodes; do not rewrite big paths or restyle large areas every frame. No CSS `filter`, `backdrop-filter` or `mix-blend-mode` on large or moving layers, and no animated SVG filters.
-- Shaders: one pass, a few octaves of noise, no long loops. They run at half resolution by default, which suits soft imagery.
+- Shaders: one pass, a few octaves of noise, no long loops. They run at half resolution by default, which suits soft imagery. Call `draw()` every frame (or create the layer with `adaptive: false` if it is drawn once). Uniforms are floats and vectors of 2 to 4 floats. Put something acceptable behind the layer: it is hidden if the shader cannot run on this machine.
 - Surfaces size themselves (see the kit). Mark a canvas `adaptive: true` only if you redraw all of it every frame.
 
 ## `state`
@@ -92,7 +95,8 @@ clock   h24, h12, m, s           numbers (New York time, always)
         hh, mm, ss, ampm, time   "12", "45", "07", "PM", "12:45"
         sf, mf, hf               seconds, minutes and hours with fractions (smooth, for sweeping motion)
         dayFrac                  0..1 through the day, smooth
-        weekday, month, day, year, date, doy (day of year), yearFrac
+        weekday, month           names: "Friday", "November" (as numbers: weekdayIndex 0-6 from Sunday, monthIndex 1-12)
+        day, year, date ("Friday, November 27"), doy (day of year), yearFrac
 
 sun     alt, az                  where it is (alt below 0 = below the horizon)
         up, phase                "night" | "dawn" | "sunrise" | "day" | "golden" | "dusk"
@@ -137,16 +141,16 @@ text    the readout strings (table above), plus: high, low, feels ("46°"), wind
 - Noise: `createNoise(seed)` gives `n2`, `n3`, `fbm2`, `fbm3`, `curl`.
 - Color (OKLab based, hex in and out): `mix(a, b, t)`, `ramp([...])`, `adjust(c, { l, c, h })`, `oklch(l, c, h)`, `toOklch`, `rgba(c, alpha)`, `luminance`, `contrast(a, b)`, `readableOn(bg)`, `vec3(c)` for shader uniforms.
 - DOM: `el(tag, attrs, ...children)`, `svg(tag, attrs, ...children)`, `svgLayer(root)`, `addStyle(root, css)`, `fitText(node, maxWidth)`, `wrapText(ctx, text, maxWidth)`.
-- Surfaces: `canvas2d(root, { maxScale, adaptive, alpha })` returns `{ canvas, ctx, clear() }` with the context already scaled so you draw in stage units; `pixelCanvas(root, { size })` is a coarse hard-pixel grid for pixel art and dot boards; `shader(root, { frag })` returns `{ ok, set(name, value), draw(time) }` for one full-stage fragment shader. Read the comments above each in `kit.js` before using them.
+- Surfaces: `canvas2d(root, { maxScale, adaptive, alpha })` returns `{ canvas, ctx, clear() }` with the context already scaled so you draw in stage units (`ctx.setTransform()` and `ctx.resetTransform()` are safe: they stay in stage units); `pixelCanvas(root, { size })` is a coarse hard-pixel grid for pixel art and dot boards; `shader(root, { frag })` returns `{ ok, set(name, value), draw(time) }` for one full-stage fragment shader. Read the comments above each in `kit.js` before using them.
 - Letterforms as data: `mask(cols, rows, draw)` rasterizes text (or any drawing) to a grid of coverage values, for dots, tiles, obstacles or places for particles to settle. Call it when the text changes, not every frame.
 - Finish: `grain(root, { opacity })`.
 
 ## A minimal piece
 
-This shows the mechanics only (it is also `_example.js` in this folder, runnable as `/visual.html?id=_example`). It is deliberately plain and does not show every readout; do not take its look as a model.
+This shows the mechanics only (it is also `_example.js` in this folder, runnable as `/visual.html?id=_example`). It is deliberately plain and shows only some of the readouts; do not take its look as a model.
 
 ```js
-import { W, H, clamp, mix, rgba, rng, el, addStyle, canvas2d, grain, fitText } from "../lib/kit.js";
+import { W, H, mix, rgba, readableOn, rng, el, addStyle, canvas2d, grain, fitText } from "../lib/kit.js";
 
 export default {
   title: "Example",
@@ -156,14 +160,18 @@ export default {
     addStyle(root, `
       .ex { position: absolute; inset: 0; font-family: "Archivo", sans-serif; }
       .ex .time { position: absolute; left: 80px; top: 120px; font-weight: 800; font-size: 330px; line-height: 0.8; }
-      .ex .cond { position: absolute; left: 84px; top: 470px; font-weight: 500; font-size: 56px; }
+      .ex .ampm { position: absolute; right: 80px; top: 128px; font-weight: 800; font-size: 60px; }
+      .ex .temp { position: absolute; left: 84px; top: 470px; font-weight: 800; font-size: 110px; line-height: 1; }
+      .ex .cond { position: absolute; left: 84px; top: 600px; font-weight: 500; font-size: 56px; }
     `);
     const wrap = el("div", { class: "ex" });
+    root.append(wrap); // in the page before anything is measured
     const layer = canvas2d(wrap, { adaptive: true }); // redrawn in full every frame
     const time = el("div", { class: "time" });
+    const ampm = el("div", { class: "ampm" });
+    const temp = el("div", { class: "temp" });
     const cond = el("div", { class: "cond" });
-    wrap.append(time, cond);
-    root.append(wrap);
+    wrap.append(time, ampm, temp, cond);
     grain(wrap);
 
     const r = rng(seed);
@@ -182,19 +190,21 @@ export default {
 
     return {
       frame(s) {
-        // Colors follow the real sky and the real light, continuously.
+        // The ground follows the real sky and the real light, continuously. The ink
+        // does not fade with it (it would pass through the ground's own grey and
+        // vanish): it switches, at the point where both inks read equally well.
         const bg = mix("#05070f", s.sky.mean, 0.25 + 0.75 * s.daylight);
-        const ink = mix("#f4f1ea", "#0b0d12", clamp((s.daylight - 0.55) * 6)); // flips while the ground is mid-grey
         if (shown.bg !== bg) {
           shown.bg = bg;
+          shown.ink = readableOn(bg, "#f4f1ea", "#0b0d12");
           wrap.style.background = bg;
-          wrap.style.color = ink;
+          wrap.style.color = shown.ink;
         }
 
         const { ctx } = layer;
         layer.clear();
-        ctx.fillStyle = rgba(ink, 0.5);
-        const drift = s.weather.wind * 6 * s.dt; // px this frame: the real wind
+        ctx.fillStyle = rgba(shown.ink, 0.5);
+        const drift = s.weather.wind * 6 * s.dt; // px this frame: the real wind (dt is 0 on the first frame)
         ctx.beginPath();
         for (let i = 0; i < N; i++) {
           const j = i * 3;
@@ -203,8 +213,10 @@ export default {
         }
         ctx.fill();
 
-        if (put("time", time, `${s.text.time} ${s.text.ampm}`)) fitText(time, W - 160);
-        put("cond", cond, `${s.text.temp} ${s.text.condition}`);
+        if (put("time", time, s.text.time)) fitText(time, W - 320);
+        put("ampm", ampm, s.text.ampm);
+        put("temp", temp, s.text.temp);
+        put("cond", cond, s.text.condition);
       },
     };
   },
@@ -213,11 +225,11 @@ export default {
 
 ## Looking at it
 
-`scripts/shoot.js` photographs a piece in a headless browser under simulated conditions and reports what the readouts should say, what a frame costs, how bright the picture is, and any errors.
+`scripts/shoot.js` photographs a piece in a headless browser under simulated conditions and reports what the readouts should say, what a frame costs, the frame rate it holds in real time, how long `mount()` took, how bright the picture is, and any errors.
 
 ```sh
-node scripts/shoot.js <id>                           # the six core scenarios and a contact sheet
-node scripts/shoot.js <id> --scenarios all           # all twelve
+node scripts/shoot.js <id>                           # the seven core scenarios and a contact sheet
+node scripts/shoot.js <id> --scenarios all           # all thirteen
 node scripts/shoot.js <id> --wx snow --at night      # any weather preset at any time
 node scripts/shoot.js <id> --frames 3 --every 4      # three shots 4 s apart: is it moving, is it calm?
 node scripts/shoot.js <id> --wx clear --at dawn --frames 6 --every 2 --rate 7200   # time-lapse through a day
@@ -228,4 +240,4 @@ node scripts/shoot.js --list                         # ids, scenarios, presets
 
 In a browser (`npm run dev`): `/visual.html?id=<id>` runs one piece on live data; add `&scenario=rain-dusk-fall`, or `&wx=snow&at=night`, `&rate=600` (a day in about two minutes), `&seed=7`, `&hud=1` (frame rate and cost). `/gallery.html` shows them all side by side under any conditions.
 
-A piece is ready when, in every scenario: every readout is present, correct and comfortably legible; nothing overlaps or runs off the frame; night shots are dark; it looks clearly different across weather and time of day; it moves, calmly; the report shows no errors and a frame cost within budget; and it is something you would stop to look at.
+A piece is ready when, in every scenario (the half-light of `overcast-sunset-fall` included): every readout is present, correct and comfortably legible; nothing overlaps or runs off the frame; night shots are dark; it looks clearly different across weather and time of day; it moves, calmly; the report shows no errors and a frame cost within budget; and it is something you would stop to look at.

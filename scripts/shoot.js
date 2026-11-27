@@ -1,7 +1,7 @@
 // Photographs a visualization in a headless browser, in any weather and at any
 // hour, so it can be looked at and checked without waiting for the real thing.
 //
-//   node scripts/shoot.js <id>                       the six core scenarios + a contact sheet
+//   node scripts/shoot.js <id>                       the seven core scenarios + a contact sheet
 //   node scripts/shoot.js <id> --scenarios all       every scenario in src/lib/simulate.js
 //   node scripts/shoot.js <id> --scenarios rain-dusk-fall,fog-dawn-spring
 //   node scripts/shoot.js <id> --wx snow --at night  one ad-hoc moment (any preset, any time)
@@ -13,12 +13,14 @@
 //
 // Other options: --warm <s> (animation run before the first shot, default 12),
 // --seed <n>, --out <dir> (default $SHOOT_OUT or ./shots), --port <n>,
-// --no-sheet, --quiet.
+// --no-sheet, --no-realtime, --quiet.
 //
 // Writes <out>/<id>/<scenario>.png (1080 x 1920) and <out>/<id>/sheet.jpg (all
 // of them side by side), and prints a JSON report: for every shot the text the
-// readouts should be showing, the cost of a frame, how bright the picture is,
-// any errors the page logged, and warnings (too bright for night, over budget).
+// readouts should be showing, the cost of a frame (the JavaScript in frame()
+// only), the frame rate held over a few seconds of real time (first scenario),
+// how bright the picture is, any errors the page logged, and warnings (too
+// bright for night, over budget, a slow mount).
 //
 // Uses a dev server on port 5173 if one is running (npm run dev), else starts
 // its own for the duration. Needs Playwright: `npm i -D playwright` if it is
@@ -26,6 +28,7 @@
 
 import { createRequire } from "module";
 import { mkdir, rmdir, stat, writeFile, readFile, readdir } from "fs/promises";
+import { rmdirSync } from "fs";
 import { tmpdir } from "os";
 import { fileURLToPath, pathToFileURL } from "url";
 import { dirname, join, resolve } from "path";
@@ -45,7 +48,7 @@ const log = (...a) => {
   if (!flag("quiet")) console.error(...a);
 };
 
-const { SCENARIOS, CORE_SCENARIOS, PRESETS } = await import(pathToFileURL(join(root, "src/lib/simulate.js")).href);
+const { SCENARIOS, CORE_SCENARIOS, PRESETS, parseAt } = await import(pathToFileURL(join(root, "src/lib/simulate.js")).href);
 
 if (flag("list") || !positional[0]) {
   const ids = (await readdir(join(root, "src/visuals"))).filter((f) => f.endsWith(".js") && !f.startsWith("_")).map((f) => f.slice(0, -3));
@@ -64,7 +67,17 @@ const every = Number(opt("every", 4));
 const rate = opt("rate");
 const seed = opt("seed");
 const perf = Number(opt("perf", 0));
-const crop = opt("crop")?.split(",").map(Number);
+let crop = opt("crop")?.split(",").map(Number);
+if (crop && (crop.length !== 4 || crop.some((n) => !Number.isFinite(n)))) {
+  console.error("--crop takes x,y,width,height in stage units, e.g. --crop 0,0,1080,640");
+  process.exit(1);
+}
+if (crop) {
+  // keep it inside the 1080 x 1920 frame
+  const x = Math.min(1079, Math.max(0, crop[0]));
+  const y = Math.min(1919, Math.max(0, crop[1]));
+  crop = [x, y, Math.max(1, Math.min(crop[2], 1080 - x)), Math.max(1, Math.min(crop[3], 1920 - y))];
+}
 const outDir = resolve(opt("out", process.env.SHOOT_OUT || join(root, "shots")), id);
 const port = Number(opt("port", 5173));
 
@@ -73,6 +86,16 @@ let shots;
 if (opt("wx") || opt("at")) {
   const wx = opt("wx", "partly");
   const at = opt("at", "noon");
+  // A typo must not be quietly shot as something else under the name asked for.
+  const known = [...Object.keys(PRESETS), "none", "offline"];
+  if (!known.includes(wx)) {
+    console.error(`unknown --wx "${wx}". One of: ${known.join(", ")}`);
+    process.exit(1);
+  }
+  if (parseAt(at) == null) {
+    console.error(`cannot read --at "${at}". Try --list.`);
+    process.exit(1);
+  }
   shots = [{ name: `${wx}-${String(at).replace(/[^\w-]+/g, "")}`, query: `wx=${encodeURIComponent(wx)}&at=${encodeURIComponent(at)}`, note: `${wx} at ${at}` }];
 } else {
   const want = opt("scenarios");
@@ -111,6 +134,14 @@ async function takeSlot() {
 }
 const releaseSlot = () => (slotDir ? rmdir(slotDir).catch(() => {}) : Promise.resolve());
 for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => releaseSlot().finally(() => process.exit(130)));
+// However this run ends (a crash included), give the slot back.
+process.on("exit", () => {
+  if (slotDir) {
+    try {
+      rmdirSync(slotDir);
+    } catch {}
+  }
+});
 await takeSlot();
 
 // A dev server: the one already running, or our own.
@@ -159,8 +190,12 @@ async function open(query, extra = "") {
   page.on("pageerror", (e) => logs.push(`pageerror: ${String(e.message || e)}`.slice(0, 400)));
   const url = `${base}/visual.html?id=${encodeURIComponent(id)}&${query}${seed ? `&seed=${seed}` : ""}${extra}`;
   await page.goto(url, { waitUntil: "load" });
-  await page.waitForFunction(() => window.__viz && (window.__viz.ready || window.__viz.error), null, { timeout: 90000 }).catch(() => {});
-  const status = await page.evaluate(() => ({ ready: Boolean(window.__viz?.ready), error: window.__viz?.error || null }));
+  await page.waitForFunction(() => window.__viz && (window.__viz.ready || window.__viz.error), null, { timeout: 60000 }).catch(() => {});
+  // A page stuck in an endless loop never answers: do not wait on it for ever.
+  const status = await Promise.race([
+    page.evaluate(() => ({ ready: Boolean(window.__viz?.ready), error: window.__viz?.error || null })),
+    new Promise((r) => setTimeout(() => r({ ready: false, error: "the page stopped responding: an endless loop in mount() or frame()?" }), 8000)),
+  ]);
   return { context, page, logs, url, status };
 }
 
@@ -168,7 +203,7 @@ const settle = (page) => page.evaluate(() => new Promise((r) => requestAnimation
 
 for (const shot of shots) {
   const { context, page, logs, url, status } = await open(shot.query, `&manual=1&warm=${warm}${rate ? `&rate=${rate}` : ""}`);
-  const entry = { scenario: shot.name, note: shot.note, url, files: [], error: status.error, logs };
+  const entry = { scenario: shot.name, note: shot.note, url, files: [], frames: [], error: status.error, logs };
   if (!status.ready) {
     entry.error = entry.error || "the page never became ready";
     report.ok = false;
@@ -179,6 +214,8 @@ for (const shot of shots) {
       const file = join(outDir, `${shot.name}${frames > 1 ? `-f${f + 1}` : ""}.png`);
       await page.screenshot({ path: file });
       entry.files.push(file);
+      // What this frame was showing: with several frames (a time-lapse) they differ.
+      entry.frames.push({ file, ...(await page.evaluate(() => ({ daylight: +window.__viz.state.daylight.toFixed(2), time: `${window.__viz.state.text.time} ${window.__viz.state.text.ampm}` }))) });
       if (crop?.length === 4) {
         const cfile = file.replace(/\.png$/, "-crop.png");
         await page.screenshot({ path: cfile, clip: { x: crop[0], y: crop[1], width: crop[2], height: crop[3] } });
@@ -198,7 +235,14 @@ for (const shot of shots) {
       };
     });
     Object.assign(entry, info);
-    if (info.frameErrors.length || logs.some((l) => l.startsWith("pageerror"))) report.ok = false;
+    // The first scenario also runs a few seconds in real time: frame() cost alone
+    // says nothing about layout, paint or shaders, the frame rate held does.
+    if (shot === shots[0] && !flag("no-realtime")) {
+      entry.realtime = await Promise.race([page.evaluate(() => window.__viz.realtime(2.5)), new Promise((r) => setTimeout(() => r({ fps: 0, target: 30, stalled: true }), 15000))]);
+    }
+    const shaderFailed = logs.find((l) => l.includes("[kit.shader]"));
+    if (shaderFailed) entry.error = `a shader failed to build: ${shaderFailed}`;
+    if (info.frameErrors.length || shaderFailed || logs.some((l) => l.startsWith("pageerror"))) report.ok = false;
   }
   report.shots.push(entry);
   log(`${entry.error ? "FAILED" : "shot  "} ${shot.name}${entry.error ? `: ${String(entry.error).split("\n")[0]}` : `  frame ${entry.stats.avgMs} ms avg, ${entry.stats.p95Ms} p95`}`);
@@ -210,11 +254,8 @@ for (const shot of shots) {
 {
   const context = await browser.newContext({ viewport: { width: 300, height: 300 } });
   const page = await context.newPage();
-  for (const shot of report.shots) {
-    const file = shot.files.find((f) => !f.endsWith("-crop.png"));
-    if (!file) continue;
-    const b64 = (await readFile(file)).toString("base64");
-    shot.brightness = await page.evaluate(async (data) => {
+  const measure = async (file) =>
+    page.evaluate(async (data) => {
       const img = new Image();
       img.src = `data:image/png;base64,${data}`;
       await img.decode();
@@ -233,13 +274,31 @@ for (const shot of shots) {
       }
       const n = px.length / 4;
       return { mean: +(sum / n).toFixed(3), lightShare: +(light / n).toFixed(3) };
-    }, b64);
-    const night = shot.conditions && shot.conditions.daylight < 0.15;
+    }, (await readFile(file)).toString("base64"));
+  for (const shot of report.shots) {
+    if (!shot.frames.length) continue;
     shot.warnings = [];
-    if (night && shot.brightness.mean > 0.22) shot.warnings.push(`too bright for night: mean brightness ${shot.brightness.mean} (keep it under about 0.22)`);
-    if (night && shot.brightness.lightShare > 0.2) shot.warnings.push(`too much light area for night: ${Math.round(shot.brightness.lightShare * 100)}% of the frame is light`);
-    if (shot.stats && shot.stats.avgMs > 4) shot.warnings.push(`frame cost ${shot.stats.avgMs} ms average is over the 4 ms budget`);
-    if (shot.stats && shot.stats.p95Ms > 8) shot.warnings.push(`frame cost ${shot.stats.p95Ms} ms at the 95th percentile is over the 8 ms budget`);
+    for (const [i, frame] of shot.frames.entries()) {
+      frame.brightness = await measure(frame.file);
+      const which = shot.frames.length > 1 ? `frame ${i + 1} (${frame.time}): ` : "";
+      const night = frame.daylight < 0.15;
+      if (night && frame.brightness.mean > 0.22) shot.warnings.push(`${which}too bright for night: mean brightness ${frame.brightness.mean} (keep it under about 0.22)`);
+      if (night && frame.brightness.lightShare > 0.2) shot.warnings.push(`${which}too much light area for night: ${Math.round(frame.brightness.lightShare * 100)}% of the frame is light`);
+    }
+    shot.brightness = shot.frames[0].brightness;
+    const st = shot.stats;
+    if (st && st.avgMs > 4) shot.warnings.push(`frame cost ${st.avgMs} ms average is over the 4 ms budget`);
+    if (st && st.p95Ms > 8) shot.warnings.push(`frame cost ${st.p95Ms} ms at the 95th percentile is over the 8 ms budget`);
+    if (st && st.mountMs > 120) shot.warnings.push(`mount() took ${st.mountMs} ms: on the display it runs while the previous piece is still on screen and freezes it (keep it well under 100 ms)`);
+    const rt = shot.realtime;
+    if (rt) {
+      const gl = (st?.surfaces || []).some((x) => x.startsWith("gl"));
+      if (rt.stalled) shot.warnings.push("the real-time run never finished: the piece is far too heavy, or stuck");
+      else if (rt.fps < rt.target * 0.85) {
+        if (gl) shot.notes = [`held ${rt.fps} of ${rt.target} fps in real time here; this test browser draws WebGL in software, which is slow for shaders, so judge the shader by how cheap it is, not by this number`];
+        else shot.warnings.push(`held only ${rt.fps} of ${rt.target} fps in real time: the work outside frame() (layout, paint, canvas fill) is too heavy`);
+      }
+    }
     for (const w of shot.warnings) log(`warning ${shot.scenario}: ${w}`);
   }
   await context.close();
@@ -287,7 +346,10 @@ if (perf > 0) {
     await page.waitForTimeout(perf * 1000);
     const after = await heap();
     const stats = await page.evaluate(() => window.__viz.stats());
-    report.perf = { scenario: shots[0].name, seconds: perf, ...stats, heapKbBefore: before, heapKbAfter: after, heapGrowthKb: after - before, logs };
+    report.perf = { scenario: shots[0].name, seconds: perf, ...stats, heapKbBefore: before, heapKbAfter: after, heapGrowthKb: after - before, logs, warnings: [] };
+    if (stats.fps < (stats.target || 30) * 0.85) report.perf.warnings.push(`ran at ${stats.fps} fps, not ${stats.target || 30}`);
+    if (stats.quality < 1) report.perf.warnings.push(`the runner cut canvas resolution to ${stats.quality} to keep up`);
+    if (after - before > 4000) report.perf.warnings.push(`memory grew by ${after - before} KB in ${perf} s: something is piling up`);
   } else {
     report.perf = { error: status.error || "never became ready" };
     report.ok = false;

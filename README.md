@@ -120,8 +120,8 @@ Vite dev server: the display at `/`, one piece at `/visual.html?id=<id>`, the ga
 Each one is a single module in `src/visuals/`; the contract, the data it can draw from and the toolkit are described in `src/visuals/README.md`. To look at a piece in every kind of weather without waiting for it:
 
 ```sh
-node scripts/shoot.js <id>                    # screenshots across six scenarios, plus a contact sheet
-node scripts/shoot.js <id> --scenarios all    # all twelve
+node scripts/shoot.js <id>                    # screenshots across seven scenarios, plus a contact sheet
+node scripts/shoot.js <id> --scenarios all    # all thirteen
 node scripts/shoot.js <id> --perf 12          # frame rate, frame cost and memory over 12 s
 node scripts/shoot.js --list
 ```

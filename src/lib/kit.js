@@ -92,7 +92,7 @@ export function hash(x, y = 0) {
 //   const n = createNoise(state.seed);
 //   n.n2(x, y)            2D        n.n3(x, y, z)        3D (use z for time)
 //   n.fbm2(x, y, octaves) layered   n.fbm3(x, y, z, octaves)
-//   n.curl(x, y, z)       [vx, vy]: a swirling, divergence-free flow
+//   n.curl(x, y, z)       [vx, vy]: a swirling, divergence-free flow (each about -2..2)
 // ---------------------------------------------------------------------------
 
 const G3 = [1, 1, 0, -1, 1, 0, 1, -1, 0, -1, -1, 0, 1, 0, 1, -1, 0, 1, 1, 0, -1, -1, 0, -1, 0, 1, 1, 0, -1, 1, 0, 1, -1, 0, -1, -1];
@@ -188,6 +188,7 @@ export function createNoise(seed = 1) {
 
   function fbm2(x, y, octaves = 4, gain = 0.5, lacunarity = 2) {
     let sum = 0, amp = 0.5, total = 0;
+    octaves = Math.max(1, octaves | 0);
     for (let o = 0; o < octaves; o++) {
       sum += amp * n2(x, y);
       total += amp;
@@ -197,6 +198,7 @@ export function createNoise(seed = 1) {
   }
   function fbm3(x, y, z, octaves = 4, gain = 0.5, lacunarity = 2) {
     let sum = 0, amp = 0.5, total = 0;
+    octaves = Math.max(1, octaves | 0);
     for (let o = 0; o < octaves; o++) {
       sum += amp * n3(x, y, z);
       total += amp;
@@ -205,7 +207,7 @@ export function createNoise(seed = 1) {
     return sum / total;
   }
   // The curl of a noise field: flow with no sources or sinks, so things carried
-  // by it swirl without bunching up. Returns [vx, vy], each about -1..1.
+  // by it swirl without bunching up. Returns [vx, vy], each about -2..2.
   function curl(x, y, z = 0) {
     const e = 0.01;
     const dx = (n3(x + e, y, z) - n3(x - e, y, z)) / (2 * e);
@@ -221,6 +223,11 @@ export function createNoise(seed = 1) {
 // ---------------------------------------------------------------------------
 
 function fill(node, attrs, kids, isSvg) {
+  // el("div", child) with no attributes: what was passed is a child, not attributes.
+  if (attrs != null && (typeof attrs !== "object" || Array.isArray(attrs) || attrs.nodeType)) {
+    kids = [attrs, ...kids];
+    attrs = null;
+  }
   for (const [k, v] of Object.entries(attrs || {})) {
     if (v == null || v === false) continue;
     if (k === "style" && typeof v === "object") Object.assign(node.style, v);
@@ -252,16 +259,32 @@ export function addStyle(root, cssText) {
 }
 
 // Shrinks one line of text (never grows it) until it is no wider than
-// `maxWidth` stage units. The node is made nowrap. Call again whenever the text
-// changes. Returns the font size used. Sizes are layout sizes, so this is right
-// however the stage is scaled on screen.
+// `maxWidth` stage units. Works on HTML elements and on SVG <text>. The node is
+// made nowrap, and it must already be in the page (a node not yet attached
+// cannot be measured: the call does nothing and should be made again later).
+// Call again whenever the text changes. Returns the font size used. Sizes are
+// layout sizes, so this is right however the stage is scaled on screen.
 export function fitText(node, maxWidth, baseSize) {
   const size = baseSize ?? (parseFloat(node.dataset.baseSize) || parseFloat(getComputedStyle(node).fontSize));
+  if (!node.isConnected || !(size > 0)) return size || 0;
   node.dataset.baseSize = size;
   node.style.whiteSpace = "nowrap";
-  node.style.fontSize = `${size}px`;
-  const w = Math.max(node.scrollWidth, node.offsetWidth);
-  const fitted = w > maxWidth ? Math.floor((size * maxWidth) / w) : size;
+  const isSvg = typeof node.getBBox === "function";
+  const width = () => {
+    if (isSvg) return node.getBBox().width;
+    const keep = node.style.width;
+    node.style.width = "max-content"; // the text itself, whatever width the box was given
+    const w = node.offsetWidth;
+    node.style.width = keep;
+    return w;
+  };
+  let fitted = size;
+  for (let i = 0; i < 4; i++) {
+    node.style.fontSize = `${fitted}px`;
+    const w = width();
+    if (!(w > maxWidth)) break;
+    fitted = Math.max(1, Math.floor((fitted * maxWidth) / w) - (i ? 1 : 0));
+  }
   node.style.fontSize = `${fitted}px`;
   return fitted;
 }
@@ -302,9 +325,10 @@ const env = { screenScale: 1, quality: 1 };
 //   maxScale   pixels per stage unit at most (default 1: soft on 4K, cheap.
 //              2 is crisp on 4K and four times the fill cost)
 //   adaptive   true if you redraw the whole surface every frame. Only adaptive
-//              surfaces are resized while running (which clears them) when the
-//              machine is struggling. A surface you draw once, or accumulate
-//              on, must leave this false.
+//              surfaces are resized while running (which clears them; fill
+//              and stroke styles, font and the like are kept) when the machine
+//              is struggling. A surface you draw once, or accumulate on, must
+//              leave this false.
 //   alpha      false for an opaque background layer (slightly cheaper)
 // Returns { canvas, ctx, ratio, clear() }. `ratio` is the pixels per stage
 // unit actually in use (needed only for getImageData-style pixel work).
@@ -314,18 +338,47 @@ export function canvas2d(root, { maxScale = 1, adaptive = false, alpha = true } 
   root.append(canvas);
   const ctx = canvas.getContext("2d", { alpha });
   const layer = { canvas, ctx, ratio: 1, adaptive, kind: "2d" };
-  layer.clear = () => ctx.clearRect(0, 0, W, H);
+  // The scale from stage units to real pixels lives in the context's matrix, so
+  // the calls that replace the matrix are kept in stage units too: a piece may
+  // use setTransform() and resetTransform() freely.
+  const setT = ctx.setTransform.bind(ctx);
+  const getT = ctx.getTransform.bind(ctx);
+  let sx = 1;
+  let sy = 1;
+  ctx.setTransform = (a = 1, b = 0, c = 0, d = 1, e = 0, f = 0) =>
+    a !== null && typeof a === "object" ? setT(a.a * sx, a.b * sy, a.c * sx, a.d * sy, a.e * sx, a.f * sy) : setT(a * sx, b * sy, c * sx, d * sy, e * sx, f * sy);
+  ctx.resetTransform = () => setT(sx, 0, 0, sy, 0, 0);
+  ctx.getTransform = () => {
+    const m = getT();
+    return new DOMMatrix([m.a / sx, m.b / sy, m.c / sx, m.d / sy, m.e / sx, m.f / sy]);
+  };
+  layer.clear = () => {
+    // the whole surface, whatever transform the piece has left in place
+    ctx.save();
+    setT(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
+  };
   layer.resize = (first) => {
     if (!first && !adaptive) return;
     const ratio = clamp(Math.min(maxScale, env.screenScale) * (adaptive ? env.quality : 1), 0.2, 3);
     const w = Math.max(1, Math.round(W * ratio));
     const h = Math.max(1, Math.round(H * ratio));
     if (canvas.width !== w || canvas.height !== h) {
+      // Setting a canvas's size resets its context: carry the piece's settings across.
+      const kept = CTX_STATE.map((key) => ctx[key]);
+      const dash = ctx.getLineDash();
       canvas.width = w;
       canvas.height = h;
+      CTX_STATE.forEach((key, i) => {
+        if (kept[i] !== undefined) ctx[key] = kept[i];
+      });
+      ctx.setLineDash(dash);
     }
     layer.ratio = w / W;
-    ctx.setTransform(w / W, 0, 0, h / H, 0, 0);
+    sx = w / W;
+    sy = h / H;
+    setT(sx, 0, 0, sy, 0, 0);
   };
   layer.resize(true);
   layer.destroy = () => {
@@ -336,6 +389,11 @@ export function canvas2d(root, { maxScale = 1, adaptive = false, alpha = true } 
   surfaces.add(layer);
   return layer;
 }
+const CTX_STATE = [
+  "fillStyle", "strokeStyle", "lineWidth", "lineCap", "lineJoin", "miterLimit", "lineDashOffset", "font", "textAlign", "textBaseline",
+  "direction", "letterSpacing", "globalAlpha", "globalCompositeOperation", "imageSmoothingEnabled", "imageSmoothingQuality",
+  "shadowBlur", "shadowColor", "shadowOffsetX", "shadowOffsetY", "filter",
+];
 
 // A low-resolution canvas shown with hard pixels, for pixel art and anything
 // built on a coarse grid (LED and flip-dot boards, tiles, cellular automata).
@@ -344,12 +402,13 @@ export function canvas2d(root, { maxScale = 1, adaptive = false, alpha = true } 
 // It stays sharp on any screen and costs almost nothing to fill.
 // Returns { canvas, ctx, cols, rows, size, clear() }.
 export function pixelCanvas(root, { size = 4, alpha = true } = {}) {
-  const cols = Math.round(W / size);
-  const rows = Math.round(H / size);
+  // Pixels stay square: a size that does not divide the stage runs a little past its right and bottom edges.
+  const cols = Math.ceil(W / size);
+  const rows = Math.ceil(H / size);
   const canvas = document.createElement("canvas");
   canvas.width = cols;
   canvas.height = rows;
-  Object.assign(canvas.style, { position: "absolute", left: "0", top: "0", width: `${W}px`, height: `${H}px`, imageRendering: "pixelated" });
+  Object.assign(canvas.style, { position: "absolute", left: "0", top: "0", width: `${cols * size}px`, height: `${rows * size}px`, imageRendering: "pixelated" });
   root.append(canvas);
   const ctx = canvas.getContext("2d", { alpha });
   ctx.imageSmoothingEnabled = false;
@@ -374,6 +433,8 @@ export function pixelCanvas(root, { size = 4, alpha = true } = {}) {
 //   const m = mask(270, 120, (ctx) => { ctx.font = '700 110px "Archivo"'; ctx.textBaseline = "top"; ctx.fillText("12:45", 0, 6); });
 const maskCanvases = new Map();
 export function mask(cols, rows, draw) {
+  cols = Math.max(1, Math.round(cols));
+  rows = Math.max(1, Math.round(rows));
   const key = `${cols}x${rows}`;
   let c = maskCanvases.get(key);
   if (!c) {
@@ -415,7 +476,9 @@ uniform float u_time;
 // and set them with layer.set(name, value) where value is a number or an
 // array of 2, 3 or 4 numbers.
 // Options: maxScale (default 0.5: half resolution, which suits soft imagery and
-// keeps a Raspberry Pi comfortable; never above 1), adaptive (default true).
+// keeps a Raspberry Pi comfortable; never above 1), adaptive (default true:
+// draw() must then be called every frame, because the surface is cleared when
+// it is resized; pass adaptive: false for a shader drawn once).
 // Returns { canvas, ok, set(name, value), draw(timeSeconds), destroy() }.
 // `ok` is false if WebGL is unavailable: put something acceptable behind the
 // surface (a CSS background on root) for that case.
@@ -443,7 +506,7 @@ export function shader(root, { frag, maxScale = 0.5, adaptive = true } = {}) {
     };
     program = gl.createProgram();
     gl.attachShader(program, compile(gl.VERTEX_SHADER, VERT));
-    gl.attachShader(program, compile(gl.FRAGMENT_SHADER, FRAG_HEAD + frag));
+    gl.attachShader(program, compile(gl.FRAGMENT_SHADER, `${FRAG_HEAD}#line 1\n${frag}`)); // errors are numbered from the piece's own first line
     gl.linkProgram(program);
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program) || "shader failed to link");
     gl.useProgram(program);
@@ -462,6 +525,7 @@ export function shader(root, { frag, maxScale = 0.5, adaptive = true } = {}) {
     } catch (err) {
       layer.error = String(err.message || err);
       console.error(`[kit.shader] ${layer.error}`);
+      canvas.style.display = "none"; // let what is behind it show, as when there is no WebGL
     }
     canvas.addEventListener("webglcontextlost", (e) => {
       e.preventDefault();
@@ -472,7 +536,10 @@ export function shader(root, { frag, maxScale = 0.5, adaptive = true } = {}) {
         build();
       } catch {}
     });
-  } else layer.error = "WebGL is not available";
+  } else {
+    layer.error = "WebGL is not available";
+    canvas.style.display = "none";
+  }
 
   const locate = (name) => (name in locations ? locations[name] : (locations[name] = gl.getUniformLocation(program, name)));
   layer.set = (name, value) => {
@@ -520,6 +587,7 @@ export function shader(root, { frag, maxScale = 0.5, adaptive = true } = {}) {
 
 // A color as [r, g, b] in 0..1, for shader uniforms: layer.set("u_sky", vec3("#4081d0")).
 export function vec3(color) {
+  if (Array.isArray(color)) return [color[0] / 255, color[1] / 255, color[2] / 255];
   let s = String(color).replace(/^#/, "");
   if (s.length === 3) s = s[0] + s[0] + s[1] + s[1] + s[2] + s[2];
   const n = parseInt(s, 16) || 0;
@@ -533,7 +601,9 @@ export function vec3(color) {
 // A still film-grain layer over everything in root. Smooth gradients band
 // badly on a big LCD, especially dark ones; a little grain hides it and makes
 // flat color feel like a material. Costs nothing per frame. `opacity` 0.03 to
-// 0.1 is the useful range. Returns the element (remove() it to take it off).
+// 0.1 is the useful range. (It leaves mid-tones as they are, and at that
+// strength lifts pure black and dims pure white by a level or two.) Returns the
+// element (remove() it to take it off).
 export function grain(root, { opacity = 0.06, size = 256, seed = 7, zIndex = 50 } = {}) {
   const c = document.createElement("canvas");
   c.width = c.height = size;
@@ -544,7 +614,7 @@ export function grain(root, { opacity = 0.06, size = 256, seed = 7, zIndex = 50 
     const v = r();
     const white = v > 0.5;
     img.data[i] = img.data[i + 1] = img.data[i + 2] = white ? 255 : 0;
-    img.data[i + 3] = Math.abs(v - 0.5) * 2 * 255; // black and white specks in equal measure, so the picture's tone is unchanged
+    img.data[i + 3] = Math.abs(v - 0.5) * 2 * 255; // black and white specks in equal measure
   }
   ctx.putImageData(img, 0, 0);
   const node = el("div", {

@@ -3,11 +3,11 @@
 // stay clean (no muddy midpoints) and lightness steps look even.
 
 export function parse(c) {
-  if (Array.isArray(c)) return c;
+  if (Array.isArray(c)) return [0, 1, 2].map((i) => (Number.isFinite(c[i]) ? c[i] : 0));
   let s = String(c || "").trim().replace(/^#/, "");
   if (s.length === 3) s = s[0] + s[0] + s[1] + s[1] + s[2] + s[2];
+  if (!/^[0-9a-f]{6}$/i.test(s)) return [0, 0, 0]; // not a color: black, rather than something invalid
   const n = parseInt(s, 16);
-  if (s.length !== 6 || Number.isNaN(n)) return [0, 0, 0];
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
@@ -62,6 +62,9 @@ export function toOklch(c) {
 // A color from lightness, chroma and hue. Out-of-gamut colors have their
 // chroma reduced until they fit, so the lightness and hue asked for are kept.
 export function oklch(l, c, h) {
+  if (!Number.isFinite(l)) l = 0;
+  if (!Number.isFinite(c)) c = 0;
+  if (!Number.isFinite(h)) h = 0;
   const rad = (h * Math.PI) / 180;
   const inGamut = (cc) => {
     const a = cc * Math.cos(rad);
@@ -91,7 +94,7 @@ export function oklch(l, c, h) {
 export function mix(a, b, t) {
   const A = toOklab(a);
   const B = toOklab(b);
-  const k = Math.max(0, Math.min(1, t));
+  const k = Number.isFinite(t) ? Math.max(0, Math.min(1, t)) : 0;
   return fromOklab([A[0] + (B[0] - A[0]) * k, A[1] + (B[1] - A[1]) * k, A[2] + (B[2] - A[2]) * k]);
 }
 
@@ -121,10 +124,12 @@ export const readableOn = (bg, light = "#ffffff", dark = "#000000") => (contrast
 // A gradient as a function: ramp(["#000", "#f80", "#fff"])(0.5) -> "#rrggbb".
 // Stops may also be [position, color] pairs with positions from 0 to 1.
 export function ramp(stops) {
-  const list = stops.map((s, i) => (Array.isArray(s) && typeof s[1] === "string" ? [s[0], toOklab(s[1])] : [stops.length > 1 ? i / (stops.length - 1) : 0, toOklab(s)]));
+  // A stop is a color, or [position, color]; a color may itself be an [r, g, b] array.
+  const isPair = (s) => Array.isArray(s) && s.length === 2 && typeof s[0] === "number" && (typeof s[1] === "string" || Array.isArray(s[1]));
+  const list = stops.map((s, i) => (isPair(s) ? [s[0], toOklab(s[1])] : [stops.length > 1 ? i / (stops.length - 1) : 0, toOklab(s)]));
   list.sort((a, b) => a[0] - b[0]);
   return (t) => {
-    if (t <= list[0][0]) return fromOklab(list[0][1]);
+    if (!(t > list[0][0])) return fromOklab(list[0][1]);
     for (let i = 1; i < list.length; i++) {
       if (t <= list[i][0]) {
         const [p0, a] = list[i - 1];

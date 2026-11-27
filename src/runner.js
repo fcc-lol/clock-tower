@@ -31,7 +31,7 @@ const manual = params.get("manual") === "1";
 const stage = document.getElementById("stage");
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const viz = (window.__viz = { id, ready: false, error: null, errors: [], state: null, title: "", quality: 1 });
+const viz = (window.__viz = { id, ready: false, error: null, errors: [], state: null, title: "", quality: 1, mountMs: 0, target: 30 });
 const tell = (type, extra = {}) => {
   if (embed) window.parent.postMessage({ type: `ct:${type}`, key, id, ...extra }, location.origin);
 };
@@ -39,11 +39,20 @@ const tell = (type, extra = {}) => {
 if (params.get("onDevice") === "true") document.documentElement.style.cursor = "none";
 
 // The stage is always 1080 x 1920 and scaled to fit the page.
+// Changing how many pixels a canvas has clears it, so while the loop is running
+// such changes wait for the start of the next frame: a cleared canvas is then
+// redrawn before it is ever shown.
+const pending = {};
+let looping = false;
+function configure(change) {
+  if (looping) Object.assign(pending, change);
+  else __kit.configure(change);
+}
 function fit() {
   const s = Math.min(window.innerWidth / W, window.innerHeight / H) || 1;
   stage.style.transform = `translate(-50%, -50%) scale(${s})`;
   const given = Number(params.get("scale"));
-  __kit.configure({ screenScale: given > 0 ? given : s * (window.devicePixelRatio || 1) });
+  configure({ screenScale: given > 0 ? given : s * (window.devicePixelRatio || 1) });
 }
 fit();
 window.addEventListener("resize", fit);
@@ -69,7 +78,7 @@ window.addEventListener("message", (e) => {
   if (e.data.type === "ct:data" && !simulatedData) {
     data = e.data.data || data;
     gotData();
-  } else if (e.data.type === "ct:scale" && e.data.scale > 0) __kit.configure({ screenScale: e.data.scale });
+  } else if (e.data.type === "ct:scale" && e.data.scale > 0) configure({ screenScale: e.data.scale });
 });
 
 // ---------------------------------------------------------------------------
@@ -141,12 +150,34 @@ viz.stats = () => {
     p95Ms: sorted.length ? +sorted[Math.floor(sorted.length * 0.95)].toFixed(3) : 0,
     maxMs: +cost.max.toFixed(3),
     fps: +fpsNow.toFixed(1),
+    target: viz.target,
+    mountMs: viz.mountMs,
     quality: __kit.quality,
     surfaces: [...__kit.surfaces].map((s) => `${s.kind}${s.adaptive ? "*" : ""} ${s.canvas.width}x${s.canvas.height}`),
     nodes: stage.getElementsByTagName("*").length,
     errors: viz.errors.length,
   };
 };
+
+// Runs the piece in real time for a few seconds and reports the frame rate it
+// held: the test for everything frame() does not time (layout, paint, shaders).
+viz.realtime = (seconds = 3) =>
+  new Promise((resolve) => {
+    const interval = 1000 / viz.target;
+    const start = performance.now();
+    let last = start;
+    let frames = 0;
+    const tick = (ts) => {
+      if (failed || ts - start >= seconds * 1000) return resolve({ fps: +((frames * 1000) / Math.max(1, ts - start)).toFixed(1), target: viz.target });
+      requestAnimationFrame(tick);
+      const elapsed = ts - last;
+      if (elapsed < interval - 3) return;
+      last = ts;
+      safeStep(Math.min(0.1, elapsed / 1000));
+      frames++;
+    };
+    requestAnimationFrame(tick);
+  });
 
 let fpsNow = 0;
 function run(fps) {
@@ -158,11 +189,18 @@ function run(fps) {
   let windowClean = true;
   let slowWindows = 0;
   const started = last;
+  looping = true;
   const loop = (ts) => {
     raf = requestAnimationFrame(loop);
     const elapsed = ts - last;
     if (elapsed < interval - 3) return;
     last = ts;
+    if (pending.quality || pending.screenScale) {
+      __kit.configure(pending);
+      viz.quality = __kit.quality;
+      delete pending.quality;
+      delete pending.screenScale;
+    }
     if (elapsed > 500) windowClean = false; // the tab was hidden, or a hiccup that is not about drawing
     safeStep(Math.min(0.1, elapsed / 1000));
     windowFrames++;
@@ -172,8 +210,8 @@ function run(fps) {
       if (windowClean && ts - started > 6000 && fpsNow < fps * 0.7) slowWindows++;
       else slowWindows = 0;
       if (slowWindows >= 2 && __kit.quality > 0.5) {
-        __kit.configure({ quality: Math.max(0.5, __kit.quality * 0.8) });
-        viz.quality = __kit.quality;
+        const q = __kit.quality * 0.8;
+        pending.quality = q < 0.55 ? 0.5 : q; // 1, 0.8, 0.64, 0.5: applied just before the next frame is drawn
         slowWindows = 0;
       }
       windowStart = ts;
@@ -223,14 +261,18 @@ async function main() {
   st.update(data, simulatedClock ? base : Date.now(), 0, 0);
   st.state.scale = __kit.screenScale;
 
+  const m0 = performance.now();
   instance = mod.mount(stage, { state: st.state, W, H, seed });
+  viz.mountMs = +(performance.now() - m0).toFixed(1);
   if (!instance || typeof instance.frame !== "function") throw new Error(`"${id}": mount() must return { frame(state) }`);
 
   const warm = Math.max(0, Number(params.get("warm")) || 0);
   if (warm) {
     const dt = 1 / 30;
-    for (let i = 0; i < Math.round(warm / dt) && !failed; i++) safeStep(dt);
-    warmed = t;
+    for (let i = 0; i < Math.round(warm / dt) && !failed; i++) {
+      warmed += dt; // the animation runs; the instant shown stays put
+      safeStep(dt);
+    }
   }
   if (!safeStep(0) && failed) return;
   if (failed) return;
@@ -241,6 +283,7 @@ async function main() {
     document.body.append(hudNode);
   }
   const fps = Math.max(1, Math.min(60, Number(params.get("fps")) || mod.fps || 30));
+  viz.target = fps;
   if (!manual) run(fps);
 
   // Give the first frame a moment to reach the screen before saying so.
