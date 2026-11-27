@@ -64,6 +64,7 @@ Rules for the readouts:
 - **Calm but alive.** Something should always be visibly moving, and nothing should flash, strobe, jitter or race. Motion should be slow enough to live with all day. Lightning, if any, is a soft, rare brightening, not a flash.
 - **True.** A viewer should be able to feel the actual conditions: the wind in the picture is the real wind (its speed, and its direction where that makes sense), rain falls when and as hard as it is raining, cloud is as thick as the cloud, the colors of the sky are the colors measured from the tower. Make clear weather, overcast, rain, snow, storm, fog, heat and cold, and day and night, look clearly different from each other.
 - **Finished from the first frame.** The piece is cut to, not faded in. If it simulates something that needs time to build up, run that in `mount()` so the first frame already looks right.
+- **The clock can jump.** The gallery and the test tool run the clock fast, and a laptop wakes from sleep. If `state.ms` moves by more than a few seconds between two frames, go straight to the new state instead of playing a transition toward it (a minute-change animation caught mid-way in every frame of a time-lapse looks broken).
 - **Banding.** Smooth dark gradients band badly on a big LCD. Finish with `grain(root)` or dither in your shader.
 - Have one strong idea and commit to it. Choose typefaces and a palette that belong to that idea. Use the whole tall frame on purpose.
 
