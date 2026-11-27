@@ -1007,7 +1007,7 @@ export default {
       c.rip = A * (1 + 0.6 * clamp((env.gust - env.wind) / 14)) + GRAV * 0.035;
       c.damp = 1.5 + 2.2 * c.wetAmt * (1 - 0.6 * env.storm);
       // the cords at a sheet's bottom corners give in a wind, so it can belly like a sail; in a calm it hangs plumb
-      c.slack = approach(c.slack, 0.12 * smoothstep(3, 30, spd) * (1 - 0.7 * env.frz) * (1 - 0.3 * c.wetAmt), dt, 1.5);
+      c.slack = approach(c.slack, 0.09 * smoothstep(3, 30, spd) * (1 - 0.7 * env.frz) * (1 - 0.3 * c.wetAmt), dt, 1.5);
       c.mass = 1 + 0.35 * c.wetAmt;
       const adv = t * (0.25 + spd * 0.035);
       const ox = -env.dirX * adv;
@@ -1049,7 +1049,7 @@ export default {
       const rip = c.rip;
       const gy = GRAV * c.mass;
       for (let j = 1; j < rows; j++) {
-        const hem = j === rows - 1 ? 1.25 : 1;
+        const hem = j === rows - 1 ? 1.5 : 1;
         for (let i = 0; i < cols; i++) {
           const k = off + j * cols + i;
           const k3 = k * 3;
@@ -1096,6 +1096,19 @@ export default {
             P[k3] += (tx0 - P[k3]) * 0.16;
             P[k3 + 1] += (ty0 - P[k3 + 1]) * 0.16;
             P[k3 + 2] += -P[k3 + 2] * 0.16;
+          }
+        } else {
+          // the small linen has weighted hems: it streams with the wind (never past about 35 degrees) but keeps its face to the room
+          const lean = clamp(c.ax / GRAV, -0.7, 0.7);
+          const drop = (c.h * 0.975) / Math.sqrt(1 + lean * lean);
+          for (let s = 0; s < 2; s++) {
+            const k3 = (last + (s ? cols - 1 : 0)) * 3;
+            const px = c.x + L.haul + (s ? c.w : 0);
+            const tx0 = px + lean * drop;
+            const ty0 = lineY(L, px) + drop;
+            P[k3] += (tx0 - P[k3]) * 0.06;
+            P[k3 + 1] += (ty0 - P[k3 + 1]) * 0.06;
+            P[k3 + 2] -= P[k3 + 2] * 0.1;
           }
         }
       }

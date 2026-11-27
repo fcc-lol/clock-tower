@@ -6,10 +6,12 @@
 //   Ink B is the temperature (violet, blue, teal, yellow, orange, fluorescent
 //   pink as it warms, always held 60 degrees of hue away from ink A); the
 //   minutes and the temperature stand on it. It carries the weather as print
-//   texture: three bold bars thrown across the sky on a clear day, a slanted
-//   line screen in rain (slant from the wind, weight from the rate), specks in
-//   snow, fat horizontal rules thickening down the sheet in fog, a torn edge in
-//   a storm, a slow shimmer in a heat wave.
+//   texture: three bold bars thrown across the sky on a clear day (a gale
+//   staggers them downwind), a slanted line screen in rain (slant from the
+//   wind, weight from the rate), specks in snow, fat horizontal rules
+//   thickening down the sheet in fog, a torn edge in a storm, a slow shimmer in
+//   a heat wave. At night the warm inks turn to embers (crimson, vermilion);
+//   yellow over a blue sky overprints green.
 //   Ink C is the black plate: the numerals and every line of text. Each minute
 //   a drum pulls it again, wiping the new time down the sheet.
 //
@@ -17,9 +19,12 @@
 // the rain lines) the third colour appears: the overprint. Wind knocks the two
 // colour plates out of register against the black (never more than 6 px, a
 // gust jolts one), humidity swells the dots and softens the edges. Daylight
-// chooses the stock: warm white paper with inks that multiply by day, black
-// paper with deep, saturated inks that lighten at night and type in a dim
-// cream; the type switches ink in one step where the ground is mid-grey.
+// chooses the stock: warm white paper with inks that multiply by day (golden
+// in a low clear sun, greyer in an overcast dusk), black paper with deep,
+// saturated inks that lighten at night and type in a dim cream. Through
+// twilight the grounds hold dark, hurry through mid-grey, and the cream
+// brightens just as much as it needs to stay legible; the type switches to
+// black in one step where the ground is mid-grey.
 //
 // The display cuts to a piece on the quarter hour. At that moment the press
 // runs the sheet again: three rollers pass down it (sky, temperature, black),
@@ -367,8 +372,16 @@ export default {
       return n;
     }
     const layers = [buildLayer(), buildLayer()];
+    // the drums: one for the black plate's pulls, one for the colour rollers (they can run at once)
     const bar = el("div", { class: "bar", style: { visibility: "hidden" } });
-    wrap.append(bar);
+    const rbar = el("div", { class: "bar", style: { visibility: "hidden" } });
+    wrap.append(bar, rbar);
+    const showBar = (node, y) => {
+      if (y > -100 && y < H + 100) {
+        if (node.style.visibility !== "visible") node.style.visibility = "visible";
+        node.style.transform = `translateY(${f1(y - 114)}px)`; // the drum's contact line is the roller position
+      } else if (node.style.visibility !== "hidden") node.style.visibility = "hidden";
+    };
     grain(root, { opacity: 0.05 });
 
     // ---- writing text: only when a string changes -----------------------------
@@ -647,6 +660,7 @@ export default {
 
         // ---- the colour plates: print-in rollers --------------------------------
         let rolling = false;
+        let rollBarY = -1e4;
         if (pt < PASS_C + 8) {
           const yA = pt < PASS_A ? -1e4 : rollY(pt, PASS_A);
           const yB = pt < PASS_B ? -1e4 : rollY(pt, PASS_B);
@@ -654,8 +668,8 @@ export default {
           uRoll[1] = pt < PASS_B + PASS ? yB : 1e5;
           uRoll[2] = pt < PASS_A ? 0 : Math.exp(-Math.max(0, pt - PASS_A - PASS * 0.5) / 2.2);
           uRoll[3] = pt < PASS_B ? 0 : Math.exp(-Math.max(0, pt - PASS_B - PASS * 0.5) / 2.2);
-          if (pt >= PASS_A && pt < PASS_A + PASS) barY = yA;
-          else if (pt >= PASS_B && pt < PASS_B + PASS) barY = yB;
+          if (pt >= PASS_A && pt < PASS_A + PASS) rollBarY = yA;
+          else if (pt >= PASS_B && pt < PASS_B + PASS) rollBarY = yB;
           // the last pull has dried a shade lighter than the fresh ink coming down over it
           uDry[0] = pt < PASS_A + PASS ? 0.2 * smoothstep(0, 0.4, pt) : 0;
           uDry[1] = pt < PASS_B + PASS ? 0.2 * smoothstep(0, 0.4, pt) : 0;
@@ -666,10 +680,8 @@ export default {
           uDry[0] = uDry[1] = 0;
           dirty = true;
         }
-        if (barY > -100 && barY < H + 100) {
-          bar.style.visibility = "visible";
-          bar.style.transform = `translateY(${f1(barY - 114)}px)`; // the drum's contact line is the roller position
-        } else if (bar.style.visibility !== "hidden") bar.style.visibility = "hidden";
+        showBar(bar, barY);
+        showBar(rbar, rollBarY);
 
         // ---- registration: the wind knocks the colour plates about -------------------
         // where it blows to on the sheet (east is right, north is up)

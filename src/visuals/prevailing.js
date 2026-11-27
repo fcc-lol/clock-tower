@@ -31,6 +31,7 @@ const ROW_TOP = 98; // top of the hour digits
 const ROW_GAP = 82; // between hours and minutes
 const CAP = 0.72; // height of an Archivo Black figure, in ems
 const TAU = Math.PI * 2;
+const HEAT_K = TAU / (STEP * 5); // the heat crinkle: five samples to a ripple, so it stays a clean wave
 const CHIRP = 0.00011; // waves shorten toward the downwind edge
 const FRONT_W = 190; // half-width of the front that carries a new minute in
 const WIPE = 0.14; // the old figures give way to the new over this share of it
@@ -283,7 +284,7 @@ export default {
       const u = sd + CHIRP * sd * sd;
       const env = 0.6 + 0.4 * Math.sin(kg * (sd - travel * 0.7) + i * 0.085);
       let d = amp * env * taut * (Math.sin(k1 * (u - travel) + phase[i]) + 0.4 * Math.sin(k2 * (u - travel * 1.3) + phase[i] * 1.6));
-      if (heat) d += heat * Math.sin(sd * 0.19 + now * 3.1 + i * 0.9);
+      if (heat) d += heat * (0.4 + 0.6 * taut) * Math.sin(sd * HEAT_K + now * 2.2 + i * 0.9);
       if (frontOn) {
         const f = (sd - frontS) / FRONT_W;
         d += PITCH * 0.5 * Math.exp(-f * f * 1.6) * (1.6 - taut);
@@ -335,10 +336,11 @@ export default {
         const day = smoothstep(0.4, 0.6, s.daylight);
         const sk = s.sky;
         const tq = Math.round((w.live ? w.temp : 50) / 3);
-        const ck = `${sk.west}${sk.northWest}${sk.northEast}${sk.east}${Math.round(day * 60)}|${tq}`;
+        const hot = w.live ? Math.round(smoothstep(84, 100, w.feels) * 8) / 8 : 0;
+        const ck = `${sk.west}${sk.northWest}${sk.northEast}${sk.east}${Math.round(day * 60)}|${tq}|${hot}`;
         if (shown.colors !== ck) {
           shown.colors = ck;
-          const paper = mix("#f5f2e9", sk.mean, 0.15);
+          const paper = mix(mix("#f5f2e9", "#f6e2c8", hot), sk.mean, 0.15); // a heat wave yellows the paper
           const ground = mix("#050609", paper, day);
           const gl = toOklch(ground).l;
           const dark = gl < 0.56; // the ink flips while the ground is mid-grey, and is at its strongest either side
@@ -391,7 +393,7 @@ export default {
         const blow = clamp(mph / 30);
         const stir = smoothstep(1.5, 5, mph); // below a couple of mph the lines lie straight
         amp = stir * (1.5 + 6 * blow + 9 * gusty * (0.62 + 0.38 * Math.sin(s.t * 0.21))); // capped: it never thrashes
-        heat = live ? smoothstep(84, 98, w.feels) * 1.9 : 0;
+        heat = live ? smoothstep(84, 100, w.feels) * 3.2 : 0; // a fine crinkle running fast along the lines
         k1 = TAU / (340 - 120 * blow);
         k2 = k1 * 2.3;
         kg = TAU / 880;
@@ -428,7 +430,7 @@ export default {
           Bs[j] = Math.sin(pb);
           Bc[j] = Math.cos(pb);
           if (heat) {
-            const ph = sd * 0.19 + s.t * 3.1;
+            const ph = sd * HEAT_K + s.t * 2.2;
             Hs[j] = Math.sin(ph);
             Hc[j] = Math.cos(ph);
           }
@@ -531,7 +533,7 @@ export default {
               const near = nearest(halo, px, py);
               // Thick line is stiff line: the waves ease off where the figures are.
               let disp = amp * (1 - TAUT * near) * (0.6 + 0.4 * (Gs[j] * cg[i] + Gc[j] * sg[i])) * (W1s[j] * c1[i] + W1c[j] * s1[i] + 0.4 * (W2s[j] * c2[i] + W2c[j] * s2[i]));
-              if (heat) disp += heat * (Hs[j] * ch[i] + Hc[j] * sh[i]);
+              if (heat) disp += heat * (1 - 0.6 * near) * (Hs[j] * ch[i] + Hc[j] * sh[i]); // calmer in the stiff figures
               if (frontOn) disp += HUMP[j] * (0.6 + 0.6 * near);
               const qx = px + nx * disp;
               const qy = py + ny * disp;
@@ -680,7 +682,7 @@ export default {
         put("aqi", sAir.b, tx.aqi);
         put("uv", sUv.b, tx.uv);
         put("factL", factLabel, tx.factLabel);
-        put("factV", factValue, tx.factValue === "Witch Hazel" ? "Alfred Nobel Signs the Will That Establishes the Nobel Prizes in Paris, France, 1895" : tx.factValue); // QATEMP
+        put("factV", factValue, tx.factValue);
         const factShow = tx.factValue ? "" : "none";
         if (shown.factShow !== factShow) {
           shown.factShow = factShow;

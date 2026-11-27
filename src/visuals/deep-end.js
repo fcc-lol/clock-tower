@@ -659,7 +659,8 @@ export default {
         el("div", { class: "speck", style: { backgroundImage: `url(${speck})`, backgroundSize: "256px 256px", backgroundPosition: `${-x}px ${-y}px` } }));
     wrap.append(stoneBox(0, 0, W, PY0), stoneBox(0, PY1, W, H - PY1), stoneBox(0, PY0, PX0, PY1 - PY0), stoneBox(PX1, PY0, W - PX1, PY1 - PY0));
     const joint = (x, y, w, h) => el("div", { class: "j", style: { left: `${x}px`, top: `${y}px`, width: `${w}px`, height: `${h}px` } });
-    for (let k = 1; k < 5; k++) wrap.append(joint(k * 216 - 1, 0, 2, PY0 - 7), joint(k * 216 - 1, PY1 + 7, 2, H - PY1 - 7));
+    // the long end slabs run unbroken behind the lettering; only the corner blocks are jointed off
+    for (const x of [PX0 - 8, PX1 + 6]) wrap.append(joint(x, 0, 2, PY0 - 7), joint(x, PY1 + 7, 2, H - PY1 - 7));
     for (let k = 0; k <= 8; k++) {
       const y = PY0 + (k * (PY1 - PY0)) / 8 - 1;
       wrap.append(joint(0, y, PX0 - 7, 2), joint(PX1 + 7, y, W - PX1 - 7, 2));
@@ -740,7 +741,7 @@ export default {
     };
 
     // ----- snowflakes: each one falls away from the viewer toward the spot it lands on -----
-    const NF = 380;
+    const NF = 300;
     const fl = new Float32Array(NF * 6); // land x, land y, phase, fall seconds, size, sideways drift
     for (let i = 0; i < NF; i++) {
       fl[i * 6] = r.range(-20, W + 20);
@@ -751,7 +752,7 @@ export default {
       fl[i * 6 + 5] = r.range(-1, 1);
     }
     // ----- raindrops: falling away from the viewer, toward where each one lands -----
-    const NR = 150;
+    const NR = 120;
     const rd = new Float32Array(NR * 4); // land x, land y, phase, speed
     for (let i = 0; i < NR; i++) {
       rd[i * 4] = r.range(-40, W + 40);
@@ -1155,7 +1156,8 @@ export default {
         }
         if (nFl) {
           const drift = 40 + wind * 9;
-          for (let pass = -1; pass < 3; pass++) {
+          const p0 = dw > 0.15 ? -1 : 0; // flake shadows only show by day
+          for (let pass = p0; pass < 3; pass++) {
             // the shadows of the falling flakes, then far (big, soft), near, landed
             ctx.fillStyle = pass < 0 ? shown.flakeShadow : pass === 0 ? shown.flakeFar : pass === 1 ? shown.flakeNear : shown.flakeLand;
             ctx.beginPath();
@@ -1164,7 +1166,7 @@ export default {
               const fall = fl[j + 3] / (1 + wind * 0.02);
               const rest = 1.6;
               let u = fl[j + 2];
-              if (pass === -1) {
+              if (pass === p0) {
                 u += dt / (fall + rest);
                 if (u >= 1) {
                   u -= 1;
@@ -1218,7 +1220,7 @@ export default {
               const rad = 2 + u * 22;
               const x = sp[j], y = sp[j + 1] + pass * 1.5;
               ctx.moveTo(x + rad, y);
-              ctx.ellipse(x, y, rad, rad, 0, 0, TAU);
+              ctx.arc(x, y, rad, 0, TAU);
             }
             ctx.globalAlpha = 1;
             ctx.stroke();

@@ -1006,13 +1006,6 @@ export default {
     const midB = bmp(WATER + 50 - mid.top);
     const bridgeB = bmp(WATER + 40 - bridge.top);
     const nearB = bmp(PIER + 82 - NEAR_TOP);
-    // The far and mid skylines, the vellum between them and the bridge are composited into one
-    // bitmap, rebuilt only when one of their (whole-pixel) offsets or the window twinkle changes.
-    const CITY_TOP = Math.min(far.top, mid.top, bridge.top);
-    const cityB = (() => {
-      const can = offscreen(W, WATER + 50 - CITY_TOP);
-      return { can, x: can.getContext("2d"), key: "", ver: 0 };
-    })();
     const ditherPat = skyB.x.createPattern(dither, "repeat");
 
     // fade a layer into the fog toward its base (only over what is already drawn)
@@ -1231,7 +1224,6 @@ export default {
         j.have = j.want;
         j.at = t;
         j.bake();
-        cityB.ver++;
         if (!all) return true;
       }
       return false;
@@ -1362,7 +1354,6 @@ export default {
       x.fill();
     };
     const vy = new Float32Array(3), vs = new Float32Array(3); // the cloud sheets: how far down, and where
-    let cityPf = 0, cityPm = 0, cityPb = 0, cityV3 = 0, cityTw = 0, cityVer = -1, cityV3a = 0;
 
     const drawScene = (s) => {
       const w = s.weather, t = s.t, n = P.n;
@@ -1569,43 +1560,22 @@ export default {
 
       // the city, far to near; each layer's windows that are on the turn twinkle
       const lit = P.lit;
-      // the three layers move together on one whole-pixel step of the nearest, so the bitmap is rebuilt rarely
-      const pb = Math.round(swayX * 8), pm = Math.round(pb * 0.625), pf = Math.round(pb * 0.25);
-      const v3 = vellums[3];
-      const v3a = vA > 0.01 ? vA * VEL_A[3] : 0;
-      const v3off = v3a > 0 ? Math.round(-wrapX(v3.x0 - drift * v3.speed, VW)) : 0;
-      const tw = lit >= 0.01 ? Math.floor(t / 2) : 0; // windows switch on and off: a two-second clock is plenty
-      if (true) {
-        cityPf = pf; cityPm = pm; cityPb = pb; cityV3 = v3off; cityTw = tw; cityVer = cityB.ver; cityV3a = v3a;
-        const x = cityB.x;
-        x.setTransform(1, 0, 0, 1, 0, 0);
-        x.clearRect(0, 0, cityB.can.width, cityB.can.height);
-        x.setTransform(1, 0, 0, 1, 0, -CITY_TOP);
-        const tt = tw * 2 * 0.05;
-        x.drawImage(farB.can, pf - PAD, far.top);
-        twinkle(x, far.wins, pf, P.winC[0], lit, tt);
-        x.drawImage(midB.can, pm - PAD, mid.top);
-        twinkle(x, mid.wins, pm, P.winC[1], lit, tt);
-        if (v3a > 0) {
-          // a vellum sheet between the city and the bridge
-          const y = Math.round(v3.top - v3.amp - 4);
-          x.globalAlpha = v3a;
-          x.drawImage(v3.can, v3off, y);
-          x.drawImage(v3.can, v3off + VW, y);
-          if (v3.fade) {
-            x.fillStyle = v3.fade;
-            x.fillRect(0, y + v3.hb, W, XF);
-            x.fillStyle = P.vellum;
-            x.fillRect(0, y + v3.hb + XF, W, v3.bot - y - v3.hb - XF);
-          }
-          x.globalAlpha = 1;
-        }
-        x.drawImage(bridgeB.can, pb - PAD, bridge.top);
-      }
-      ctx.drawImage(farB.can, pf - PAD, far.top); ctx.drawImage(midB.can, pm - PAD, mid.top); ctx.drawImage(bridgeB.can, pb - PAD, bridge.top);
+      const tt = t * 0.05;
+      let px = Math.round(swayX * 2);
+      ctx.drawImage(farB.can, px - PAD, far.top);
+      twinkle(ctx, far.wins, px, P.winC[0], lit, tt);
+      px = Math.round(swayX * 5);
+      ctx.drawImage(midB.can, px - PAD, mid.top);
+      twinkle(ctx, mid.wins, px, P.winC[1], lit, tt);
+
+      // a vellum sheet between the city and the bridge
+      if (vA > 0.01) drawVellum(vellums[3], vA * VEL_A[3], null);
+
+      // the bridge
+      px = Math.round(swayX * 8);
+      ctx.drawImage(bridgeB.can, px - PAD, bridge.top);
 
       // the train on its rod
-      const px = pb;
       const tc = (t + 20) / 64;
       const tk = Math.floor(tc), tp = tc - tk;
       const dir = tk % 2 ? -1 : 1;

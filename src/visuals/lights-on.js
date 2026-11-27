@@ -276,11 +276,6 @@ export default {
       node.textContent = value;
       return true;
     };
-    const css = (key, node, prop, value) => {
-      if (shown[key] === value) return;
-      shown[key] = value;
-      node.style[prop] = value;
-    };
     const cssVar = (name, value) => {
       if (shown[name] === value) return;
       shown[name] = value;
@@ -636,7 +631,7 @@ export default {
       aW: 0, aD: 0, glossA: 0, sunS: 0, shTop: 0, shSide: 0, va: 0, fogA: 0, night: 0,
     };
     let lastMs = null, lastH = -1, lastM = -1, first = true;
-    let wetness = 0, snowDepth = 0, scrollX = 0, palKey1 = -1, palKey2 = -1, skyKey = "", shKey = -1e9;
+    let wetness = 0, snowDepth = 0, scrollX = 0, palKey1 = -1, palKey2 = -1, skyKey = "", skyKeyW = "", shKey = -1e9;
     let hasFact = false, frostK = 0, winDirty = true, shDx = 0, shDy = 1, wasMoving = false, palPending = false, sinceBuild = 99;
 
     function setDigits(h12, m) {
@@ -1092,13 +1087,14 @@ export default {
             palChanged = true;
           }
         }
-        if (k1 !== palKey1 || k2 !== palKey2 || skyKey !== s.sky.mean + s.sky.west) {
-          palKey1 = k1; palKey2 = k2; skyKey = s.sky.mean + s.sky.west;
+        if (k1 !== palKey1 || k2 !== palKey2 || skyKey !== s.sky.mean || skyKeyW !== s.sky.west) {
+          palKey1 = k1; palKey2 = k2; skyKey = s.sky.mean; skyKeyW = s.sky.west;
           updatePalette(s, env);
           palChanged = true;
         }
         if (palChanged) paintFronts();
-        css("flash", flashDiv, "opacity", (Math.round(flash * 0.34 * 100) / 100).toFixed(2));
+        const flashO = Math.round(flash * 34);
+        if (shown.flashO !== flashO) { shown.flashO = flashO; flashDiv.style.opacity = String(flashO / 100); }
 
 
         // ---- clouds drift at the wind's speed ----
@@ -1374,7 +1370,13 @@ export default {
           dateEl.style.letterSpacing = "";
           if (fitText(dateEl, 952) < 44) { dateEl.style.letterSpacing = "0.05em"; fitText(dateEl, 952); }
         }
-        if (put("moon", moonA, tx_.moon.split(" ")[0])) { moonB.textContent = tx_.moon.split(" ").slice(1).join(" "); fitText(moonA, 236); fitText(moonB, 236); }
+        if (shown.moon !== tx_.moon) {
+          shown.moon = tx_.moon;
+          const sp = tx_.moon.indexOf(" ");
+          moonA.textContent = sp > 0 ? tx_.moon.slice(0, sp) : tx_.moon;
+          moonB.textContent = sp > 0 ? tx_.moon.slice(sp + 1) : "";
+          fitText(moonA, 236); fitText(moonB, 236);
+        }
         put("ampm", ampmEl, tx_.ampm);
         if (put("aqi", aqiEl, tx_.aqi)) fitText(aqiEl, 104);
         if (put("uv", uvEl, tx_.uv)) fitText(uvEl, 104);

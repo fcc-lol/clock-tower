@@ -512,7 +512,7 @@ export default {
       .sm .wx { display: flex; align-items: flex-end; }
       .sm .temp { font-family: ${NUM_FAMILY}, serif; font-weight: 800; font-size: 176px; line-height: 0.74; letter-spacing: -0.03em;
         margin-right: 46px; white-space: nowrap; }
-      .sm .temp.none .tn { display: inline-block; font-family: "Cormorant Garamond", serif; font-weight: 700; transform: translateY(-0.2em); margin-right: 0.06em; }
+      .sm .temp.none .tn { display: inline-block; font-family: "Cormorant Garamond", serif; font-weight: 700; transform: translateY(-0.27em); margin-right: 0.06em; }
       .sm .lines { padding-bottom: 1px; min-width: 0; }
       .sm .cond { font-style: italic; font-size: 62px; line-height: 1; white-space: nowrap; margin-bottom: 32px; }
       .sm .moon { font-weight: 500; font-size: 48px; line-height: 0.86; white-space: nowrap; letter-spacing: 0.01em; }
