@@ -13,7 +13,9 @@
 //   ...&manual=1      no animation loop: step it with window.__viz.advance(seconds)
 //
 // Parameters the display adds: embed=1 (data comes from the parent page by
-// postMessage), key, slot, scale (real pixels per stage unit), onDevice.
+// postMessage), key, slot, scale (real pixels per stage unit), onDevice, host
+// (the display's address, when this page is loaded under the machine's other
+// name), atWall (with a simulated clock: when the display's clock read `at`).
 
 import { __kit, W, H, hash } from "./lib/kit.js";
 import { loadVisual } from "./lib/registry.js";
@@ -32,8 +34,19 @@ const stage = document.getElementById("stage");
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const viz = (window.__viz = { id, ready: false, error: null, errors: [], state: null, title: "", quality: 1, mountMs: 0, target: 30 });
+
+// The page this one is embedded in. On the kiosk that is this same machine
+// under another of its names (see App.jsx), given as ?host=; nothing else is believed.
+const HOST = (() => {
+  const loopback = (h) => /^(localhost|127(\.\d{1,3}){3})$/.test(h);
+  try {
+    const u = new URL(params.get("host") || "");
+    if (loopback(u.hostname) && loopback(location.hostname) && u.port === location.port && u.protocol === location.protocol) return u.origin;
+  } catch {}
+  return location.origin;
+})();
 const tell = (type, extra = {}) => {
-  if (embed) window.parent.postMessage({ type: `ct:${type}`, key, id, ...extra }, location.origin);
+  if (embed) window.parent.postMessage({ type: `ct:${type}`, key, id, ...extra }, HOST);
 };
 
 if (params.get("onDevice") === "true") document.documentElement.style.cursor = "none";
@@ -67,18 +80,35 @@ const rate = params.has("rate") ? Number(params.get("rate")) || 0 : 1;
 const sim = resolveSim(params) ?? (rate !== 1 ? { wx: "partly", ms: null, overrides: {}, name: null } : null);
 const simulatedClock = (sim && sim.ms != null) || rate !== 1;
 const simulatedData = Boolean(sim && sim.wx !== "live");
+// Under a simulated clock the display's clock is the one that counts: this page
+// is told what it read and when, and follows it, so a piece agrees with the
+// display however long it took to load. (Stepped by hand, time moves only when stepped.)
+const atWall = Number(params.get("atWall")) || 0;
+const hostClock = embed && !manual && atWall && sim?.ms != null ? () => sim.ms + (Date.now() - atWall) * rate : null;
 let data = emptyData();
 let simAt = null;
 let hub = null;
 let gotData = () => {};
 const firstData = new Promise((r) => (gotData = r));
 
+// On the display, a piece judges its own frame rate only while it is the one on
+// screen with the machine to itself: not while it warms up behind another
+// piece, nor in its last seconds while the next one warms up behind it.
+let judging = !embed;
+let judgeFrom = 0;
+
 window.addEventListener("message", (e) => {
-  if (e.origin !== location.origin || !e.data || typeof e.data.type !== "string") return;
-  if (e.data.type === "ct:data" && !simulatedData) {
+  if (e.origin !== HOST || !e.data || typeof e.data.type !== "string") return;
+  const type = e.data.type;
+  if (type === "ct:data" && !simulatedData) {
     data = e.data.data || data;
     gotData();
-  } else if (e.data.type === "ct:scale" && e.data.scale > 0) configure({ screenScale: e.data.scale });
+  } else if (type === "ct:scale" && e.data.scale > 0) configure({ screenScale: e.data.scale });
+  else if (type === "ct:ping") tell("pong"); // still here (a page that has hung cannot answer)
+  else if (type === "ct:shown") {
+    judging = true;
+    judgeFrom = performance.now();
+  } else if (type === "ct:leaving") judging = false;
 });
 
 // ---------------------------------------------------------------------------
@@ -107,7 +137,7 @@ function fail(err) {
 
 function step(dt) {
   t += dt;
-  const ms = simulatedClock ? base + (t - warmed) * 1000 * rate : Date.now();
+  const ms = !simulatedClock ? Date.now() : hostClock ? hostClock() : base + (t - warmed) * 1000 * rate;
   if (simulatedData && (simAt == null || Math.abs(ms - simAt) > 10 * 60 * 1000)) {
     data = simulate({ wx: sim.wx, ms, overrides: sim.overrides });
     simAt = ms;
@@ -188,7 +218,7 @@ function run(fps) {
   let windowFrames = 0;
   let windowClean = true;
   let slowWindows = 0;
-  const started = last;
+  if (judging) judgeFrom = last;
   looping = true;
   const loop = (ts) => {
     raf = requestAnimationFrame(loop);
@@ -207,7 +237,8 @@ function run(fps) {
     if (ts - windowStart >= 2000) {
       fpsNow = (windowFrames * 1000) / (ts - windowStart);
       const statsClean = windowClean; // false if the window included a pause that was not about drawing
-      if (windowClean && ts - started > 6000 && fpsNow < fps * 0.7) slowWindows++;
+      // Only while this piece is the one on screen, and once it has had 6 s to settle.
+      if (windowClean && judging && ts - judgeFrom > 6000 && fpsNow < fps * 0.7) slowWindows++;
       else slowWindows = 0;
       if (slowWindows >= 2 && __kit.quality > 0.5) {
         const q = __kit.quality * 0.8;
@@ -218,7 +249,7 @@ function run(fps) {
       windowFrames = 0;
       windowClean = true;
       if (hudNode) hudNode.textContent = hudText();
-      tell("stats", { fps: +fpsNow.toFixed(1), target: fps, clean: statsClean, quality: __kit.quality, avgMs: viz.stats().avgMs });
+      tell("stats", { fps: +fpsNow.toFixed(1), target: fps, clean: statsClean && judging, quality: __kit.quality, avgMs: viz.stats().avgMs });
     }
   };
   raf = requestAnimationFrame(loop);
@@ -231,6 +262,10 @@ const hudText = () => {
 };
 
 async function main() {
+  // To the display, this is the first sign of life. It answers with the
+  // screen's scale and the latest data, and from here on asks now and then
+  // whether this page is still there.
+  tell("hello");
   mod = await loadVisual(id);
   viz.title = mod.title || id;
   document.title = `${viz.title} · Clock Tower`;
@@ -239,7 +274,6 @@ async function main() {
   if (simulatedData) {
     // nothing to wait for
   } else if (embed) {
-    tell("hello");
     await Promise.race([firstData, wait(1500)]);
   } else {
     hub = createHub({ onChange: (d) => { data = d; gotData(); } });
@@ -249,7 +283,7 @@ async function main() {
   }
   await fontsReady;
 
-  base = sim?.ms ?? Date.now();
+  base = hostClock ? hostClock() : (sim?.ms ?? Date.now());
   const slot = params.has("slot") ? Number(params.get("slot")) : slotOf(base);
   const seed = params.has("seed") ? Number(params.get("seed")) || 1 : 1 + Math.floor(hash(slot, [...id].reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) | 0, 7)) * 1e9);
   st = createState({ slot, seed });

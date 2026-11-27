@@ -5,11 +5,28 @@
 import { SCENARIOS, PRESETS } from "./lib/simulate.js";
 import { createHub } from "./lib/data.js";
 
-// Titles and descriptions come from the modules themselves.
-const modules = import.meta.glob(["./visuals/*.js", "!./visuals/_*.js"], { eager: true });
-const pieces = Object.entries(modules)
-  .map(([path, m]) => ({ id: path.slice(path.lastIndexOf("/") + 1, -3), title: m.default?.title, description: m.default?.description }))
+// Titles and descriptions come from the modules themselves. Each is loaded on
+// its own, so one that cannot be loaded costs only its own caption.
+const loaders = import.meta.glob(["./visuals/*.js", "!./visuals/_*.js"]);
+const pieces = Object.keys(loaders)
+  .map((path) => ({ id: path.slice(path.lastIndexOf("/") + 1, -3), path, title: null, description: null, caption: null }))
   .sort((a, b) => a.id.localeCompare(b.id));
+const caption = (p) => {
+  if (!p.caption) return;
+  p.caption.title.textContent = p.title || p.id;
+  p.caption.description.textContent = p.description || "";
+};
+for (const p of pieces) {
+  loaders[p.path]()
+    .then((m) => {
+      p.title = m.default?.title;
+      p.description = m.default?.description;
+    })
+    .catch((err) => {
+      p.description = `Could not be loaded: ${String(err?.message || err).slice(0, 120)}`;
+    })
+    .then(() => caption(p));
+}
 
 const $ = (id) => document.getElementById(id);
 const grid = $("grid");
@@ -121,7 +138,9 @@ function render() {
     tile.className = "tile";
     const shot = Object.assign(document.createElement("a"), { className: "shot", href: `/?${open}` });
     shot.dataset.id = p.id;
-    tile.append(shot, Object.assign(document.createElement("h2"), { textContent: p.title || p.id }), Object.assign(document.createElement("p"), { textContent: p.description || "" }));
+    p.caption = { title: document.createElement("h2"), description: document.createElement("p") };
+    caption(p);
+    tile.append(shot, p.caption.title, p.caption.description);
     grid.append(tile);
     observer.observe(shot);
   }

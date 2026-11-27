@@ -45,9 +45,11 @@ export function pieceFor(slot, ids) {
 
 // The id to show for a slot when some pieces are known to be broken on this
 // machine (`skip`, a Set) or must not be repeated (`not`): the scheduled one if
-// it is usable, otherwise the next usable one in the rotation.
+// it is usable, otherwise the next usable one in the rotation. It looks ahead
+// 2n - 1 slots, which always holds one whole round, so every id is considered
+// (n slots can straddle two rounds and miss some).
 export function pieceForSkipping(slot, ids, skip = new Set(), not = null) {
-  for (let k = 0; k < ids.length; k++) {
+  for (let k = 0; k < 2 * ids.length - 1; k++) {
     const id = pieceFor(slot + k, ids);
     if (!skip.has(id) && id !== not) return id;
   }

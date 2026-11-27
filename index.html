@@ -6,8 +6,9 @@
     <title>Clock Tower</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <!-- Only the plain fallback clock is set by this page; each visualization loads its own type. -->
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&amp;display=swap" rel="stylesheet" />
+    <!-- Only the plain fallback clock is set by this page; each visualization loads its own type.
+         Loaded without blocking: if the network is not answering, the page must still start. -->
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&amp;display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
   </head>
   <body>
     <div id="root"></div>
