@@ -49,7 +49,7 @@ import { W, H, TAU, clamp, lerp, smoothstep, approach, rng, hash, createNoise, o
 const FONT = '"Fraunces", Georgia, serif';
 const WALL = 50; // width of each brick sliver
 const GRAV = 900; // px/s^2: a little slower than life, so it is calm to live with
-const LINE_Y = [64, 674, 1320, 1644];
+const LINE_Y = [64, 674, 1300, 1630];
 const SHEET_H = 550;
 const PERSP = 4200;
 const HORIZON = 860;
@@ -489,8 +489,8 @@ export default {
       x.fillRect(0, h - 18, w, 6);
       x.fillRect(0, h - 24, w, 2);
       // two pairs, each a label over its number, with a row of stitches between them
-      const ys = stack(x, w, [["Air quality", 500, 26, 24, 0], [aqi, 900, 54, 36, 18], ["UV index", 500, 26, 24, 50], [uv, 900, 54, 36, 18]], 24, h - 24, w - 30);
-      const mid = (ys[1] + ys[2]) / 2;
+      const ys = stack(x, w, [["Air quality", 500, 26, 24, 0], [aqi, 900, 52, 36, 18], ["UV index", 500, 26, 24, 46], [uv, 900, 52, 36, 18]], 24, h - 24, w - 30);
+      const mid = (ys[2] + ys[3]) / 2;
       x.save();
       x.globalAlpha = 0.6;
       x.setLineDash([6, 5]);
@@ -508,15 +508,11 @@ export default {
       x.fillRect(0, 25, w, 2.5);
       x.fillRect(0, h - 20, w, 6);
       x.fillRect(0, h - 27.5, w, 2.5);
-      x.font = font(500, 28);
-      x.fillText("Moon", w / 2, 64);
       const words = name.split(" ");
       const rowsOf = words.length > 1 ? [words.slice(0, -1).join(" "), words[words.length - 1]] : [name];
-      let size = 46;
-      for (const t of rowsOf) size = Math.min(size, fit(x, t, 900, 46, w - 36, false, 36));
-      x.font = font(900, size);
-      const lh = Math.round(size * 1.16);
-      rowsOf.forEach((t, k) => x.fillText(t, w / 2, (rowsOf.length > 1 ? 114 : 136) + k * lh));
+      let size = 44;
+      for (const t of rowsOf) size = Math.min(size, fit(x, t, 900, 44, w - 36, false, 36));
+      stack(x, w, [["Moon", 500, 28, 24, 0], ...rowsOf.map((t, k) => [t, 900, size, size, k ? 42 : 18])], 27.5, h - 27.5, w - 36);
     }
     function printFact(c, label, value) {
       const x = begin(c);
@@ -536,18 +532,8 @@ export default {
         if (rowsOf.length <= 2 || size <= 36) break;
         size -= 2;
       }
-      const lh = Math.round(size * 1.24);
-      // label cap-height, a gap, then the lines
-      const blockH = 20 + 16 + rowsOf.length * lh - (lh - size * 0.72);
-      let y = (h - blockH) / 2 + 20;
-      x.font = font(500, 27);
-      x.fillText(label, w / 2, y);
-      x.font = font(600, size);
-      y += 16 + size * 0.72;
-      for (const t of rowsOf) {
-        x.fillText(t, w / 2, y);
-        y += lh;
-      }
+      // the label, then the lines, spaced by their real ink: clear air between every line
+      stack(x, w, [[label, 500, 27, 24, 0], ...rowsOf.map((t, k) => [t, 600, size, size, k ? 42 : 20])], 18, h - 18, w - 60);
     }
 
     function print(c) {
