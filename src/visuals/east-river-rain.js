@@ -704,8 +704,12 @@ export default {
     const mmLen = new Map();
     const fitTall = (node, maxH) => {
       node.style.fontSize = "48px";
+      node.style.letterSpacing = "";
       const h = node.offsetHeight;
-      if (h > maxH) node.style.fontSize = `${Math.max(44, Math.floor((48 * (maxH - 2 * TZ_PAD)) / (h - 2 * TZ_PAD)))}px`;
+      if (h <= maxH) return;
+      node.style.fontSize = `${Math.max(44, Math.floor((48 * (maxH - 2 * TZ_PAD)) / (h - 2 * TZ_PAD)))}px`;
+      // the longest dates ("Wednesday, September 30") still overrun at the smallest size: close the letters up
+      if (node.offsetHeight > maxH) node.style.letterSpacing = "0.015em";
     };
 
     // Eased weather factors (they snap when the clock jumps).

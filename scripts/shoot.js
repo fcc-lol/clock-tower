@@ -200,6 +200,8 @@ async function open(query, extra = "") {
 }
 
 const settle = (page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+// The rate a piece can actually reach on a 60 Hz screen: frames land on whole refreshes, so 24 fps runs at 20.
+const paced = (fps) => Math.min(fps, 60 / Math.ceil(60 / fps - 1e-6));
 
 for (const shot of shots) {
   const { context, page, logs, url, status } = await open(shot.query, `&manual=1&warm=${warm}${rate ? `&rate=${rate}` : ""}`);
@@ -294,7 +296,7 @@ for (const shot of shots) {
     if (rt) {
       const gl = (st?.surfaces || []).some((x) => x.startsWith("gl"));
       if (rt.stalled) shot.warnings.push("the real-time run never finished: the piece is far too heavy, or stuck");
-      else if (rt.fps < rt.target * 0.85) {
+      else if (rt.fps < paced(rt.target) * 0.85) {
         if (gl) shot.notes = [`held ${rt.fps} of ${rt.target} fps in real time here; this test browser draws WebGL in software, which is slow for shaders, so judge the shader by how cheap it is, not by this number`];
         else shot.warnings.push(`held only ${rt.fps} of ${rt.target} fps in real time: the work outside frame() (layout, paint, canvas fill) is too heavy`);
       }
@@ -347,7 +349,7 @@ if (perf > 0) {
     const after = await heap();
     const stats = await page.evaluate(() => window.__viz.stats());
     report.perf = { scenario: shots[0].name, seconds: perf, ...stats, heapKbBefore: before, heapKbAfter: after, heapGrowthKb: after - before, logs, warnings: [] };
-    if (stats.fps < (stats.target || 30) * 0.85) report.perf.warnings.push(`ran at ${stats.fps} fps, not ${stats.target || 30}`);
+    if (stats.fps < paced(stats.target || 30) * 0.85) report.perf.warnings.push(`ran at ${stats.fps} fps, not ${stats.target || 30}`);
     if (stats.quality < 1) report.perf.warnings.push(`the runner cut canvas resolution to ${stats.quality} to keep up`);
     if (after - before > 4000) report.perf.warnings.push(`memory grew by ${after - before} KB in ${perf} s: something is piling up`);
   } else {
