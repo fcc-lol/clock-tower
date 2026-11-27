@@ -38,7 +38,7 @@
 import { W, H, TAU, clamp, lerp, smoothstep, remap, approach, rng, mix, adjust, toOklch, el, svg, addStyle } from "../lib/kit.js";
 
 // The print inside its paper margin, and the far waterline.
-const X0 = 44, Y0 = 44, X1 = 1036, Y1 = 1744;
+const X0 = 44, Y0 = 44, X1 = 1036, Y1 = 1724;
 const PW = X1 - X0, PH = Y1 - Y0;
 const HY = 1172;
 const LX = 92, RX = 988; // inner edges that type keeps to
@@ -182,18 +182,27 @@ function buildBridge() {
 }
 
 // ---------------------------------------------------------------------------
-// The Long Island gantry, cropped hard at the right edge of the print.
+// The Long Island gantry, its legs cropped hard at the right edge of the
+// print. The sign plate is cantilevered out over the water, as wide as the
+// words on it (PL, its left edge, comes from the measured lettering), so the
+// whole of LONG ISLAND is printed inside the picture.
 // ---------------------------------------------------------------------------
-function buildGantry() {
+function buildGantry(PL) {
   let g = "", caps = "";
   const P0 = 1124, P1 = 1210, T1 = 1284; // sign plate, then the truss under it
-  const xs = [766, 862, 958, 1054];
-  g += rect(752, P0, 320, P1 - P0) + rect(752, P1, 320, 12) + rect(752, T1 - 12, 320, 12);
-  caps += rect(750, P0 - 5, 300, 6);
+  const R = 1072, span = R - PL;
+  g += rect(PL, P0, span, P1 - P0) + rect(PL, P1, span, 12) + rect(PL, T1 - 12, span, 12);
+  caps += rect(PL - 2, P0 - 5, X1 - PL + 4, 6);
+  // the truss under the plate: a panel point every 96 px from the right, and one at the very end
+  const xs = [];
+  for (let x = 1054; x > PL + 40; x -= 96) xs.unshift(x);
+  xs.unshift(PL + 6);
   for (let i = 0; i < xs.length; i++) {
     g += rect(xs[i] - 5, P1, 10, T1 - P1);
     if (i) g += seg(xs[i - 1], P1 + 8, xs[i], T1 - 8, 6) + seg(xs[i - 1], T1 - 8, xs[i], P1 + 8, 6);
   }
+  // the overhang is carried by a raking strut from the near leg
+  g += seg(PL + 70, T1 - 4, 800, T1 + 168, 7);
   // machine house on top
   g += rect(886, 1084, 84, 42) + `M878 1086L928 1062L978 1086Z` + rect(940, 1052, 7, 22);
   caps += `M878 1084L928 1060L978 1084L972 1087L928 1066L884 1087Z`;
@@ -209,13 +218,14 @@ function buildGantry() {
   g += rect(856, 1470, 130, 12);
   caps += rect(858, 1465, 126, 6);
   g += seg(858, T1 + 2, 984, 1470, 4.4) + seg(984, T1 + 2, 858, 1470, 4.4);
-  for (const hx of [884, 921, 958]) g += rect(hx - 1.6, 1482, 3.2, 100);
-  g += rect(866, 1582, 110, 20) + rect(872, 1602, 10, 16) + rect(960, 1602, 10, 16);
-  caps += rect(868, 1577, 106, 6);
-  // the pier it stands on
-  g += rect(744, 1694, 320, 60) + rect(770, 1672, 16, 24) + rect(766, 1668, 24, 7) + rect(904, 1672, 16, 24) + rect(900, 1668, 24, 7);
-  caps += rect(746, 1689, 50, 6) + rect(858, 1689, 126, 6);
-  return { g, caps, signY: P1 - 20 };
+  for (const hx of [884, 921, 958]) g += rect(hx - 1.6, 1482, 3.2, 90);
+  g += rect(866, 1572, 110, 20) + rect(872, 1592, 10, 14) + rect(960, 1592, 10, 14);
+  caps += rect(868, 1567, 106, 6);
+  // the pier it stands on: its own path, so the leg bracing behind it cannot
+  // cancel holes into it under the nonzero rule
+  const pier = rect(744, Y1 - 44, 320, 60) + rect(770, Y1 - 66, 16, 24) + rect(766, Y1 - 70, 24, 7) + rect(904, Y1 - 66, 16, 24) + rect(900, Y1 - 70, 24, 7);
+  caps += rect(746, Y1 - 49, 50, 6) + rect(858, Y1 - 49, 126, 6);
+  return { g, pier, caps };
 }
 
 // Brush-like water lines for one strip of river, drawn twice so the strip can
@@ -259,13 +269,13 @@ export default {
       .er .tz::after, .er .seal::after { content: ""; position: absolute; inset: 7px; border: 1.5px solid var(--cream); opacity: 0.5; }
       .er .seal { position: absolute; top: 572px; width: 94px; height: 94px; background: var(--beni); color: var(--cream);
         font: 400 44px/94px "Abril Fatface", Georgia, serif; text-align: center; letter-spacing: 0.02em; }
-      .er .fact { position: absolute; left: ${LX}px; bottom: ${H - 1700}px; width: fit-content; min-width: 360px; max-width: 640px; box-sizing: border-box; padding: 20px 34px 26px 30px; background: var(--paper); color: var(--ink); border: 2px solid var(--ink); }
+      .er .fact { position: absolute; left: ${LX}px; bottom: ${H - 1680}px; width: fit-content; min-width: 360px; max-width: 640px; box-sizing: border-box; padding: 20px 34px 26px 30px; background: var(--paper); color: var(--ink); border: 2px solid var(--ink); }
       .er .fact::after { content: ""; position: absolute; inset: 6px; border: 1px solid var(--ink); opacity: 0.45; }
       .er .fact .lab { font-size: 28px; letter-spacing: 0.08em; color: var(--beniText); }
       .er .fact .val { font-size: 40px; line-height: 1.2; margin-top: 4px; }
-      .er .colo { position: absolute; left: ${LX}px; width: ${RX - LX}px; top: 1764px; display: flex; justify-content: space-between; align-items: flex-start; white-space: nowrap; }
-      .er .colo .lab { font-size: 27px; letter-spacing: 0.07em; color: var(--beniText); line-height: 32px; }
-      .er .colo .val { font-size: 42px; line-height: 52px; margin-top: 0; }
+      .er .colo { position: absolute; left: ${LX}px; width: ${RX - LX}px; top: 1756px; display: flex; justify-content: space-between; align-items: flex-start; white-space: nowrap; }
+      .er .colo .lab { font-size: 30px; letter-spacing: 0.07em; color: var(--beniText); line-height: 36px; }
+      .er .colo .val { font-size: 50px; line-height: 56px; margin-top: 2px; }
       .er .edge { position: absolute; left: ${X0}px; top: ${Y0}px; width: ${PW}px; height: ${PH}px; box-sizing: border-box; border: 2px solid var(--edge); pointer-events: none; }
     `);
 
@@ -414,7 +424,7 @@ export default {
       Object.assign(node.style, { position: "absolute", left: `${X0}px`, top: `${st.y0}px` });
       const lightLines = svg("path", { d: waterPath(r, st.n, st.y0, st.y1, st.l[0], st.l[1], st.th), style: "fill: var(--waterLight)" });
       const darkLines = svg("path", { d: waterPath(r, Math.round(st.n * 0.7), st.y0, st.y1, st.l[0], st.l[1], st.th), style: "fill: var(--waterDark)" });
-      const chop = svg("path", { d: waterPath(r, st.n * 2, st.y0, st.y1, st.l[0] * 0.5, st.l[1] * 0.45, st.th * 0.9), style: "fill: var(--waterLight)", opacity: 0 });
+      const chop = svg("path", { d: waterPath(r, st.n * 2, st.y0, st.y1, st.l[0] * 0.5, st.l[1] * 0.45, st.th * 0.9), style: "fill: var(--chop)", opacity: 0 });
       node.append(darkLines, lightLines, chop);
       inner.append(node);
       return { node, chop, k: st.k, off: r.range(0, PW) };
@@ -456,14 +466,26 @@ export default {
     addMist(mistLow, 1240, 1000, 26, 0.95, 0.9, 0.8);
 
     // ----- gantry -----
-    const ga = buildGantry();
-    const gantry = svgBox(inner, 740, 1040, X1 - 740, Y1 - 1040);
+    // The lettering is set first and measured (the fonts are loaded before
+    // mount), then the plate is cut to fit it with a margin either side.
+    const GX = 360;
+    const gantry = svgBox(inner, GX, 1040, X1 - GX, Y1 - 1040);
+    const SIGN_END = X1 - 24;
+    const signText = svg("text", { x: SIGN_END, y: 1188, "font-size": 60, "letter-spacing": 4, "text-anchor": "end", style: 'font-family: "Abril Fatface", Georgia, serif; fill: var(--sign)', text: "LONG ISLAND" });
+    gantry.append(signText);
+    let signLen = 0;
+    try { signLen = signText.getComputedTextLength(); } catch (e) { signLen = 0; }
+    if (!(signLen > 300 && signLen < 560)) {
+      // an unexpected measure (fallback face): pin the words to a known width
+      signLen = 450;
+      signText.setAttribute("textLength", signLen);
+      signText.setAttribute("lengthAdjust", "spacingAndGlyphs");
+    }
+    const ga = buildGantry(Math.round(SIGN_END - signLen - 26));
     const gaCaps = svg("path", { d: ga.caps, style: "fill: var(--cap)", opacity: 0 });
-    gantry.append(
-      svg("path", { d: ga.g, style: "fill: var(--gantry)" }),
-      svg("text", { x: 772, y: ga.signY, "font-size": 66, "letter-spacing": 3, style: 'font-family: "Abril Fatface", Georgia, serif; fill: var(--sign)', text: "LONG ISLAND" }),
-      gaCaps,
-    );
+    gantry.insertBefore(svg("path", { d: ga.g, style: "fill: var(--gantry)" }), signText);
+    gantry.insertBefore(svg("path", { d: ga.pier, style: "fill: var(--gantry)" }), signText);
+    gantry.append(gaCaps);
 
     // ----- rain and snow -----
     // Each is a periodic texture: an SVG pattern of ruled lines or dots, one
@@ -505,7 +527,7 @@ export default {
     // Rain: lines at random places in a tile; each is drawn with every wrapped
     // copy that touches the tile. Shorter than the tile is tall, so a line
     // never joins its own copy into a stripe.
-    const RN = 180;
+    const RN = 250;
     const rX = new Float32Array(RN), rY = new Float32Array(RN), rL = new Float32Array(RN);
     for (let i = 0; i < RN; i++) {
       rX[i] = r();
@@ -590,8 +612,8 @@ export default {
     };
     const cSun = coloItem("");
     const cMoon = coloItem("Moon");
-    const cAir = coloItem("Air quality");
-    const cUv = coloItem("UV index");
+    const cAir = coloItem("AQI");
+    const cUv = coloItem("UV");
     wrap.append(colo);
 
     // ----- paper: fibres, wood grain and grain, as repeating tiles painted
@@ -704,7 +726,10 @@ export default {
       flatDay = mix(flatDay, adjust(flatDay, { l: (v) => Math.min(v, 0.63), c: (v) => v * 0.7 }), f.snow);
       const flatNight = mix(adjust(up, { l: (v) => Math.min(v, 0.26) }), "#0a1026", 0.55);
       let flat = mix(flatNight, flatDay, dd);
-      flat = adjust(flat, { l: (v) => v * (1 - 0.22 * f.storm) });
+      flat = adjust(flat, { l: (v) => v * (1 - 0.36 * f.storm * dd) });
+      // a storm at night: the low cloud catches the city's light, a slate violet
+      // under the black head of the storm
+      flat = mix(flat, "#2a293d", 0.4 * f.storm * (1 - dd));
       // fog: a luminous, colourless grey that brightens with the day
       flat = mix(flat, mix("#2b2d33", "#cfcdc3", smoothstep(0.05, 0.8, d)), 0.5 * f.fog);
       let glowDay = adjust(mix(s.sky.west, PAPER_D, 0.74 - 0.56 * sunLow), { c: (v) => v * (1 + 0.7 * sunLow) });
@@ -712,18 +737,23 @@ export default {
       glowDay = mix(glowDay, "#dcae56", 0.6 * f.heat);
       const glowNight = mix(adjust(s.sky.west, { l: (v) => Math.min(v, 0.3) }), "#1d2b55", 0.55);
       let glow = mix(glowNight, glowDay, dd);
-      glow = mix(glow, flat, 0.75 * f.fog);
+      glow = mix(glow, flat, 0.92 * f.fog);
       let topDay = mix("#0f2f66", "#3a3e46", cl);
       topDay = mix(topDay, "#5f7894", 0.55 * f.heat);
       topDay = adjust(topDay, { l: (v) => v * (1 - 0.5 * f.storm - 0.12 * wetI) });
-      const top = mix("#020308", topDay, smoothstep(0.02, 0.7, d));
+      let top = mix("#020308", topDay, smoothstep(0.02, 0.7, d));
+      top = mix(top, "#030305", 0.6 * f.storm);
       const flatL = toOklch(flat).l;
       const onLight = flatL > 0.553; // the ground is light: print in sumi; else leave the type as bare paper
       // the horizon band climbs higher in heat haze
       // and in the low sun, as a broad warm bokashi rather than a thin line
       const warm = sunLow * dd * (1 - 0.7 * cl);
       const g0 = 71 - 30 * f.heat - 18 * warm, g1 = 80 - 24 * f.heat - 13 * warm, g2 = 91 - 12 * f.heat - 6 * warm;
-      sky.style.backgroundImage = `var(--tex), linear-gradient(to bottom, ${top} 0%, ${mix(top, flat, 0.4)} 5%, ${mix(top, flat, 0.82)} 10%, ${flat} 14%, ${flat} ${g0}%, ${mix(flat, glow, 0.35)} ${g1}%, ${mix(flat, glow, 0.8)} ${g2}%, ${glow} 100%)`;
+      // a storm hangs its black head far down the sky; fog has no top strip at
+      // all, one even veil from the top of the print to the water
+      const hk = 1 + 1.9 * f.storm;
+      const topF = mix(top, flat, 0.9 * f.fog);
+      sky.style.backgroundImage = `var(--tex), linear-gradient(to bottom, ${topF} 0%, ${mix(topF, flat, 0.4)} ${f1(5 * hk)}%, ${mix(topF, flat, 0.82)} ${f1(10 * hk)}%, ${flat} ${f1(14 * hk)}%, ${flat} ${g0}%, ${mix(flat, glow, 0.35)} ${g1}%, ${mix(flat, glow, 0.8)} ${g2}%, ${glow} 100%)`;
 
       // The paper margin: cream by day, indigo-dyed (aizome) paper through the
       // half-light and the evening, near-black at night. The passage from
@@ -765,6 +795,8 @@ export default {
       river.style.backgroundImage = `var(--tex), linear-gradient(to bottom, ${mix(mix(riv, glow, 0.5), flat, 0.9 * f.fog)} 0%, ${mix(mix(riv, glow, 0.12), flat, 0.7 * f.fog)} 16%, ${mix(riv, flat, 0.3 * f.fog)} 34%, ${riv} 62%, ${adjust(riv, { l: (v) => v * 0.6 })} 100%)`;
       setVar("--waterLight", mix(mix(riv, "#93a6cf", 0.32), mix(riv, "#f6efdc", 0.8), dd));
       setVar("--waterDark", adjust(riv, { l: (v) => v * 0.6 }));
+      // whitecaps: the storm churns the river into pale broken chop
+      setVar("--chop", mix(mix(mix(riv, "#93a6cf", 0.32), mix(riv, "#f6efdc", 0.8), dd), mix("#a9b2c6", "#f7f1e2", dd), 0.75 * f.storm));
 
       // skyline, bridge, gantry
       let near = mix("#04050c", mix("#3f5879", "#565f6a", cl * 0.7), dd);
@@ -775,12 +807,13 @@ export default {
       far = mix(far, flat, f.fog);
       setVar("--near", near);
       setVar("--far", far);
-      setVar("--bridge", mix(mix("#020309", "#252a40", dd), flat, 0.72 * f.fog));
-      setVar("--pier", mix(mix("#0c0e17", mix("#b8a37b", "#8e8c85", cl * 0.6), dd), flat, 0.5 * f.fog));
-      setVar("--island", mix(mix("#03040a", "#2f4a45", dd), flat, 0.6 * f.fog));
-      setVar("--gantry", mix("#010103", "#17120f", dd));
+      // fog greys out even the near steel: only a ghost of the bridge is left
+      setVar("--bridge", mix(mix("#020309", "#252a40", dd), flat, 0.9 * f.fog));
+      setVar("--pier", mix(mix("#0c0e17", mix("#b8a37b", "#8e8c85", cl * 0.6), dd), flat, 0.88 * f.fog));
+      setVar("--island", mix(mix("#03040a", "#2f4a45", dd), flat, 0.92 * f.fog));
+      setVar("--gantry", mix(mix("#010103", "#17120f", dd), flat, 0.42 * f.fog));
       // the sign's letters are lit at night: the one warm red in the dark
-      setVar("--sign", mix(mix("#c9402c", "#c2382a", dd), flat, 0.35 * f.fog));
+      setVar("--sign", mix(mix("#c9402c", "#c2382a", dd), flat, 0.4 * f.fog));
       setVar("--hull", mix("#020308", "#1c1a1c", dd));
       setVar("--window", "#e8b656");
       setVar("--lamp", "#f1d68c");
@@ -828,7 +861,12 @@ export default {
       const sunGlint = dd * (1 - cl) * (1 - f.wet) * (1 - f.snow);
       setVar("--glint", lampOn > sunGlint ? "#e8b656" : "#fbf5e4");
       setOpacity("glint", glint, Math.max(lampOn * 0.75, sunGlint * 0.9) * (1 - f.fog));
-      const bargeO = String(Math.round((1 - 0.6 * f.fog) * 20) / 20);
+      const bargeO = String(Math.round((1 - 0.8 * f.fog) * 20) / 20);
+      // the far water lines go first in fog, the near ones last
+      for (let i = 0; i < strips.length; i++) {
+        const so = String(Math.round((1 - f.fog * (0.95 - 0.65 * strips[i].k)) * 20) / 20);
+        if (strips[i].node.style.opacity !== so) strips[i].node.style.opacity = so;
+      }
       if (barge.style.opacity !== bargeO) barge.style.opacity = bargeO;
       const capOn = f.snow;
       setOpacity("capS", slCaps, capOn);
@@ -875,10 +913,29 @@ export default {
           // a narrow label by preference; a long fact widens it (over the
           // gantry if need be) so it always sets in two lines at most
           fact.style.maxWidth = "640px";
+          fact.style.width = "";
+          fact.style.minWidth = "";
           factVal.style.fontSize = "40px";
           if (tx.factValue && factVal.offsetHeight > 100) {
             fact.style.maxWidth = `${RX - LX}px`;
             if (factVal.offsetHeight > 100) factVal.style.fontSize = "36px";
+          }
+          // Balance a two-line fact: narrow the label until one more step
+          // would make a third line, so the lines come out of similar length
+          // and no word is left alone on the second. Measured on change only.
+          if (tx.factValue) {
+            const h2 = factVal.offsetHeight;
+            const lh = parseFloat(factVal.style.fontSize) * 1.2;
+            if (h2 > lh * 1.5) {
+              let wpx = fact.offsetWidth;
+              fact.style.minWidth = "0";
+              while (wpx > 300) {
+                fact.style.width = `${wpx - 12}px`;
+                if (factVal.offsetHeight > h2) break;
+                wpx -= 12;
+              }
+              fact.style.width = `${wpx}px`;
+            }
           }
         }
 
@@ -887,7 +944,8 @@ export default {
         const tWet = falling && falling !== "snow" ? 1 : 0;
         const tSnow = falling === "snow" ? 1 : 0;
         const tStorm = falling === "storm" || w.kind === "storm" ? 1 : 0;
-        const tFog = w.fog ? 1 : remap(w.visibility, 2.5, 0.2, 0, 0.85);
+        // (in rain the ruled lines are the murk: only true fog veils the view)
+        const tFog = w.fog ? 1 : remap(w.visibility, 2.5, 0.2, 0, 0.85) * (falling ? 0.3 : 1);
         const tHeat = smoothstep(88, 98, w.temp);
         if (jump) {
           f.wet = tWet; f.snow = tSnow; f.storm = tStorm; f.fog = tFog; f.heat = tHeat;
@@ -949,7 +1007,7 @@ export default {
 
         // ----- water: the tide's current, and the wind's chop -----
         const flow = (s.tide.rising ? 1 : -1) * (0.25 + 0.75 * Math.sin(Math.PI * clamp(s.tide.norm)));
-        let current = 15 * flow + 0.3 * cross;
+        let current = (15 * flow + 0.3 * cross) * (1 + 0.6 * f.storm);
         if (Math.abs(current) < 3.5) current = current < 0 ? -3.5 : 3.5;
         const chop = smoothstep(9, 28, w.wind);
         for (let i = 0; i < strips.length; i++) {
@@ -957,7 +1015,7 @@ export default {
           st.off += current * st.k * dt;
           const x = -((((-st.off % PW) + PW) % PW));
           st.node.style.transform = `translate3d(${f1(x)}px,0,0)`;
-          setOpacity(`chop${i}`, st.chop, chop);
+          setOpacity(`chop${i}`, st.chop, Math.max(chop, f.storm));
         }
         bargeX += bargeDir * 8.5 * dt;
         const bx = ((bargeX % BARGE_RUN) + BARGE_RUN) % BARGE_RUN;
@@ -988,17 +1046,18 @@ export default {
         if (f.wet > 0.02) {
           if (!rain) rain = makeSheet(560, 900);
           // slant: mostly the wind across the view, a little of it however it blows
-          const deg = dir * clamp(4 + 1.2 * Math.abs(cross) + 0.45 * (w.wind - Math.abs(cross)), 5, 50);
-          const n = Math.round(drizzle ? lerp(24, 56, clamp(inten * 2)) : lerp(40, RN, Math.pow(inten, 0.85)));
+          // a storm drives it harder: more slant, half as many lines again, heavier
+          const deg = dir * clamp(4 + 1.2 * Math.abs(cross) + 0.45 * (w.wind - Math.abs(cross)) + 12 * f.storm, 5, 52);
+          const n = Math.round(drizzle ? lerp(24, 56, clamp(inten * 2)) : lerp(40, 160, Math.pow(inten, 0.85)) + (RN - 160) * f.storm);
           const key = `${Math.round(deg / 2)}|${Math.round(n / 6)}|${drizzle}|${rainRGB}|${Math.round(f.storm * 4)}`;
           if (key !== rain.key && (jump || s.t - rain.at > 2)) {
             rain.key = key;
             rain.at = s.t;
             rain.deg = deg;
-            paintRain(rain, n, deg, dir * (3.2 + 2.5 * f.storm), drizzle ? 0.4 : 1, rainRGB, rainAlpha * (drizzle ? 0.7 : 1), (drizzle ? 1.1 : 1.5) * (1 + 0.25 * inten));
+            paintRain(rain, n, deg, dir * (3.2 + 2.5 * f.storm), drizzle ? 0.4 : 1, rainRGB, Math.min(0.8, rainAlpha * (drizzle ? 0.7 : 1) * (1 + 0.15 * f.storm)), (drizzle ? 1.1 : 1.5) * (1 + 0.25 * inten) * (1 + 0.2 * f.storm));
           }
           const a = (rain.deg * Math.PI) / 180;
-          const v = (190 + 250 * inten) * dt;
+          const v = (190 + 250 * inten) * (1 + 0.35 * f.storm) * dt;
           rain.ox = (rain.ox + v * Math.sin(a)) % rain.px;
           rain.oy = (rain.oy + v * Math.cos(a)) % rain.py;
           const ox = rain.ox < 0 ? rain.ox + rain.px : rain.ox;

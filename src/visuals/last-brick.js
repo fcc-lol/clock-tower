@@ -42,7 +42,7 @@
 
 import {
   W, H, TAU, clamp, lerp, smoothstep, approach, rng, hash, createNoise,
-  toOklab, oklch, mix, adjust, ramp, rgba, luminance,
+  toOklab, toOklch, oklch, mix, adjust, ramp, rgba, luminance, contrast,
   el, addStyle, canvas2d, grain, fitText,
 } from "../lib/kit.js";
 import { sunPosition } from "../lib/astro.js";
@@ -64,7 +64,7 @@ const PAD_W = 150;
 const PAD_H = 16;
 const BR = 9; // ball radius
 const QUARTER = 15 * 60 * 1000;
-const U0 = 0.5; // how much of its colour an unlit brick keeps at night
+const U0 = 0.66; // how much of its colour an unlit brick keeps at night
 const ROW_MS = 36 * 60 * 1000; // 24 hours over 40 courses
 const TRAIL = 48;
 
@@ -74,17 +74,13 @@ const NIGHT_GROUND = "#05060a";
 const NIGHT_SKY = "#080b16";
 
 // ----- the numerals: 7 x 15 bricks, strokes two bricks wide, bars three tall ---
+// Hours over minutes, two courses of sky brick between them, so the two
+// figures read as one time. (AM/PM is set beside the date, in the title line.)
 const SEG = { a: [0, 0, 7, 3], g: [0, 6, 7, 3], d: [0, 12, 7, 3], f: [0, 0, 2, 9], b: [5, 0, 2, 9], e: [0, 6, 2, 9], c: [5, 6, 2, 9] };
 const DIGITS = ["abcdef", "", "abged", "abgcd", "fgbc", "afgcd", "afgecd", "abc", "abcdefg", "abfgcd"].map((k) => [...k].map((ch) => SEG[ch]));
 DIGITS[1] = [[3, 0, 2, 15], [1, 0, 2, 3], [1, 12, 6, 3]];
-const LETTERS = {
-  A: ["111", "101", "111", "101", "101"],
-  P: ["111", "101", "111", "100", "100"],
-  M: ["10001", "11011", "10101", "10001", "10001"],
-};
-const HOUR_ROW = 2;
-const AMPM_ROW = 18;
-const MIN_ROW = 24;
+const HOUR_ROW = 4;
+const MIN_ROW = 21;
 const SLOT_A = 1;
 const SLOT_B = 10;
 const SLOT_H = 5;
@@ -92,20 +88,12 @@ const SLOT_H = 5;
 function stampDigit(map, d, c0, r0) {
   for (const [x, y, w, h] of DIGITS[d] || []) for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) map[(r0 + y + r) * COLS + c0 + x + c] = 1;
 }
-function stampLetter(map, ch, c0, r0) {
-  const rows = LETTERS[ch];
-  if (!rows) return;
-  for (let r = 0; r < rows.length; r++) for (let c = 0; c < rows[r].length; c++) if (rows[r][c] === "1") map[(r0 + r) * COLS + c0 + c] = 1;
-}
-function buildSteel(map, hh, mm, ampm) {
+function buildSteel(map, hh, mm) {
   map.fill(0);
   if (hh.length > 1) {
     stampDigit(map, +hh[0], SLOT_A, HOUR_ROW);
     stampDigit(map, +hh[1], SLOT_B, HOUR_ROW);
   } else stampDigit(map, +hh, SLOT_H, HOUR_ROW); // a lone hour stands in the middle, over the minutes
-  const a0 = hh.length > 1 ? SLOT_A : SLOT_H; // AM/PM lines up under the hour
-  stampLetter(map, ampm[0], a0, AMPM_ROW);
-  stampLetter(map, "M", a0 + 4, AMPM_ROW);
   stampDigit(map, +mm[0], SLOT_A, MIN_ROW);
   stampDigit(map, +mm[1], SLOT_B, MIN_ROW);
 }
@@ -126,14 +114,16 @@ function modelSky(ms, cloud, bearing) {
 }
 
 // How much of the reachable sky brick should still stand, p of the way through the quarter hour.
-const keepAt = (p) => 0.86 - 0.68 * Math.pow(clamp(p), 0.72);
+const keepAt = (p) => 0.88 - 0.52 * Math.pow(clamp(p), 0.72); // never below about a third: the sky stays in the wall
 
 const TRAIL_RAMP = ramp([[0, "#9fd4ff"], [0.42, "#f3ebd9"], [0.72, "#ffc56e"], [1, "#ff5f2e"]]);
 
 const CSS = `
 .lb { position: absolute; inset: 0; overflow: hidden; background: ${NIGHT_GROUND}; color: var(--ink, ${STEEL_DAY}); font-family: "Silkscreen", "Courier New", monospace; text-transform: uppercase; }
 .lb canvas { z-index: 1; }
-.lb-date { position: absolute; z-index: 6; left: 76px; top: 64px; font-size: 50px; line-height: 1; white-space: nowrap; letter-spacing: 0.04em; }
+.lb-title { position: absolute; z-index: 6; left: 76px; width: 928px; top: 52px; height: 80px; display: flex; align-items: baseline; justify-content: space-between; }
+.lb-date { font-size: 48px; line-height: 80px; white-space: nowrap; letter-spacing: 0.02em; }
+.lb-ampm { font-size: 80px; line-height: 80px; font-weight: 400; white-space: nowrap; letter-spacing: 0.02em; margin-left: 48px; }
 .lb-horizon { position: absolute; z-index: 6; left: 0; width: ${W}px; top: ${FLOOR}px; height: 4px; background: currentColor; opacity: 0.5; }
 .lb-fog { position: absolute; z-index: 3; left: 0; top: 0; width: ${W}px; height: ${WB + 60}px; overflow: hidden; opacity: 0; display: none;
   background: linear-gradient(to bottom, var(--fog) 0%, var(--fog) 30%, transparent 92%); }
@@ -148,7 +138,7 @@ const CSS = `
 .lb-au .lb-v { margin: 0 44px 0 14px; line-height: 42px; font-size: 64px; }
 .lb-b { position: relative; height: 100px; margin-top: 50px; }
 .lb-cell { position: absolute; top: 0; white-space: nowrap; }
-.lb-k { font-family: "Silkscreen", monospace; text-transform: uppercase; font-size: 28px; line-height: 22px; letter-spacing: 0.06em; color: var(--dim, #9a9484); }
+.lb-k { font-family: "Silkscreen", monospace; text-transform: uppercase; font-size: 28px; line-height: 22px; letter-spacing: 0.06em; color: var(--acc, #9a9484); }
 .lb-v { font-size: 84px; line-height: 64px; margin-top: 14px; }
 .lb-fact { margin-top: 48px; }
 .lb-fv { font-size: 50px; line-height: 62px; margin-top: 12px; }
@@ -197,6 +187,7 @@ export default {
     });
 
     const dateEl = el("div", { class: "lb-date" });
+    const ampmEl = el("div", { class: "lb-ampm" });
     const tempEl = el("div", { class: "lb-temp" });
     const condEl = el("div", { class: "lb-cond" });
     const cell = (col, label) => {
@@ -219,7 +210,7 @@ export default {
       el("div", { class: "lb-b" }, sunC.node, moonC.node),
       factEl);
     wrap.append(
-      dateEl,
+      el("div", { class: "lb-title" }, dateEl, ampmEl),
       el("div", { class: "lb-horizon" }),
       floorEl,
     );
@@ -272,6 +263,7 @@ export default {
     let ctrlT = 0;
     let snowT = 0;
     let relayCool = 0;
+    let spares = 3; // the balls in hand, lying on the floor by the right wall
     let reachTotal = 1;
     let shownH = "";
     let shownM = "";
@@ -594,7 +586,9 @@ export default {
           b.aimed = false;
           if (live && env.rain > 0) for (let k = 0; k < 4; k++) spark(b.x + vr.range(-8, 8), PAD_Y, vr.range(-90, 90), vr.range(-150, -60), 0.35, 3, 2);
         } else if (b.y - BR > FLOOR) {
-          // missed
+          // missed: a spare ball is used up (and when they are all gone, the
+          // machine is generous and awards two more)
+          spares = spares > 0 ? spares - 1 : 2;
           if (live) for (let k = 0; k < 8; k++) spark(b.x + vr.range(-6, 6), FLOOR, vr.range(-110, 110), vr.range(-200, -60), vr.range(0.3, 0.6), 4, 0);
           b.state = 3;
           b.timer = 1.1;
@@ -813,7 +807,7 @@ export default {
     function rebuild(s, tail = 30) {
       const c = s.clock;
       shownH = c.hh; shownM = c.mm; shownA = c.ampm;
-      buildSteel(steel, shownH, shownM, shownA);
+      buildSteel(steel, shownH, shownM);
       computeReach();
       for (let i = 0; i < NB; i++) kind[i] = steel[i] ? 2 : 1;
       preCarve(keepAt(0), Math.floor(s.ms / QUARTER));
@@ -830,6 +824,7 @@ export default {
       ctrlT = 1;
       snowT = 0.5;
       relayCool = 0;
+      spares = 3;
       ai.lazy = false;
       pad.x = pad.target = W / 2 + gr.range(-200, 200);
       pad.v = pad.freeze = pad.react = 0;
@@ -878,7 +873,7 @@ export default {
     // The clock moved on: re-lay what changed.
     function timeChanged(s, now) {
       const c = s.clock;
-      buildSteel(steelNext, c.hh, c.mm, c.ampm);
+      buildSteel(steelNext, c.hh, c.mm);
       const whole = c.hh !== shownH || c.ampm !== shownA;
       const tens = c.mm[0] !== shownM[0];
       const ones = c.mm[1] !== shownM[1];
@@ -946,8 +941,9 @@ export default {
           // sky into fired glaze: mid-toned, a little richer, never quite the same twice
           const j1 = hash(i, seed) - 0.5;
           const j2 = hash(i, seed + 31) - 0.5;
-          let L = Math.min(0.62, 0.25 + 0.42 * L0) + j1 * 0.06;
-          const C = Math.min(0.2, Math.hypot(a, b) * 1.4 + 0.018) * (1 + j2 * 0.25);
+          // (rain soaks the glaze: darker and deeper in colour)
+          let L = (Math.min(0.62, 0.25 + 0.42 * L0) + j1 * 0.06) * (1 - 0.2 * wet);
+          const C = Math.min(0.2, Math.hypot(a, b) * 1.4 + 0.018) * (1 + j2 * 0.25) * (1 + 0.2 * wet);
           const hue = (Math.atan2(b, a) * 180) / Math.PI + j2 * 9;
           let hex = oklch(L, C, hue);
           while (luminance(hex) > Y_MAX && L > 0.3) {
@@ -1100,6 +1096,29 @@ export default {
       wc.globalAlpha = 1;
     }
 
+    // The foundation below the horizon: the same brick in a running bond, laid
+    // dark, for the scoreboard to be set into (on the wall's layer, once per
+    // change of light). Only the mortar and a faint lip show, so the type
+    // over it keeps its contrast.
+    function paintFloor() {
+      const wc = wall.ctx;
+      const y0 = FLOOR + 4;
+      wc.clearRect(0, y0, W, H - y0);
+      wc.beginPath();
+      for (let r = 0; y0 + r * BH < H; r++) {
+        const y = y0 + r * BH;
+        wc.rect(0, y + BH - 2, W, 2);
+        const off = r & 1 ? BW / 2 : 0;
+        for (let x = WX - BW + off; x < W; x += BW) wc.rect(x + BW - 2, y, 2, BH - 2);
+      }
+      wc.fillStyle = "rgba(0,0,0,0.26)";
+      wc.fill();
+      wc.beginPath();
+      for (let r = 0; y0 + r * BH < H; r++) wc.rect(0, y0 + r * BH, W, 1);
+      wc.fillStyle = "rgba(255,255,255,0.035)";
+      wc.fill();
+    }
+
     // ----- weather behind the wall --------------------------------------------
     const RN = 360;
     const rX = new Float32Array(RN), rY = new Float32Array(RN), rV = new Float32Array(RN), rLen = new Float32Array(RN);
@@ -1133,6 +1152,7 @@ export default {
     let ink = STEEL_DAY;
     let ground = NIGHT_GROUND;
     let trailCol = STEEL_DAY;
+    let acc = "#9a9484";
     let snowCol = "#ffffff";
     let rainCol = "rgba(200,220,240,0.4)";
     let flash = 0; // far lightning: 0..1
@@ -1164,6 +1184,7 @@ export default {
           // a new quarter hour: the whole wall is laid again
           gr = rng(seed + (q % 100000) * 7919);
           shownH = "";
+          spares = 3; // a new wall, a new game
         }
         if (c.hh !== shownH || c.mm !== shownM || c.ampm !== shownA) timeChanged(s, fast || Math.abs(dms) > 3000);
         if (env.storm && !balls[1].keep) {
@@ -1203,6 +1224,8 @@ export default {
         wet = wt;
         const k = (u - U0) / (1 - U0);
         steelDim = mix(STEEL_NIGHT, STEEL_DAY, k);
+        // in fog the steel is whitened, so the numerals stand out of the grey
+        if (env.fog > 0.05) steelDim = mix(steelDim, "#fbf8f0", 0.75 * env.fog);
         ink = steelDim;
         // The air behind the wall is the sky as it is now, held deep so the
         // ivory always reads on it: cobalt at noon, slate under cloud, navy at
@@ -1214,7 +1237,21 @@ export default {
         let bot = mix(mix("#0f1629", "#2a1b16", cloud * 0.85), adjust(mix(s.sky.mean, s.sky.west, 0.7), { l: 0.43, c: (v) => Math.min(v * 1.15, 0.1) }), dk);
         // a hot day leaves an amber haze lying over the river
         if (ht > 0) bot = mix(bot, "#a8673a", 0.42 * ht * (0.3 + 0.7 * dk));
-        ground = mix(NIGHT_GROUND, adjust(s.sky.mean, { l: 0.18, c: (v) => Math.min(v, 0.03) }), dk);
+        // the foundation the scoreboard is set in: a deep tone of the sky as it
+        // is now (blue under a clear sky, slate under cloud, warm at sundown),
+        // darker and bluer when it is wet, a little browner in a heatwave
+        const skyLow = mix(s.sky.mean, s.sky.west, 0.4);
+        let gDay = adjust(skyLow, { l: 0.24 - 0.04 * wt, c: (v) => Math.min(v * 1.2 + 0.012, 0.08) });
+        if (wt > 0) gDay = mix(gDay, "#13233a", 0.3 * wt);
+        if (ht > 0) gDay = mix(gDay, "#4a2a18", 0.45 * ht);
+        const gNight = mix(NIGHT_GROUND, adjust(skyLow, { l: 0.15, c: (v) => Math.min(v * 1.2 + 0.01, 0.045) }), 0.6);
+        ground = mix(gNight, gDay, dk);
+        // the arcade's label colour: the hue of the western sky when it has one,
+        // otherwise of the temperature (ice blue in the cold, amber in the heat)
+        const lw = toOklch(skyLow);
+        const tHue = lerp(230, 40, smoothstep(20, 95, s.weather.temp));
+        const hue = lw.c > 0.03 ? lw.h : tHue;
+        acc = oklch(lerp(0.74, 0.84, dk), 0.13, hue);
         // one background for the whole stage: the sky down to the horizon, then the ground
         wrap.style.background = `linear-gradient(to bottom, ${top} 0px, ${mix(top, bot, 0.45)} ${FLOOR / 2}px, ${bot} ${FLOOR}px, ${mix(ground, bot, 0.25)} ${FLOOR}px, ${ground} ${FLOOR + 160}px, ${ground} ${H}px)`;
         starA = (1 - smoothstep(0.02, 0.3, dl)) * Math.pow(1 - cloud, 1.5) * (1 - env.fog);
@@ -1225,8 +1262,17 @@ export default {
         rowDirty.fill(1);
         paintSkyStars();
         wrap.style.setProperty("--ink", ink);
-        wrap.style.setProperty("--dim", mix(ink, ground, 0.28));
-        wrap.style.setProperty("--fog", adjust(s.sky.mean, { l: lerp(0.24, 0.56, dk), c: (v) => v * 0.4 }));
+        wrap.style.setProperty("--acc", acc);
+        // fog is pale by day and dusky by night, but never so close to the
+        // steel that the numerals (or the title over it) lose their edge
+        let fl = lerp(0.3, 0.56, dk);
+        let fogCol = adjust(s.sky.mean, { l: fl, c: (v) => v * 0.4 });
+        while (contrast(fogCol, steelDim) < 4.6 && fl > 0.12) {
+          fl -= 0.02;
+          fogCol = adjust(s.sky.mean, { l: fl, c: (v) => v * 0.4 });
+        }
+        wrap.style.setProperty("--fog", fogCol);
+        paintFloor();
       }
 
       // ----- repaint what changed: single bricks at once, whole courses a few per frame -----
@@ -1504,6 +1550,16 @@ export default {
         fc.fillRect(x0 + 4, PAD_Y + PAD_H - 3, PAD_W - 8, 3);
       }
 
+      // the spare balls, lying on the floor in the corner
+      fc.fillStyle = ink;
+      fc.beginPath();
+      for (let k = 0; k < spares; k++) {
+        const x = WR - 16 - k * 24;
+        fc.moveTo(x + 7, FLOOR - 8);
+        fc.arc(x, FLOOR - 8, 7, 0, TAU);
+      }
+      fc.fill();
+
       // the balls and their trails: long and molten in heat, short and icy in cold
       const tl = Math.round(lerp(9, TRAIL, smoothstep(15, 96, s.weather.temp)));
       const glow = 0.25 + 0.75 * dark + env.fog * 0.6;
@@ -1547,7 +1603,8 @@ export default {
 
       // ----- the readouts -----
       const tx = s.text;
-      if (put("date", dateEl, tx.date)) fitText(dateEl, 928);
+      const amCh = put("ampm", ampmEl, tx.ampm);
+      if (put("date", dateEl, tx.date) || amCh) fitText(dateEl, 928 - 48 - ampmEl.offsetWidth);
       const tch = put("temp", tempEl, tx.temp);
       if (tch && !/\d/.test(tx.temp)) {
         // no reading: the dash is set in the title face (Jersey's sits on the

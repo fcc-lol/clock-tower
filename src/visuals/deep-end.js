@@ -14,12 +14,15 @@
 //                capped, rougher with wind and rain, so the figures never smear
 //   cloud, sun   the caustic light net is as strong as the sun is clear and
 //                high; the coping's shadow falls away from the sun; under cloud
-//                the net fades and the water takes the sky's colour
+//                the net fades and the water takes the sky's colour; a low sun
+//                that gets through turns the net amber and warms the stone
 //   sky colours  the measured sky (west to east) is what the surface reflects
 //   rain         drops falling away from you, ring ripples whose crests catch
 //                the light, splashes on the stone: as many as it is raining
-//   snow, cold   flakes fall, land and melt into slush rafts; below freezing a
-//                cracked ice sheet creeps in from the edges and stills the water
+//   snow, cold   flakes fall (drawn out into streaks in a hard wind), land and
+//                melt into slush rafts; below freezing a cracked ice sheet
+//                creeps in from the edges and stills the water, and the wind
+//                streams blown snow across it
 //   fog          steam wisps drift over the surface
 //   storm        slate water, heavy rings, a rare slow brightening
 //   tide         the East River tide sets the depth: at high water the floor
@@ -52,11 +55,13 @@ const GW = 45, GH = 55;
 const DH = 22;
 const SEG = { A: [0, 0, 13, 4], G: [0, 9, 13, 13], D: [0, 18, 13, 22], F: [0, 0, 4, 13], B: [9, 0, 13, 13], E: [0, 9, 4, 22], C: [9, 9, 13, 22] };
 const DIGITS = ["ABCDEF", "", "ABGED", "ABGCD", "FGBC", "AFGCD", "AFGECD", "ABC", "ABCDEFG", "ABCDFG"];
-// AM/PM: 7 x 10 tiles with 2-tile strokes, half the weight of the figures.
+// AM/PM: 8 x 10 tiles with 2-tile strokes, half the weight of the figures. Eight
+// wide so the M's middle stroke is two tiles too and survives the water.
+const LW = 8;
 const LETTERS = {
-  A: [".#####.", "#######", "##...##", "##...##", "##...##", "#######", "#######", "##...##", "##...##", "##...##"],
-  P: ["######.", "#######", "##...##", "##...##", "#######", "######.", "##.....", "##.....", "##.....", "##....."],
-  M: ["##...##", "###.###", "#######", "##.#.##", "##.#.##", "##...##", "##...##", "##...##", "##...##", "##...##"],
+  A: [".######.", "########", "##....##", "##....##", "##....##", "########", "########", "##....##", "##....##", "##....##"],
+  P: ["#######.", "########", "##....##", "##....##", "########", "#######.", "##......", "##......", "##......", "##......"],
+  M: ["##....##", "###..###", "########", "##.##.##", "##.##.##", "##....##", "##....##", "##....##", "##....##", "##....##"],
 };
 
 function buildDigit(ch) {
@@ -127,7 +132,7 @@ function layTime(out, hh, mm, ampm) {
     }
   };
   // hours and AM/PM as one unit, centred like the minutes below them
-  const hx = 7 + Math.floor((31 - (width(hh) + 3 + 7)) / 2);
+  const hx = 7 + Math.floor((31 - (width(hh) + 3 + LW)) / 2);
   const ax = hx + width(hh) + 3;
   row(hh, hx, 3);
   row(mm, 7 + Math.floor((31 - width(mm)) / 2), 29);
@@ -153,6 +158,8 @@ const COL = {
   fRain: [0.42, 0.55, 0.62],
   fStorm: [0.29, 0.38, 0.47],
   fFog: [0.66, 0.77, 0.76],
+  fGold: [0.62, 0.78, 0.6],
+  stoneGold: [0.98, 0.8, 0.6],
   fSnow: [0.6, 0.76, 0.8],
   fIce: [0.62, 0.82, 0.9],
   fNight: [0.022, 0.05, 0.1],
@@ -310,10 +317,12 @@ void main() {
   if (u_rain.x > 0.0) rg += rainCells(p, 150.0, u_rain.w, u_rain.x, 3.0) * u_rain.z;
   if (u_rain.y > 0.0) rg += rainCells(p, 62.0, u_rain.w * 1.25, u_rain.y, 17.0) * (u_rain.z * 0.55);
 
-  vec2 disp = (s * u_wave.x + rs * 0.45 + rg * 0.5) * open;
+  // (the cat's-paw ruffle is kept out of the steep-facet sky reflection: its
+  // fine crests lit by the pale sky read as falling rain on a dry day)
+  vec2 disp = (s * u_wave.x + rs * 0.3 + rg * 0.5) * open;
   float dl = length(disp);
   disp *= inversesqrt(1.0 + dl * dl / (u_cap * u_cap)); // soft limit
-  vec2 sl = (s * (u_wave.x * 0.12) + rs * 0.6 + rg * 0.22) * open;
+  vec2 sl = (s * (u_wave.x * 0.12) + rs * 0.22 + rg * 0.22) * open;
   disp *= 1.0 - 0.6 * smoothstep(u_kd - 0.01, 1.0, m0); // the walls are nearer the surface
   vec2 qr = q + disp / u_pool.zw;
 
@@ -383,6 +392,7 @@ void main() {
   vec2 cuv = (p + disp * 5.0) / 620.0 + u_sun.zw * 0.13 * t * 0.2;
   float c = (u_light.x > 0.004 || u_glowC.a > 0.001) ? caustic(cuv, t * 0.3 + 3.0) : 0.0;
   float cs = u_light.x * mix(1.0, min(1.0, fall * 2.4), u_light.w) * floorK * (1.0 - 0.8 * shade) * (1.0 - 0.75 * ice);
+  cs *= 1.0 - 0.35 * ink * (1.0 - pale); // the net plays over the cobalt more softly, so the figures keep their edges
   col *= vec3(lit) + u_sunCol * (cs * (c * 1.9 - 0.3));
   col += u_light.w * vec3(0.012, 0.085, 0.095) * fall * fall * (1.0 - 0.6 * ink);
   // The figures are set in lit glass tiles: after dark they glow, spill a halo
@@ -406,9 +416,10 @@ void main() {
   float sx = clamp(q.x * 0.5 + 0.5 - sl.x * 0.3, 0.0, 1.0);
   vec3 sky = sx < 0.3333 ? mix(u_skyW, u_skyNW, sx * 3.0) : sx < 0.6667 ? mix(u_skyNW, u_skyNE, sx * 3.0 - 1.0) : mix(u_skyNE, u_skyE, sx * 3.0 - 2.0);
   float steep = length(sl);
-  float fres = u_refl.x * (1.0 + 0.7 * patch) + u_refl.y * smoothstep(0.3, 1.5, steep);
+  float fres = u_refl.x + u_refl.y * smoothstep(0.3, 1.5, steep);
   fres *= 1.0 - 0.75 * ink * pale * u_glowC.a; // a dark sky never blots out the lit figures
   col = mix(col, sky * (1.0 + 0.2 * steep), clamp(fres, 0.0, 0.7));
+  col *= 1.0 - 0.09 * patch * open; // a cat's-paw: a matte, darker ruffled patch moving downwind
   // Sun glints: where a wave tilts to mirror the sun. Kept off the figures.
   vec2 gd = sl * 0.5 - u_glint.xy;
   float gl = exp(-dot(gd, gd) * u_glint.z) * smoothstep(0.72, 0.95, vnoise(p * 0.09 + vec2(t * 0.9, -t * 0.7)));
@@ -446,8 +457,11 @@ void main() {
     col = mix(col, u_veil, ice * open * 1.6 * guard); // the growing edge is thicker and whiter
     if (u_cold.z > 0.002) {
       // snow dust streaming over the ice
-      float du = vnoise(vec2(dot(p, d) * 0.0035 - u_wave.w * 0.012, dot(p, n) * 0.028));
-      col = mix(col, u_veil, smoothstep(0.5, 0.9, du) * u_cold.z * ice * 0.42 * guard);
+      // (pale even at night: blown snow catches whatever light there is)
+      float du = vnoise(vec2(dot(p, d) * 0.0035 - u_wave.w * 0.0042, dot(p, n) * 0.028));
+      float du2 = vnoise(vec2(dot(p, d) * 0.009 - u_wave.w * 0.011, dot(p, n) * 0.06 + 3.0));
+      vec3 dustc = max(u_veil * 1.08, vec3(0.3, 0.35, 0.42));
+      col = mix(col, dustc, smoothstep(0.48, 0.85, du * 0.7 + du2 * 0.3) * u_cold.z * ice * 0.62 * guard);
     }
   }
   if (u_cold.w > 0.002) {
@@ -741,7 +755,7 @@ export default {
     };
 
     // ----- snowflakes: each one falls away from the viewer toward the spot it lands on -----
-    const NF = 300;
+    const NF = 420;
     const fl = new Float32Array(NF * 6); // land x, land y, phase, fall seconds, size, sideways drift
     for (let i = 0; i < NF; i++) {
       fl[i * 6] = r.range(-20, W + 20);
@@ -836,6 +850,10 @@ export default {
         const ice = clamp((33 - wx.temp) / 15);
         const tide = s.tide.norm;
         const wind = wx.wind;
+        // the pool lights come on at dusk, sooner when rain or storm darkens the day
+        const lamp = smoothstep(0.42, 0.12, day * (1 - 0.35 * e.wet - 0.2 * e.storm));
+        // golden hour: a low sun that is getting through warms the water and the stone
+        const gold = smoothstep(24, 4, s.sun.alt) * smoothstep(-2, 2, s.sun.alt) * (1 - Math.pow(cloud, 1.4) * 0.9) * (1 - e.fog) * (1 - e.wet) * (1 - lamp);
 
         // ----- the clocks of the water -----
         const rate = 0.5 + Math.min(1.1, wind / 26);
@@ -863,6 +881,7 @@ export default {
         mix3(f, f, COL.fSnow, Math.min(1, e.snow * 1.6));
         mix3(f, f, COL.fIce, ice * 0.6);
         mix3(f, f, skyMean, 0.12 * day);
+        mix3(f, f, COL.fGold, 0.42 * gold);
         mul3(f, f, lerp(1.04, 0.95, tide));
         mix3(tmp, COL.fNight, skyMean, 0.1);
         mix3(f, tmp, f, dw);
@@ -892,14 +911,12 @@ export default {
         mix3(U.veil, U.veil, skyMean, 0.12);
 
         // ----- light -----
-        // the pool lights come on at dusk, sooner when rain or storm darkens the day
-        const lamp = smoothstep(0.42, 0.12, day * (1 - 0.35 * e.wet - 0.2 * e.storm));
         const low = smoothstep(26, 3, s.sun.alt);
         mix3(U.sunCol, COL.sunHigh, COL.sunLow, low * (1 - lamp));
         mix3(U.sunCol, U.sunCol, COL.lampCol, lamp);
-        U.light[0] = lerp(direct * (0.5 + 0.2 * heat) + 0.03 * day, 0.22, lamp) * (1 - 0.6 * e.storm * lamp);
-        U.light[1] = direct * (0.25 + 0.35 * heat + 0.15 * U.wave[1]);
-        U.light[2] = direct * 0.36;
+        U.light[0] = lerp(direct * (0.5 + 0.2 * heat) + 0.03 * day + 0.26 * gold, 0.22, lamp) * (1 - 0.6 * e.storm * lamp);
+        U.light[1] = direct * (0.25 + 0.35 * heat + 0.15 * U.wave[1]) + 0.2 * gold;
+        U.light[2] = direct * 0.36 + 0.3 * gold; // the long shadow of the coping
         U.light[3] = lamp;
         const az = (s.sun.az * Math.PI) / 180;
         const lx = -Math.sin(az), ly = Math.cos(az); // the way sunlight travels across the floor
@@ -923,7 +940,7 @@ export default {
         mul3(tmp, tmp, 0.3 + 0.5 * dw);
         mix3(U.hl, tmp, COL.glow, lamp * 0.55);
         U.hl[3] = 0.075 * (1 - ice);
-        U.cap = 4 + 4.5 * Math.max(smoothstep(4, 32, wind), e.rain * 0.8, e.storm);
+        U.cap = 3.5 + 4 * Math.max(smoothstep(4, 32, wind), e.rain * 0.8, e.storm);
 
         // ----- rain -----
         U.rain[0] = clamp(e.rain * 1.5 - 0.35) * 0.95;
@@ -1082,6 +1099,7 @@ export default {
           cssAt = s.t;
           mix3(stone, COL.stoneClear, COL.stoneOver, cloud);
           mix3(stone, stone, skyMean, 0.1);
+          mix3(stone, stone, COL.stoneGold, 0.5 * gold);
           mul3(stone, stone, 1 - 0.2 * e.wet);
           mix3(stone, stone, COL.white, 0.35 * Math.min(1, e.snow * 1.5 + ice * 0.3));
           // the stone hurries through mid-grey, where neither ink would hold
@@ -1100,7 +1118,9 @@ export default {
             mix3(paint, COL.paintNight, COL.white, lum(COL.paintNight) >= want ? 0 : hi);
           }
           const fb = 0.4 + 0.6 * dw;
-          shown.flakeShadow = `rgba(20,40,70,${(0.16 * dw).toFixed(3)})`;
+          shown.splashLight = `rgba(255,255,255,${(0.1 + 0.3 * dw).toFixed(3)})`;
+          shown.splashDark = `rgba(10,20,40,${(0.2 + 0.1 * dw).toFixed(3)})`;
+          shown.flakeShadow = `rgba(20,40,70,${(0.2 * dw).toFixed(3)})`;
           shown.flakeFar = `rgba(255,255,255,${(0.3 * fb).toFixed(3)})`;
           shown.flakeNear = `rgba(255,255,255,${(0.75 * fb).toFixed(3)})`;
           shown.flakeLand = `rgba(255,255,255,${(0.85 * fb).toFixed(3)})`;
@@ -1156,7 +1176,11 @@ export default {
         }
         if (nFl) {
           const drift = 40 + wind * 9;
-          const p0 = dw > 0.15 ? -1 : 0; // flake shadows only show by day
+          // in a hard wind the falling flakes draw out into streaks along it
+          const streak = smoothstep(10, 30, wind);
+          const sa = Math.atan2(U.wind[1], U.wind[0]);
+          const ca = Math.cos(sa), sn = Math.sin(sa);
+          const p0 = dw > 0.15 ? -1 : 0; // flake shadows only show by day (they are what makes white flakes read on pale stone)
           for (let pass = p0; pass < 3; pass++) {
             // the shadows of the falling flakes, then far (big, soft), near, landed
             ctx.fillStyle = pass < 0 ? shown.flakeShadow : pass === 0 ? shown.flakeFar : pass === 1 ? shown.flakeNear : shown.flakeLand;
@@ -1177,7 +1201,7 @@ export default {
               }
               const uf = (u * (fall + rest)) / fall; // 0..1 falling, above 1 lying where it landed
               const which = uf >= 1 ? 2 : uf > 0.55 ? 1 : 0;
-              if (pass < 0 ? which !== 1 : which !== pass) continue;
+              if (pass < 0 ? which === 2 : which !== pass) continue;
               let x = fl[j], y = fl[j + 1], sz;
               if (uf < 1) {
                 const up = 1 - uf;
@@ -1191,6 +1215,12 @@ export default {
                 sz = 2.4 * fl[j + 4] * (onWater ? 1 - melt : 1 - melt * melt * melt);
               }
               if (sz < 0.3) continue;
+              if (uf < 1 && streak > 0.05) {
+                const rx = sz * (1 + 2.6 * streak);
+                ctx.moveTo(x + rx * ca, y + rx * sn);
+                ctx.ellipse(x, y, rx, sz, sa, 0, TAU);
+                continue;
+              }
               if (sz < 2) {
                 ctx.rect(x - sz, y - sz, sz * 2, sz * 2); // too small to tell from a disc, and cheaper
                 continue;
@@ -1204,7 +1234,7 @@ export default {
         if (nSp) {
           ctx.lineWidth = 1.6;
           for (let pass = 0; pass < 2; pass++) {
-            ctx.strokeStyle = pass ? `rgba(255,255,255,${(0.1 + 0.3 * dw).toFixed(3)})` : `rgba(10,20,40,${(0.2 + 0.1 * dw).toFixed(3)})`;
+            ctx.strokeStyle = pass ? shown.splashLight : shown.splashDark;
             ctx.beginPath();
             for (let i = 0; i < nSp; i++) {
               const j = i * 4;
@@ -1244,19 +1274,20 @@ export default {
         topDirty = put("cond", cond, t.condition) || topDirty;
         if (topDirty) {
           // the date takes what the temperature block leaves, with a clear gap
+          // (never below the README's 44 px: every real string fits well above it)
           cond.style.fontSize = "";
-          fitText(cond, 560);
+          if (fitText(cond, 560) < 44) cond.style.fontSize = "44px";
           const room = W - 128 - 56 - tb.offsetWidth;
           wkday.style.fontSize = mday.style.fontSize = "";
-          fitText(wkday, room);
-          fitText(mday, room);
+          if (fitText(wkday, room) < 46) wkday.style.fontSize = "46px";
+          if (fitText(mday, room) < 46) mday.style.fontSize = "46px";
         }
         put("sunL", sunIt.lb, t.sunLabel);
         put("sunV", sunIt.vl, t.sunValue);
         if (put("moon", moonIt.vl, t.moon) || shown.moonFact !== hasFact) {
           shown.moonFact = hasFact;
           moonIt.vl.style.fontSize = "";
-          fitText(moonIt.vl, moonIt.node.offsetWidth || 380);
+          if (fitText(moonIt.vl, moonIt.node.offsetWidth || 380) < 40) moonIt.vl.style.fontSize = "40px";
         }
         put("aqi", aqiIt.vl, t.aqi);
         put("uv", uvIt.vl, t.uv);

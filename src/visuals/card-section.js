@@ -47,7 +47,7 @@ const N = COLS * ROWS;
 // each keeps at least 50 px of crowd between itself and the digits.
 const ROW_HOUR = 6; // rows 6-23: y 180-720
 const ROW_MIN = 31; // rows 31-48: y 930-1470
-const DATE_TOP = 52, DATE_H = 76; // 52-128
+const DATE_TOP = 0, DATE_H = 154; // the ribbon board along the roof: 0-154
 const MID_TOP = 770, MID_H = 110; // 770-880
 const TIFO_TOP = 1520; // height follows its content
 
@@ -90,17 +90,25 @@ const HAIR = ["#1c1919", "#34261f", "#62402a", "#a97a36", "#8c8c93", "#d6bd86", 
 const SHIRT = ["#d5492f", "#e3b23f", "#2f6f8f", "#e9e5da", "#3b4160", "#5a9b7b", "#bf6a8d", "#8a8f99"];
 const BEANIE = ["#e2533b", "#f0c04f", "#3d7ea6", "#f2efe8", "#57a47d", "#d77fa1"];
 const UMBRELLA = ["#d9573f", "#e2b33c", "#2f8f8a", "#3b5fa8", "#d98aa8", "#8fc7a4"];
-const INK = ["#0f1118", "#13151d", "#181a24"];
 
 const CSS = `
 .cs { position: absolute; inset: 0; overflow: hidden; background: #05060a; font-family: "Bowlby One", "Arial Black", sans-serif; }
-.cs .bn { position: absolute; z-index: 3; }
+.cs .bn { position: absolute; z-index: 3; box-sizing: border-box; }
+.cs .board { --paint: #f3ead8; --soft: #eba851; border: 6px solid #2a2c35; border-radius: 6px;
+  background: radial-gradient(circle, rgba(255,240,215,0.045) 1.1px, transparent 1.7px) 0 0 / 6px 6px, #0f1015;
+  box-shadow: 0 5px 0 rgba(0,0,0,0.4), inset 0 0 0 2px #17181e; }
+.cs .date.board { border-width: 0 0 6px 0; border-radius: 0; --paint: #f6bf66; }
+.cs .post { position: absolute; z-index: 2; width: 24px; background: linear-gradient(90deg, #26272f, #3a3c46 40%, #1c1d23); }
+.cs .mid .sl::before { content: ""; position: absolute; top: -7px; left: 11px; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--hand1); box-shadow: 27px 1px 0 var(--hand1); }
+.cs .mid .sl:nth-child(3n+1)::before { background: var(--hand2); box-shadow: 27px 1px 0 var(--hand2); }
+.cs .mid .sl:nth-child(3n+2)::before { background: var(--hand3); box-shadow: 27px -1px 0 var(--hand3); }
 .cs .sl { position: absolute; top: 0; height: 100%; width: 61px; box-sizing: border-box; background: var(--cloth);
   border-top: 4px solid var(--hem); border-bottom: 4px solid var(--hem); }
 .cs .tx { position: absolute; inset: 0; color: var(--paint); }
 .cs .g { display: inline-block; white-space: pre; }
 .cs i { font-style: normal; font-size: 28px; color: var(--soft); margin-right: 12px; }
-.cs .date .tx { display: flex; align-items: center; justify-content: center; font-size: 58px; line-height: 1; white-space: nowrap; }
+.cs .date .tx { display: flex; align-items: center; justify-content: center; padding-top: 26px; font-size: 58px; line-height: 1; white-space: nowrap; }
 .cs .mid .tx { display: flex; align-items: center; padding: 0 30px 0 34px; gap: 44px; }
 .cs .temp { flex: none; font-size: 104px; line-height: 1; margin-top: -2px; }
 .cs .stack { flex: 1; min-width: 0; }
@@ -127,7 +135,9 @@ export default {
 
     const crowd = canvas2d(wrap, { maxScale: 2, alpha: false }); // persistent: only dirty seats are redrawn
     const ctx = crowd.ctx;
-    const R = crowd.ratio;
+    // The kit keeps setTransform() in stage units (it applies the canvas's own
+    // pixel ratio itself), so R stays 1 at any screen scale.
+    const R = 1;
     const wet = canvas2d(wrap, { adaptive: true }); // rain and snow, redrawn in full while it falls
     wet.canvas.style.zIndex = "2";
 
@@ -137,7 +147,6 @@ export default {
     // ----- the people -------------------------------------------------------
     const jx = new Float32Array(N); // sits a little off-centre
     const tilt = new Float32Array(N); // holds the card a little crooked
-    const phase = new Float32Array(N);
     const uTh = new Float32Array(N); // brings an umbrella when the rain passes this
     const sTh = new Float32Array(N); // falls asleep when the night passes this
     const hatRoll = new Float32Array(N);
@@ -147,11 +156,9 @@ export default {
     const shirtI = new Uint8Array(N);
     const umbI = new Uint8Array(N);
     const shadeI = new Uint8Array(N);
-    const sideI = new Int8Array(N);
     for (let i = 0; i < N; i++) {
       jx[i] = r.range(-1, 1);
       tilt[i] = clamp(r.gauss() * 0.035, -0.08, 0.08);
-      phase[i] = r() * TAU;
       uTh[i] = r();
       sTh[i] = r();
       hatRoll[i] = r();
@@ -161,7 +168,6 @@ export default {
       shirtI[i] = r.int(0, SHIRT.length - 1);
       umbI[i] = r.int(0, UMBRELLA.length - 1);
       shadeI[i] = r.int(0, 2);
-      sideI[i] = r.sign();
     }
 
     const role = new Uint8Array(N);
@@ -171,6 +177,7 @@ export default {
     const dirty = new Uint8Array(N);
     const lift = new Float32Array(N); // the stadium wave: how far this person is out of the seat
     const liftWas = new Float32Array(N);
+    const numLvl = new Uint8Array(N); // a numeral card's shade in the slow ripple across the figures
     const TURN = 1 / 0.6; // turns per second
     const stage = new Uint8Array(N); // the turn in steps: a seat is redrawn only when its step changes
     const steps = new Uint8Array(N).fill(4); // four steps for the minute wave, three for everyday turns
@@ -184,17 +191,34 @@ export default {
     const fidOf = new Int16Array(N).fill(-1);
     let fidAcc = 0;
 
-    // Up to two waves in flight.
-    const WAVES = 2;
+    // Up to three waves in flight.
+    const WAVES = 3;
     const wOn = new Uint8Array(WAVES);
     const wT0 = new Float32Array(WAVES);
     const wDx = new Float32Array(WAVES);
     const wDy = new Float32Array(WAVES);
     const wSpeed = new Float32Array(WAVES);
-    const wAmp = new Float32Array(WAVES);
     const wFrom = new Float32Array(WAVES);
     const wTo = new Float32Array(WAVES);
     let gustAcc = 0.72;
+    let ambAcc = 0.62; // the first wave comes round a few seconds after the cut
+    let ambSide = 1;
+    let waveLive = false;
+    function launchWave(t, dx, dy, speed) {
+      for (let k = 0; k < WAVES; k++) {
+        if (wOn[k]) continue;
+        wOn[k] = 1;
+        wT0[k] = t;
+        wDx[k] = dx;
+        wDy[k] = dy;
+        wSpeed[k] = speed;
+        const ext = Math.abs(dx) * 540 + Math.abs(dy) * 960;
+        const mid = dx * 540 + dy * 960;
+        wFrom[k] = mid - ext - 100;
+        wTo[k] = mid + ext + 100;
+        return;
+      }
+    }
 
     // The rolling refresh visits seats in a scattered order.
     const order = new Uint16Array(N);
@@ -208,7 +232,6 @@ export default {
     let orderAt = 0;
     const numList = new Uint16Array(N);
     let numCount = 0;
-    let numAt = 0;
 
     // Cloud field: low-frequency noise, thresholded so that the covered share
     // of the stand equals the cloud cover. Quantiles are measured once.
@@ -223,9 +246,9 @@ export default {
 
     // ----- palette (rebuilt when the light or the sky changes) ---------------
     const P = {
-      stand: "#05060a", eye: "#17181c", snow: "#f5f7fb", flake: "#f5f7fb", rain: "#dfe7f5", light: "#fff2c8", halo: "rgba(255,190,90,0.2)", halo2: "rgba(255,205,120,0.45)", straw: "#e6cd8a",
+      stand: "#05060a", eye: "#17181c", snow: "#f5f7fb", flake: "#f5f7fb", rain: "#dfe7f5", straw: "#e6cd8a",
       sky: new Array(COLS * 3), cloud: new Array(COLS * 3), core: new Array(COLS * 3), lap: new Array(COLS),
-      lit: new Array(4), skin: new Array(6), skinLit: new Array(6), skinMoat: new Array(6), hair: new Array(8), shirt: new Array(8),
+      lit: new Array(4), litSeam: "#000", ink: new Array(4), inkSeam: "#000", umbHi: new Array(6), skin: new Array(6), skinLit: new Array(6), skinMoat: new Array(6), hair: new Array(8), shirt: new Array(8),
       beanie: new Array(6), umb: new Array(6), umbDark: new Array(6), veil: new Array(ROWS), veilNum: new Array(ROWS),
     };
     const env = {
@@ -240,14 +263,28 @@ export default {
       const wx = s.weather;
       const dayK = smoothstep(0.04, 0.6, dl);
       env.dayK = dayK;
-      const mean = toOklch(s.sky.mean);
-      P.stand = mix(mix("#040508", s.sky.mean, 0.1), oklch(0.27, Math.min(0.05, mean.c * 0.6), mean.h), dayK);
+      const skyRamp = ramp([s.sky.west, s.sky.northWest, s.sky.northEast, s.sky.east]);
+      const rawMid = skyRamp(0.5);
+      // By day the stand between the cards is a shade of the sky itself, not a
+      // dark grid, so the crowd reads as one calm field around the numerals.
+      // Snow settles on it.
+      let standDay = mix(rawMid, "#0d0e13", 0.46);
+      if (env.snow > 0) standDay = mix(standDay, "#dfe5ee", 0.32 * env.snow);
+      let standNight = mix("#040508", s.sky.mean, 0.1);
+      if (env.snow > 0) standNight = mix(standNight, "#5d6676", 0.4 * env.snow);
+      P.stand = mix(standNight, standDay, dayK);
       const moonK = s.moon.up ? s.moon.illumination * (1 - 0.8 * clamp(wx.cloud / 100)) : 0;
       const pl = clamp(0.17 + 0.83 * smoothstep(0.02, 0.5, dl) + 0.12 * moonK);
       const moonTint = (1 - dayK) * moonK * 0.5;
-      const person = (c) => mix(P.stand, moonTint > 0.01 ? mix(c, "#93a8cf", moonTint) : c, pl);
+      // People's own colours are muted toward the sky by day: the crowd is the
+      // ground, the numerals are the figure.
+      const calm = 0.42 * dayK;
+      const person = (c) => {
+        let q = moonTint > 0.01 ? mix(c, "#93a8cf", moonTint) : c;
+        if (calm > 0.01) q = mix(q, rawMid, calm);
+        return mix(P.stand, q, pl);
+      };
 
-      const skyRamp = ramp([s.sky.west, s.sky.northWest, s.sky.northEast, s.sky.east]);
       const cardDim = 0.74 + 0.26 * dayK;
       const cloudMix = 0.28 + 0.54 * dayK;
       for (let c = 0; c < COLS; c++) {
@@ -277,8 +314,13 @@ export default {
       const gloom = env.gloomLight;
       if (paletteKey === "") env.lit = bgLum < 0.305 || gloom < 0.175;
       else env.lit = env.lit ? bgLum < 0.33 || gloom < 0.19 : bgLum < 0.28 || gloom < 0.16;
-      const litBase = mix("#d99a42", "#ffd98a", smoothstep(0.0, 0.25, bgLum));
-      for (let k = 0; k < 4; k++) P.lit[k] = mix(litBase, "#8a5520", (3 - k) * 0.1);
+      // Deep amber at night (the room stays dark), brighter while there is light.
+      const litBase = mix("#b37836", "#ffd98a", smoothstep(0.0, 0.25, bgLum));
+      for (let k = 0; k < 4; k++) P.lit[k] = mix(litBase, "#8a5520", (3 - k) * 0.11);
+      P.litSeam = mix(litBase, "#3a2208", 0.42);
+      // By day the numerals are one flat ink, with the faintest slow ripple.
+      for (let k = 0; k < 4; k++) P.ink[k] = mix("#111219", "#262833", k * 0.22);
+      P.inkSeam = "#2c2e3a";
 
       for (let k = 0; k < 6; k++) {
         P.skin[k] = person(SKIN[k]);
@@ -290,9 +332,10 @@ export default {
         const um = oklch(lerp(u.l, skyL, 0.72) + (k % 3 - 1) * 0.03, u.c, u.h);
         // After dark the umbrellas keep a dim colour of their own, wet domes
         // catching the light from the cards, so the rain still shows in the crowd.
-        const umNight = oklch(0.29 + (k % 3 - 1) * 0.025, Math.min(0.07, u.c * 0.6), u.h);
+        const umNight = oklch(0.33 + (k % 3 - 1) * 0.03, Math.min(0.08, u.c * 0.7), u.h);
         P.umb[k] = mix(umNight, um, dayK);
-        P.umbDark[k] = mix(P.umb[k], "#000000", 0.16);
+        P.umbDark[k] = mix(P.umb[k], "#000000", 0.18);
+        P.umbHi[k] = mix(P.umb[k], dayK > 0.5 ? "#ffffff" : "#ffcf8a", 0.38); // wet sheen
       }
       for (let k = 0; k < 8; k++) {
         P.hair[k] = person(HAIR[k]);
@@ -319,6 +362,9 @@ export default {
       const st = wrap.style;
       st.setProperty("--cloth", mix("#17181e", "#f1e7d3", k));
       st.setProperty("--hem", mix("#2a2b34", "#d6c8ab", k));
+      st.setProperty("--hand1", P.skin[1]);
+      st.setProperty("--hand2", P.skin[3]);
+      st.setProperty("--hand3", P.skin[0]);
       if (day !== clothDay) {
         clothDay = day;
         st.setProperty("--paint", day ? "#14151c" : "#f6be64");
@@ -338,7 +384,7 @@ export default {
       env.thrCloud = env.cloud < 0.02 ? 9 : env.cloud > 0.985 ? -9 : quantile(1 - env.cloud);
       env.thrCore = env.cloud < 0.02 ? 9 : quantile(1 - env.cloud * 0.5);
       const snowing = wx.falling === "snow";
-      env.umb = wx.falling ? clamp((snowing ? 0.12 : 0.22) + wx.intensity * (snowing ? 0.6 : 0.95)) : 0;
+      env.umb = wx.falling ? clamp((snowing ? 0.12 : 0.4) + wx.intensity * (snowing ? 0.6 : 1.1)) : 0;
       env.snow = snowing ? clamp(0.35 + 0.65 * wx.intensity) : 0;
       const night = 1 - smoothstep(0.06, 0.3, s.daylight);
       env.sleep = night * lerp(0.3, 0.97, smoothstep(0.08, 0.45, s.sun.up ? 0 : s.sun.progress));
@@ -359,10 +405,10 @@ export default {
     }
 
     // ----- banners ----------------------------------------------------------
-    function makeBanner(cls, ph) {
-      const node = el("div", { class: `bn ${cls}` });
+    function makeBanner(cls, ph, rigid = false) {
+      const node = el("div", { class: `bn ${cls}${rigid ? " board" : ""}` });
       const slices = [];
-      for (let k = 0; k < 17; k++) {
+      for (let k = 0; k < (rigid ? 0 : 17); k++) {
         const sl = el("div", { class: "sl", style: { left: `${k * 60 - 0.5}px` } });
         node.append(sl);
         slices.push(sl);
@@ -370,7 +416,7 @@ export default {
       const tx = el("div", { class: "tx" });
       node.append(tx);
       wrap.append(node);
-      return { node, slices, tx, c0: -1, c1: -1, r0: -1, r1: -1, top: -1, h: -1, n: 0, x: 0, ph, items: [], sy: new Float32Array(17).fill(99), sa: new Float32Array(17) };
+      return { node, slices, tx, rigid, c0: -1, c1: -1, r0: -1, r1: -1, top: -1, h: -1, n: 0, x: 0, ph, items: [], sy: new Float32Array(17).fill(99), sa: new Float32Array(17) };
     }
     // A banner over columns c0..c1, from y `top`, `h` tall. The row it starts in
     // holds it up (heads peek over the top); rows it mostly covers are hidden.
@@ -380,7 +426,7 @@ export default {
       if (b.c0 === c0 && b.c1 === c1 && b.top === top && b.h === h) return false;
       b.c0 = c0; b.c1 = c1; b.r0 = r0; b.r1 = r1; b.top = top; b.h = h;
       b.x = c0 * S;
-      b.n = Math.round(((c1 - c0 + 1) * S) / 60);
+      b.n = b.rigid ? 0 : Math.round(((c1 - c0 + 1) * S) / 60);
       Object.assign(b.node.style, { left: `${b.x}px`, top: `${top}px`, width: `${(c1 - c0 + 1) * S}px`, height: `${h}px` });
       b.slices.forEach((sl, k) => (sl.style.display = k < b.n ? "" : "none"));
       b.sy.fill(99);
@@ -388,6 +434,7 @@ export default {
     }
     // Where each rippling piece of type sits across the stage.
     function measure(b) {
+      if (b.rigid) return;
       const base = wrap.getBoundingClientRect();
       const k = base.width / 1080 || 1;
       b.items.length = 0;
@@ -396,10 +443,6 @@ export default {
         b.items.push({ node, x: (q.left + q.width / 2 - base.left) / k, rot: +node.dataset.rot || 0, y: 99, a: 0 });
       }
     }
-    const letters = (node, text) => {
-      node.textContent = "";
-      for (const ch of text) node.append(el("span", { class: "g", text: ch === " " ? " " : ch }));
-    };
     const words = (node, text) => {
       node.textContent = "";
       text.split(/\s+/).forEach((w, k) => {
@@ -413,9 +456,14 @@ export default {
       return { node: el("span", { class: `g ${cls}` }, label, value), label, value };
     };
 
-    const bDate = makeBanner("date", 0);
+    // The date runs on the ribbon board along the roof, the temperature on a
+    // painted sheet the crowd holds up between the hour and the minutes, and
+    // the rest on the scoreboard standing in the lower stand.
+    const bDate = makeBanner("date", 0, true);
     const bMid = makeBanner("mid", 2.1);
-    const bTifo = makeBanner("tifo", 4.4);
+    const bTifo = makeBanner("tifo", 4.4, true);
+    const posts = [el("div", { class: "post" }), el("div", { class: "post" })];
+    wrap.append(...posts);
     const banners = [bDate, bMid, bTifo];
 
     const dateLine = el("span");
@@ -459,7 +507,7 @@ export default {
     function updateText(s) {
       const tx = s.text;
       let changed = false;
-      if (put("date", tx.date)) { letters(dateLine, tx.date); changed = true; }
+      if (put("date", tx.date)) { dateLine.textContent = tx.date; changed = true; }
       if (put("temp", tx.temp)) { tempEl.textContent = tx.temp; changed = true; }
       if (put("cond", tx.condition)) { words(condEl, tx.condition); changed = true; }
       if (put("aqi", tx.aqi)) { aqi.value.textContent = tx.aqi; changed = true; }
@@ -481,8 +529,7 @@ export default {
         dateLine.style.fontSize = `${Math.max(44, Math.floor((58 * 880) / w))}px`;
         w = dateLine.offsetWidth;
       }
-      const seats = clamp(Math.ceil((w + 96) / 60) * 2, 12, 34);
-      let moved = placeBanner(bDate, (COLS - seats) / 2, (COLS - seats) / 2 + seats - 1, DATE_TOP, DATE_H);
+      let moved = placeBanner(bDate, 0, COLS - 1, DATE_TOP, DATE_H);
 
       // So is the temperature strip, to the length of what it says.
       condEl.style.fontSize = "54px";
@@ -498,7 +545,7 @@ export default {
       moved = placeBanner(bTifo, 1, 34, TIFO_TOP, bTifo.h > 0 ? bTifo.h : 300) || moved; // its width, before measuring
       rule.style.display = fLabel.style.display = fValue.style.display = hasFact ? "" : "none";
       row1.style.fontSize = "42px";
-      const inner = 1020 - 68;
+      const inner = 1020 - 12 - 68;
       const rw = sun.node.offsetWidth + moon.node.offsetWidth + 44;
       if (rw > inner) row1.style.fontSize = `${Math.max(36, Math.floor((42 * inner) / rw))}px`;
       if (hasFact) {
@@ -509,7 +556,10 @@ export default {
           if (fh <= Math.ceil(size * 1.2 * 2) + 2 && fh <= 112) break;
         }
       }
-      moved = placeBanner(bTifo, 1, 34, TIFO_TOP, col.offsetHeight) || moved;
+      moved = placeBanner(bTifo, 1, 34, TIFO_TOP, col.offsetHeight + 12) || moved;
+      // The scoreboard stands on two posts.
+      const foot = TIFO_TOP + bTifo.h;
+      posts.forEach((p, k) => Object.assign(p.style, { left: `${k ? 836 : 220}px`, top: `${foot}px`, height: `${1920 - foot}px` }));
       for (const b of banners) measure(b);
       if (moved) rolesStale = true;
     }
@@ -519,6 +569,7 @@ export default {
     const waveY = (x, t, ph) => env.bannerAmp * (0.62 * Math.sin(x * K1 - t * env.bannerOm + ph) + 0.38 * Math.sin(x * K2 - t * env.bannerOm * 1.63 + ph * 2.1));
     function ripple(t) {
       for (const b of banners) {
+        if (b.rigid) continue;
         let yl = waveY(b.x, t, b.ph);
         // Only pieces that have visibly moved are written to the DOM.
         for (let k = 0; k < b.n; k++) {
@@ -577,7 +628,7 @@ export default {
         }
       }
       for (const b of banners) {
-        for (let rr = b.r0; rr <= b.r1; rr++) for (let cc = b.c0; cc <= b.c1; cc++) role[rr * COLS + cc] = rr === b.r0 ? R_HOLD : R_COVER;
+        for (let rr = b.r0; rr <= b.r1; rr++) for (let cc = b.c0; cc <= b.c1; cc++) role[rr * COLS + cc] = rr === b.r0 && !b.rigid ? R_HOLD : R_COVER;
       }
     }
     function wantOf(i) {
@@ -731,9 +782,32 @@ export default {
           dip = (1 - Math.cos(u * TAU * 5)) * 1.1 * inOut;
         }
       }
-      const up = face[i] >= F_INK && face[i] <= F_LIT ? lift[i] * 0.5 : lift[i]; // numeral holders only bob, so the stroke stays whole
+      const lv = lift[i]; // the stadium wave: 0 seated .. 3 card held high, other face out
+      const up = face[i] >= F_INK && face[i] <= F_LIT ? 0 : lv * 3; // numeral holders hold still, so the figure stays whole
       const cx = 15 + jx[i];
       const veil = f === F_INK || f === F_LIT ? "" : P.veil[row];
+
+      if ((f === F_INK || f === F_LIT) && open >= 0.97) {
+        // A numeral card, settled: it fills the seat, so the cards close up into
+        // one flat figure with only a hairline seam between them.
+        const lvl = numLvl[i];
+        ctx.fillStyle = f === F_LIT ? P.litSeam : P.inkSeam;
+        ctx.fillRect(0, 0, S, S);
+        ctx.fillStyle = f === F_LIT ? P.lit[lvl] : P.ink[lvl];
+        ctx.fillRect(1, 1, S - 2, S - 2);
+        if (env.snow > 0.05 && (row === 0 || role[i - COLS] !== R_NUM)) {
+          // Snow settles along the top edge of each stroke.
+          ctx.fillStyle = P.snow;
+          ctx.beginPath();
+          ctx.roundRect(1, 0.5, S - 2, 2 + 3.5 * env.snow * capVar[i], 1.5);
+          ctx.fill();
+        }
+        if (P.veilNum[row] !== "") {
+          ctx.fillStyle = P.veilNum[row];
+          ctx.fillRect(0, 0, S, S);
+        }
+        return;
+      }
 
       if (f <= F_LIT) {
         // Someone holding a card: hair and eyes over the top edge, fingers gripping it.
@@ -745,48 +819,39 @@ export default {
           ctx.fillRect(0, 0, S, S);
         }
         head(i, cx, hy, peek > 0.12, look, 0, f === F_LIT ? 2 : role[i] === R_MOAT ? 1 : 0);
-        const hh = 9.5 * open;
+        // The wave: the card goes up, turns through edge-on, and shows its other
+        // face (sky cards turn cloud-white, cloud cards turn sky) at the crest.
+        const turning = !numeral && (lv === 1 || lv === 2);
+        const hh = (numeral ? 14 : 9.9) * open * (turning ? 0.4 : 1);
         if (hh > 0.35) {
-          const a = tilt[i] + wob + env.lean * capVar[i];
+          const a = numeral ? 0 : tilt[i] + wob + env.lean * capVar[i];
           const c = Math.cos(a) * R;
           const sn = Math.sin(a) * R;
-          ctx.setTransform(c, sn, -sn, c, (x0 + cx) * R, (y0 + 20.1 - up + dip) * R);
+          ctx.setTransform(c, sn, -sn, c, (x0 + (numeral ? 15 : cx)) * R, (y0 + (numeral ? 15 : 19.9) - up + dip) * R);
+          const other = !numeral && lv >= 2;
           let fill;
-          if (f === F_SKY) fill = P.sky[col * 3 + shadeI[i]];
-          else if (f === F_CLOUD) fill = P.cloud[col * 3 + shadeI[i]];
-          else if (f === F_CORE) fill = P.core[col * 3 + shadeI[i]];
-          else if (f === F_INK) fill = INK[shadeI[i]];
-          else fill = P.lit[((Math.sin(env.t * 0.35 + phase[i]) * 0.5 + 0.5) * 3.99) | 0];
+          if (f === F_INK) fill = P.ink[numLvl[i]];
+          else if (f === F_LIT) fill = P.lit[numLvl[i]];
+          else if ((f === F_SKY) !== other) fill = P.sky[col * 3 + shadeI[i]];
+          else if (f === F_CORE && !other) fill = P.core[col * 3 + shadeI[i]];
+          else fill = P.cloud[col * 3 + shadeI[i]];
+          const hw = numeral ? 14 : 13.6;
           ctx.fillStyle = fill;
           ctx.beginPath();
-          ctx.roundRect(-13, -hh, 26, hh * 2, Math.min(3, hh));
+          ctx.roundRect(-hw, -hh, hw * 2, hh * 2, Math.min(numeral ? 1 : 3, hh));
           ctx.fill();
-          if (env.snow > 0.05) {
+          if (env.snow > 0.05 && !numeral) {
             ctx.fillStyle = P.snow;
             ctx.beginPath();
-            ctx.roundRect(-13, -hh - 0.6, 26, Math.min(hh, (1.2 + 3.4 * env.snow * capVar[i]) * (numeral ? 0.55 : 1)), 1.6);
+            ctx.roundRect(-hw, -hh - 0.6, hw * 2, Math.min(hh, 1.2 + 3.4 * env.snow * capVar[i]), 1.6);
             ctx.fill();
           }
-          ctx.fillStyle = f === F_LIT ? P.skinLit[skinI[i] % 6] : P.skin[skinI[i] % 6];
-          ctx.beginPath();
-          ctx.arc(-10.4, -hh + 0.7, 1.9, 0, TAU);
-          ctx.moveTo(12.3, -hh + 0.7);
-          ctx.arc(10.4, -hh + 0.7, 1.9, 0, TAU);
-          ctx.fill();
-          if (f === F_LIT && open > 0.5) {
-            const lx = sideI[i] * 6.6;
-            const ly = -hh - 2.4;
-            ctx.fillStyle = P.halo;
+          if (!numeral) {
+            ctx.fillStyle = P.skin[skinI[i] % 6];
             ctx.beginPath();
-            ctx.arc(lx, ly, 5.6, 0, TAU);
-            ctx.fill();
-            ctx.fillStyle = P.halo2;
-            ctx.beginPath();
-            ctx.arc(lx, ly, 3.1, 0, TAU);
-            ctx.fill();
-            ctx.fillStyle = P.light;
-            ctx.beginPath();
-            ctx.arc(lx, ly, 1.6, 0, TAU);
+            ctx.arc(-10.6, -hh + 0.7, 1.9, 0, TAU);
+            ctx.moveTo(12.5, -hh + 0.7);
+            ctx.arc(10.6, -hh + 0.7, 1.9, 0, TAU);
             ctx.fill();
           }
           ctx.setTransform(R, 0, 0, R, x0 * R, y0 * R);
@@ -800,7 +865,7 @@ export default {
         const hy = lerp(9.6, 20.2, open);
         torso(i, hy);
         head(i, 15, hy, true, look, 0, 0);
-        const rad = 13.2 * open;
+        const rad = 14.6 * open; // domes all but touching: a roof of umbrellas
         if (rad > 0.6) {
           const a = (up / 9) * 0.5 * (env.wx < 0 ? -1 : 1) + wob * 1.6;
           const c = Math.cos(a) * R;
@@ -822,6 +887,12 @@ export default {
           ctx.quadraticCurveTo(rad * 0.36, -rad * 0.74, rad * 0.333, 0);
           ctx.quadraticCurveTo(0, -rad * 0.3, -rad * 0.333, 0);
           ctx.fill();
+          // A wet highlight along the crown.
+          ctx.fillStyle = P.umbHi[k];
+          ctx.beginPath();
+          ctx.arc(0, 0, rad * 0.8, Math.PI * 1.18, Math.PI * 1.42);
+          ctx.arc(0, 0, rad * 0.62, Math.PI * 1.42, Math.PI * 1.18, true);
+          ctx.fill();
           if (env.snow > 0.05) {
             const a0 = 1.05 - env.snow * 0.45 * capVar[i];
             ctx.fillStyle = P.snow;
@@ -834,7 +905,7 @@ export default {
         }
       } else if (f === F_SLEEP) {
         // Asleep: card in the lap, head tipped forward.
-        const deep = open + (up / 9) * 0.25 - peek * 0.75;
+        const deep = open - (up / 9) * 0.7 - peek * 0.75; // the wave rouses them for a moment
         const hy = lerp(9.6, 18.2, deep);
         torso(i, hy);
         ctx.fillStyle = P.lap[col];
@@ -880,7 +951,7 @@ export default {
       dropCtx.setTransform(SPR, 0, 0, SPR, 0, 0);
       dropCtx.clearRect(0, 0, 40, 56);
       dropCtx.strokeStyle = color;
-      dropCtx.lineWidth = 2;
+      dropCtx.lineWidth = 2.4;
       dropCtx.lineCap = "round";
       dropCtx.beginPath();
       dropCtx.moveTo(20 + slant * 25, 3);
@@ -903,17 +974,60 @@ export default {
       flakeCtx.fill();
     }
     let wetClean = true;
+    // In a strong wind a few cards get away and tumble across the stand.
+    const LOOSE = 9;
+    const lx = new Float32Array(LOOSE);
+    const ly = new Float32Array(LOOSE);
+    const lsp = new Float32Array(LOOSE);
+    const lph = new Float32Array(LOOSE);
+    for (let k = 0; k < LOOSE; k++) {
+      lx[k] = r.range(0, 1080);
+      ly[k] = r.range(200, 1500);
+      lsp[k] = r.range(0.7, 1.3);
+      lph[k] = r() * TAU;
+    }
+    function drawLoose(s, g, n) {
+      const speed = 40 + s.weather.wind * 6; // px/s: 220 at 30 mph
+      const dt = s.dt;
+      for (let k = 0; k < n; k++) {
+        const v = speed * lsp[k];
+        lx[k] += env.wx * v * dt;
+        ly[k] += (env.wy * v * 0.5 + Math.sin(s.t * 1.3 + lph[k]) * 30) * dt;
+        if (lx[k] > 1110 || lx[k] < -30 || ly[k] > 1900 || ly[k] < 20) {
+          // back in from the upwind side
+          const across = 160 + hash(k, s.frame) * 1400;
+          if (Math.abs(env.wx) >= Math.abs(env.wy)) {
+            lx[k] = env.wx > 0 ? -25 : 1105;
+            ly[k] = across;
+          } else {
+            lx[k] = hash(k + 9, s.frame) * 1080;
+            ly[k] = env.wy > 0 ? 30 : 1890;
+          }
+        }
+        const a = s.t * 1.7 * lsp[k] + lph[k];
+        const q = Math.cos(s.t * 3.1 * lsp[k] + lph[k] * 2); // tumbling: seen face-on, then edge-on
+        const c = Math.cos(a);
+        const sn = Math.sin(a);
+        g.setTransform(c, sn, -sn * q, c * q, lx[k], ly[k]);
+        g.fillStyle = (k & 1) ? P.cloud[((k * 7) % COLS) * 3 + 2] : P.sky[((k * 11) % COLS) * 3 + 2];
+        g.fillRect(-13, -9.5, 26, 19);
+      }
+      g.setTransform(1, 0, 0, 1, 0, 0);
+    }
     function drawWet(s) {
       const wx = s.weather;
       const g = wet.ctx;
-      const count = !wx.falling ? 0 : wx.falling === "snow" ? Math.round(DROPS * clamp(0.3 + 0.7 * wx.intensity)) : Math.round(300 * clamp(0.2 + 0.8 * wx.intensity));
-      if (!count) {
+      const count = !wx.falling ? 0 : wx.falling === "snow" ? Math.round(DROPS * clamp(0.3 + 0.7 * wx.intensity)) : Math.round(380 * clamp(0.25 + 0.75 * wx.intensity));
+      const loose = Math.round(LOOSE * clamp((wx.wind - 13) / 20));
+      if (!count && !loose) {
         if (!wetClean) wet.clear();
         wetClean = true;
         return;
       }
       wet.clear();
       wetClean = false;
+      if (loose) drawLoose(s, g, loose);
+      if (!count) return;
       const slant = Math.round(clamp(env.wx * wx.wind * 0.03, -0.7, 0.7) * 20) / 20;
       if (wx.falling === "snow") {
         makeFlake(P.flake);
@@ -935,7 +1049,7 @@ export default {
         makeDrop(P.rain, slant);
         const fall = wx.falling === "drizzle" ? 420 : 640 + wx.intensity * 260;
         const len = wx.falling === "drizzle" ? 12 : 20 + wx.intensity * 16;
-        g.globalAlpha = 0.5;
+        g.globalAlpha = 0.62;
         for (let k = 0; k < count; k++) {
           dy[k] += fall * dv[k] * s.dt;
           dx[k] += slant * fall * dv[k] * s.dt;
@@ -1033,30 +1147,28 @@ export default {
         }
       }
 
-      // Gusts set off stadium waves that travel downwind.
-      if (!jump && env.gusty > 0.01) {
-        gustAcc += dt * lerp(1 / 50, 1 / 10, env.gusty);
-        if (gustAcc >= 1) {
-          gustAcc -= 1;
-          for (let k = 0; k < WAVES; k++) {
-            if (wOn[k]) continue;
-            wOn[k] = 1;
-            wT0[k] = t;
-            wDx[k] = env.wx;
-            wDy[k] = env.wy;
-            wSpeed[k] = 150 + 130 * env.gusty;
-            wAmp[k] = 6 + 3 * env.gusty; // never out of the seat: the card goes up past the face
-            const ext = Math.abs(env.wx) * 540 + Math.abs(env.wy) * 960;
-            const mid = env.wx * 540 + env.wy * 960;
-            wFrom[k] = mid - ext - 90;
-            wTo[k] = mid + ext + 90;
-            break;
+      // The crowd keeps a stadium wave going: one rolls round the stand every
+      // twenty seconds or so, downwind. Gusts set off more of them, faster, and
+      // along the real wind.
+      if (!jump) {
+        ambAcc += dt / 21;
+        if (ambAcc >= 1) {
+          ambAcc -= 1;
+          ambSide = Math.abs(env.wx) > 0.2 ? (env.wx > 0 ? 1 : -1) : -ambSide;
+          launchWave(t, ambSide, 0, 125);
+        }
+        if (env.gusty > 0.01) {
+          gustAcc += dt * lerp(1 / 50, 1 / 10, env.gusty);
+          if (gustAcc >= 1) {
+            gustAcc -= 1;
+            launchWave(t, env.wx, env.wy, 160 + 130 * env.gusty);
           }
         }
       }
       let anyWave = false;
       for (let k = 0; k < WAVES; k++) if (wOn[k]) anyWave = true;
-      if (anyWave) {
+      if (anyWave || waveLive) {
+        waveLive = anyWave;
         for (let i = 0; i < N; i++) {
           liftWas[i] = lift[i];
           lift[i] = 0;
@@ -1073,9 +1185,9 @@ export default {
           const base = wDx[k] * 15 + wDy[k] * 15 - front;
           for (let i = 0; i < N; i++) {
             const d = (i % COLS) * ax + ((i / COLS) | 0) * ay + base;
-            if (d > -75 && d < 75) {
-              const c = Math.cos(d * 0.020944); // pi / 150
-              const v = Math.round(wAmp[k] * c * c * 0.34) * 3; // in 3 px steps: fewer redraws
+            if (d > -90 && d < 90) {
+              const c = Math.cos(d * 0.017453); // pi / 180
+              const v = Math.round(3 * c * c); // in steps: up, edge-on, other face
               if (v > lift[i]) lift[i] = v;
             }
           }
@@ -1114,12 +1226,20 @@ export default {
         }
       }
 
-      // The lit numerals breathe, a few at a time; after a palette change everyone
-      // is repainted, a few dozen a frame.
-      const nightly = env.lit ? 14 : 0;
-      for (let k = 0; k < nightly && numCount; k++) {
-        numAt = (numAt + 1) % numCount;
-        dirty[numList[numAt]] = 1;
+      // A slow ripple runs across the numerals: their cards step through four
+      // close shades (amber by night, ink by day). Only cards whose shade
+      // changes are redrawn. After a palette change everyone is repainted, a
+      // few dozen a frame.
+      if ((s.frame & 1) === 0) {
+        const ph = t * 0.55;
+        for (let k = 0; k < numCount; k++) {
+          const i = numList[k];
+          const v = ((Math.sin((i % COLS) * 0.36 + ((i / COLS) | 0) * 0.22 - ph) * 0.5 + 0.5) * 3.99) | 0;
+          if (v !== numLvl[i]) {
+            numLvl[i] = v;
+            dirty[i] = 1;
+          }
+        }
       }
       for (let k = 0; k < 40 && refreshLeft > 0; k++, refreshLeft--) {
         orderAt = (orderAt + 1) % N;

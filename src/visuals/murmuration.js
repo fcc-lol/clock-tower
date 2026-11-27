@@ -40,7 +40,7 @@ import {
 
 const DISPLAY = '"Big Shoulders Display", "Anton", "Arial Narrow", sans-serif';
 const SANS = '"Instrument Sans", "Helvetica Neue", Arial, sans-serif';
-const SERIF = '"Instrument Serif", Georgia, serif';
+const SERIF = '"Newsreader", Georgia, serif';
 
 const NG = 2100; // birds that live in the numerals
 const NF = 600; // free birds: the ribbon, the wires, and at night the numerals too
@@ -90,7 +90,7 @@ export default {
   title: "Murmuration",
   description: "Three thousand starlings wheel in the real colour of the sky, and the densest part of the flock is the time; the real wind tears at it.",
   fps: 24, // the flock reads as smooth at film rate, and the Pi is spared a fifth of the drawing
-  fonts: ["Big Shoulders Display:wght@900", "Instrument Sans:wdth,wght@75..100,400..700", "Instrument Serif:ital@0;1"],
+  fonts: ["Big Shoulders Display:wght@900", "Instrument Sans:wdth,wght@75..100,400..700", "Newsreader:ital,opsz,wght@1,6..72,500"],
 
   mount(root, { state, seed }) {
     addStyle(root, `
@@ -110,11 +110,10 @@ export default {
       .mu .soft { font-size: 34px; font-weight: 400; }
       .mu .ampmBox { position: absolute; overflow: visible; z-index: 6; will-change: transform; }
       .mu .ampm { font-family: ${DISPLAY}; font-size: 108px; font-weight: 900; fill: currentColor; letter-spacing: 0.01em; paint-order: stroke fill; stroke-width: 12px; stroke-linejoin: round; }
-      .mu .fact { position: absolute; left: ${MARGIN}px; top: 1738px; width: ${W - 2 * MARGIN}px; z-index: 6; will-change: transform;
-        font-family: ${SERIF}; font-style: italic; font-size: 46px; line-height: 56px; max-height: 112px; overflow: hidden;
-        text-wrap: balance; letter-spacing: 0.003em; }
+      .mu .fact { position: absolute; left: ${MARGIN}px; top: 1728px; width: ${W - 2 * MARGIN}px; z-index: 6; will-change: transform;
+        font-family: ${SERIF}; font-style: italic; font-weight: 500; font-size: 52px; line-height: 63px; max-height: 126px; overflow: hidden;
+        font-optical-sizing: auto; text-wrap: balance; letter-spacing: 0.002em; }
     `);
-    const __t0=performance.now(); let __tp=__t0; const __L=[]; const __m=(n)=>{const t=performance.now(); __L.push(n+":"+(t-__tp).toFixed(1)); __tp=t;};
     const wrap = el("div", { class: "mu" });
     root.append(wrap);
 
@@ -247,7 +246,6 @@ export default {
       return `#${h(skyImg.data[o])}${h(skyImg.data[o + 1])}${h(skyImg.data[o + 2])}`;
     };
 
-    __m("sky");
     // ------------------------------------------------------------- clouds
     // One soft band texture, built once, twice as wide as its period so it can
     // drift for ever; its tint and opacity follow the cloud cover and the light.
@@ -291,7 +289,6 @@ export default {
     const glow = el("div", { class: "glow" });
     wrap.append(glow);
 
-    __m("clouds");
     // --------------------------------------------- the numerals as a field
     // For each digit: a distance-to-edge field inside the strokes. Birds'
     // home points ride its contour lines, so they stream round and round the
@@ -411,7 +408,6 @@ export default {
       return { c, ctx: c.getContext("2d"), key: "", on: false, sh: 0, x: 0, op: -1, dark: true, lumGap: 0 };
     });
 
-    __m("fieldsetup");
     // ------------------------------------------------------------- birds
     const px = new Float32Array(N), py = new Float32Array(N), vx = new Float32Array(N), vy = new Float32Array(N);
     const alx = new Float32Array(N), aly = new Float32Array(N), psi0 = new Float32Array(N);
@@ -427,7 +423,7 @@ export default {
       size[i] = r < 0.4 ? 0 : r < 0.84 ? 1 : 2;
       half[i] = HALF[size[i]] * R.range(0.88, 1.14);
       kT[i] = R.range(24, 40);
-      loose[i] = R.chance(0.27) ? Math.pow(R(), 1.6) * 0.95 + 0.05 : 0; // the birds the wind can carry off
+      loose[i] = R.chance(0.2) ? Math.pow(R(), 1.6) * 0.95 + 0.05 : 0; // the birds the wind can carry off
       peel[i] = loose[i] === 0 && R.chance(0.28) ? R.range(0.5, 1) : 0; // the ones a gust can peel
       const bank = clamp(R.gauss() * 0.42, -1, 1); // each bird banks at its own angle
       bankC[i] = Math.cos(bank);
@@ -481,7 +477,7 @@ export default {
     const cum = [0, 0, 0, 0];
     function setTime(hh, mm, first) {
       const want = [+hh[0], hh.length > 1 ? +hh[1] : -1, +mm[0], +mm[1]];
-      for (let k = 0; k < 4; k++) if (want[k] >= 0) field(want[k]); if (typeof __m!=="undefined") __m("fields");
+      for (let k = 0; k < 4; k++) if (want[k] >= 0) field(want[k]);
       let x = LEFT;
       for (let k = 0; k < 4; k++) {
         const s = slots[k];
@@ -535,7 +531,6 @@ export default {
       }
     }
 
-    __m("birds");
     // ----------------------------------------------- wires and captions
     // Each wire is its own small SVG band, so its sway is a cheap transform.
     const bands = [];
@@ -561,7 +556,7 @@ export default {
     });
     const onWire = (w, cls, anchor, ...kids) => {
       const tp = svg("textPath", { href: `#mu-w${w}` }, kids);
-      const text = svg("text", { class: cls, "text-anchor": anchor, dy: -17 }, tp);
+      const text = svg("text", { class: cls, "text-anchor": anchor, dy: -26 }, tp);
       bands[w].append(text);
       return { text, tp, w, right: anchor === "end", width: 0, dx: 0 };
     };
@@ -689,7 +684,7 @@ export default {
         place(tFactLab, MARGIN);
         busy[2].push([MARGIN - GAP, MARGIN + tFactLab.width + GAP]);
         // up to two lines; a long fact steps down in size rather than overflow
-        for (const fs of [46, 41, 37]) {
+        for (const fs of [52, 47, 42]) {
           const lh = Math.ceil(fs * 1.2);
           fact.style.fontSize = `${fs}px`;
           fact.style.lineHeight = `${lh}px`;
@@ -700,16 +695,16 @@ export default {
       seatBirds();
     }
 
-    __m("wires");
     // -------------------------------------------------------------- inks
     const INK_DAY = "#0b0d12";
-    const INK_NIGHT = "#d2c8b2"; // birds lit from below by the city
+    const INK_NIGHT = "#e4dac4"; // birds lit from below by the city
     const INK_DUSK = "#ece6d6"; // the same birds catching the last light on a mid-toned sky
     const TYPE_DAY = "#050608";
     const TYPE_NIGHT = "#f5f1e8"; // near-white: at the switch even this only just reads
     const FLIP = 0.168; // sky luminance where dark and pale type read equally well
     let birdFlip = 0.1; // the same for birds, which stay silhouettes for as long as there is daylight
     const ALPHA = [0.86, 0.95, 1];
+    const FLY_ALPHA = 0.6; // the ribbon in flight, against the numerals' full ink
     const WIDTH = [1.8, 2.2, 2.6];
     let pale = INK_NIGHT;
     let skyKey = "";
@@ -790,7 +785,6 @@ export default {
       g.dark = dark;
     }
 
-    __m("inks");
     // ------------------------------------------------------ the simulation
     const birds = canvas2d(wrap, { maxScale: 2, adaptive: true });
     birds.canvas.style.zIndex = "4";
@@ -1112,8 +1106,8 @@ export default {
         }
         dotStyles[0] = rgba(INK_DAY, +(0.8 * (1 - 0.3 * fog)).toFixed(3));
         dotStyles[1] = rgba(pale, +(0.8 * (1 - 0.3 * fog)).toFixed(3));
-        dotStyles[2] = rgba(INK_DAY, +(0.8 * (1 - 0.9 * fog)).toFixed(3));
-        dotStyles[3] = rgba(pale, +(0.8 * (1 - 0.9 * fog)).toFixed(3));
+        dotStyles[2] = rgba(INK_DAY, +(0.55 * (1 - 0.9 * fog)).toFixed(3));
+        dotStyles[3] = rgba(pale, +(0.55 * (1 - 0.9 * fog)).toFixed(3));
       }
       // far birds first: specks
       for (let i = 0; i < NDG; i++) dbk[i] = slots[dsl[i]].light;
@@ -1139,25 +1133,27 @@ export default {
         ctx.fill();
       }
       // the birds proper. A whole digit flips ink together, so it never averages
-      // out to the tone of the sky; a free bird takes the ink that reads where it is.
+      // out to the tone of the sky; a free bird takes the ink that reads where it
+      // is, and in flight it is drawn a shade lighter (the ribbon is the farther
+      // flock), so where it crosses a numeral the figure still reads through it.
       for (let i = 0; i < N; i++) {
         if (md[i] === 0) bk[i] = slots[sl[i]].light;
-        else if (md[i] === 1 && perched[i - NG]) bk[i] = 2;
+        else if (md[i] === 1 && perched[i - NG]) bk[i] = 4;
         else {
           let ci = (px[i] * (SC / W)) | 0;
           let cj = (py[i] * (SR / H)) | 0;
           if (ci < 0) ci = 0; else if (ci >= SC) ci = SC - 1;
           if (cj < 0) cj = 0; else if (cj >= SR) cj = SR - 1;
-          bk[i] = skyLum[cj * SC + ci] < birdFlip ? 1 : 0;
+          bk[i] = (skyLum[cj * SC + ci] < birdFlip ? 1 : 0) + 2;
         }
       }
       for (let r = 0; r < 6; r++) {
         const run = runs[r];
         const z = run.z;
         const wd = WIDTH[z];
-        ctx.globalAlpha = runAlpha[r];
-        for (let ink = 0; ink < 2; ink++) {
-          ctx.fillStyle = ink ? pale : INK_DAY;
+        for (let ink = 0; ink < (run.free ? 4 : 2); ink++) {
+          ctx.globalAlpha = runAlpha[r] * (ink > 1 ? FLY_ALPHA : 1);
+          ctx.fillStyle = ink & 1 ? pale : INK_DAY;
           ctx.beginPath();
           for (let o = run.from; o < run.to; o++) {
             const i = drawOrder[o];
@@ -1274,8 +1270,8 @@ export default {
       if (tk !== timeKey) {
         const first = timeKey === "" || jumped;
         timeKey = tk;
-        if (typeof __m!=="undefined") __m("pre"); setTime(tx.hh, tx.mm, first); if (typeof __m!=="undefined") __m("setTime");
-        for (let k = 0; k < 4; k++) drawGhost(k); if (typeof __m!=="undefined") __m("ghost");
+        setTime(tx.hh, tx.mm, first);
+        for (let k = 0; k < 4; k++) drawGhost(k);
       }
       put("ampm", ampm, tx.ampm);
       if (put("date", tDate.tp, tx.date)) relayout = true;
@@ -1289,7 +1285,7 @@ export default {
       const hasFact = tx.factValue !== "";
       if (put("factL", tFactLab.tp, hasFact ? tx.factLabel : "")) relayout = true;
       if (put("factV", fact, tx.factValue)) relayout = true;
-      if (typeof __m!=="undefined") __m("puts"); if (relayout) layoutCaptions(hasFact); if (typeof __m!=="undefined") __m("layout");
+      if (relayout && laidOut) layoutCaptions(hasFact);
     }
 
     function paintGround() {
@@ -1326,7 +1322,10 @@ export default {
         const S = slots[k];
         const g = ghosts[k];
         if (S.ch < 0) continue;
-        const op = Math.round((g.dark ? 0.34 : 0.3) * smoothstep(0, 0.035, g.lumGap) * (1 - 0.5 * S.rel) * 40) / 40;
+        // strong enough that the figure reads on its own, even where birds
+        // peel away or the ribbon crosses it; a little softer right at the
+        // ink switch, where neither ink has much to push against
+        const op = Math.round((g.dark ? 0.68 : 0.46) * (0.72 + 0.28 * smoothstep(0, 0.035, g.lumGap)) * (1 - 0.45 * S.rel) * 40) / 40;
         if (op !== g.op || qs !== g.sh || S.ox !== g.x) {
           g.op = op;
           g.sh = qs;
@@ -1385,15 +1384,15 @@ export default {
     }
 
     let lastMs = state.ms;
+    // The captions are measured and placed on the first frame rather than in
+    // mount (it forces a text layout), which keeps mount short.
+    let laidOut = false;
     // Start in full flight: the first frame places every bird at its home
     // (`snap`), and the runner then gives the piece plenty of unseen frames for
     // the streamers to develop. Leaving that to the first frame keeps mount short.
-    __m("preSync");
     syncText(state, false);
-    __m("syncText");
     syncLook(state);
 
-    __m("syncLook"); console.warn("MOUNT "+(performance.now()-__t0).toFixed(1)+" "+__L.join(" "));
     return {
       frame(s) {
         // the clock jumped (a time-lapse, a laptop waking): go straight to the new state
@@ -1404,6 +1403,10 @@ export default {
           for (let k = 0; k < 4; k++) slots[k].rel = 0;
         }
         syncText(s, jumped);
+        if (!laidOut) {
+          laidOut = true;
+          layoutCaptions(s.text.factValue !== "");
+        }
         syncLook(s);
         step(s, s.dt, s.t);
         syncLayers(s, s.dt);

@@ -6,8 +6,8 @@
 //   Ink B is the temperature (violet, blue, teal, yellow, orange, fluorescent
 //   pink as it warms, always held 60 degrees of hue away from ink A); the
 //   minutes and the temperature stand on it. It carries the weather as print
-//   texture: three bold bars thrown across the sky on a clear day (a gale
-//   staggers them downwind), a slanted line screen in rain (slant from the
+//   texture: a coarse halftone fade rising up the sky on a clear day (a gale
+//   leans it downwind), a slanted line screen in rain (slant from the
 //   wind, weight from the rate), specks in snow, fat horizontal rules
 //   thickening down the sheet in fog, a torn edge in a storm, a slow shimmer in
 //   a heat wave. At night the warm inks turn to embers (crimson, vermilion);
@@ -15,7 +15,7 @@
 //   Ink C is the black plate: the numerals and every line of text. Each minute
 //   a drum pulls it again, wiping the new time down the sheet.
 //
-// Where A and B cross (the band between the two lines of numerals, the bars,
+// Where A and B cross (the band between the two lines of numerals, the clear-sky dots,
 // the rain lines) the third colour appears: the overprint. Wind knocks the two
 // colour plates out of register against the black (never more than 6 px, a
 // gust jolts one), humidity swells the dots and softens the edges. Daylight
@@ -50,7 +50,10 @@ const B0 = [122, 744], B1 = [1240, 1374];  // ink B field (the band where they c
 const SLOT = 15 * 60 * 1000;  // the display cuts to a new piece on every quarter hour
 const FS = 604;               // numerals: Anton digits are 0.875 em tall, so 528 px
 const HY = 210, MY = 810;     // tops of the hour and minute digits
-const DX = 30;                // where the numerals start: left of the margin, so the plate edge cuts them
+// where the numerals start. The block is turned 3 degrees, which swings the top
+// of the hour left and the foot of the minutes right; each line is set so its
+// widest figure sits whole on the sheet, just inside the colour plates' cut edge.
+const DXH = 96, DXM = 66;
 const CX = 694, CW = 282;     // the column beside the numerals (AM/PM, temperature)
 const SIN = Math.sin((TILT * Math.PI) / 180), COS = Math.cos((TILT * Math.PI) / 180);
 const MAXREG = 6;             // px: the most a plate may sit out of register
@@ -87,12 +90,12 @@ uniform vec4 u_wx;    // x rain weight, y rain slant (tangent), z snow, w fog
 uniform vec4 u_mo;    // x rain travel (px), y snow fall (px), z storm, w seed
 uniform vec4 u_roll;  // x, y: where the rollers re-inking plates A and B are (px; above it is the new pull); z, w: how wet they are
 uniform vec4 u_old;   // the last pull's registration, relative to the new one (A xy, B zw), shown below a roller
-uniform vec4 u_fx;    // x clear-sky bars, y heat shimmer, z haze (air quality), w shimmer phase
+uniform vec4 u_fx;    // x clear-sky halftone fade, y heat shimmer, z haze (air quality), w shimmer phase
 uniform vec2 u_dry;   // during the print-in: how much lighter the last pull's dried ink is, plates A and B
 uniform vec4 u_stamp; // xy centre, zw half size of the stamped box (z = 0: none)
 uniform vec2 u_srot;  // its angle: sin, cos
 uniform vec4 u_c;     // ink C (rgb) and how much of the night it is: on black stock snow is printed in it
-uniform vec2 u_gale;  // x: how far the wind staggers the clear-sky bars (px, signed), y: their slow sway
+uniform vec2 u_gale;  // x: how far the wind leans the clear-sky fade (px, signed), y: its slow wander
 
 const vec2 PIV = vec2(${glf(PX)}, ${glf(PY)});
 const vec2 RS = vec2(${SIN.toFixed(6)}, ${COS.toFixed(6)});
@@ -176,15 +179,21 @@ void main() {
   float tin = 1.0;    // coverage inside the field
   float tout = 0.0;   // what the plate throws across the sky field
 
-  // clear sky: three bold flat bars thrown across the sky field, beside the hour;
-  // a strong wind staggers them downwind, each one swaying slowly on its own
+  // clear sky: a coarse halftone fade of ink B rising up the sky field from the
+  // band, like warm light off the river. Its screen creeps slowly upward; its
+  // ragged crest wanders, and a strong wind leans it downwind.
   if (u_fx.x > 0.002) {
-    float yb = qb.y - 452.0;
-    float kk = floor(yb / 96.0);
-    float fy = yb - kk * 96.0;
-    float bx = qb.x - u_gale.x * (kk - 1.0 + 0.4 * sin(u_gale.y + kk * 2.1));
-    float bar = step(0.0, kk) * step(kk, 2.0) * smoothstep(soft, -soft, max(max(612.0 - bx, bx - B1.x), max(-fy, fy - 52.0)) + wobB);
-    tout = max(tout, bar * u_fx.x);
+    float lean = u_gale.x * (B0.y - qb.y) / 420.0;
+    vec2 hq = vec2(qb.x - lean, qb.y + u_fx.w * 11.0);
+    vec2 hb = mat2(0.259, 0.966, -0.966, 0.259) * hq / 26.0;   // a 75 degree screen, against plate A's 30
+    float crest = fbm(vec2((qb.x - lean) * 0.0042 + u_gale.y * 0.35, qb.y * 0.0021 - u_fx.w * 0.05) + seed);
+    float rise = (B0.y + 40.0 - qb.y) / 470.0 + 0.55 * (crest - 0.5);
+    float tb = clamp(1.0 - rise, 0.0, 1.0);
+    tb = tb * tb * 0.9;
+    float rb = sqrt(tb / 3.14159) + 0.03 * gain * tb;
+    float hab = max(0.9 + 0.8 * gain, 0.8 * pxs) / 26.0;
+    float dotB = smoothstep(rb + hab, rb - hab, length(fract(hb) - 0.5)) * step(0.02, tb);
+    tout = max(tout, dotB * u_fx.x);
   }
 
   float rain = u_wx.x;
@@ -280,7 +289,7 @@ const CSS = `
 .op .pull b { font-weight: 700; }
 .op .crop { position: absolute; left: ${M}px; top: 0; width: ${W - 2 * M}px; height: ${H}px; overflow: hidden; }
 .op .blk { position: absolute; left: ${-M}px; top: 0; width: ${W}px; height: ${H}px; transform-origin: ${PX}px ${PY}px; transform: rotate(${-TILT}deg); font-family: "Anton", "Impact", sans-serif; font-weight: 400; }
-.op .num { position: absolute; left: ${DX}px; font-size: ${FS}px; line-height: 1em; white-space: nowrap; }
+.op .num { position: absolute; font-size: ${FS}px; line-height: 1em; white-space: nowrap; }
 .op .fr { color: var(--fr); will-change: transform; }
 .op .ampm { position: absolute; left: ${CX}px; top: ${HY - 0.0485 * 206 - 0.016 * 206}px; font-size: 206px; line-height: 1em; white-space: nowrap; }
 .op .temp { position: absolute; left: ${CX}px; top: ${MY - 0.0485 * 206}px; font-size: 206px; line-height: 1em; white-space: nowrap; }
@@ -347,10 +356,10 @@ export default {
       n.date = el("div", { class: "date" });
       n.pull = el("div", { class: "pull" });
       const hd = el("div", { class: "hd" }, n.date, n.pull);
-      n.hhF = el("div", { class: "num fr", style: { top: `${HY - 0.0485 * FS}px` } });
-      n.mmF = el("div", { class: "num fr", style: { top: `${MY - 0.0485 * FS}px` } });
-      n.hh = el("div", { class: "num", style: { top: `${HY - 0.0485 * FS}px` } });
-      n.mm = el("div", { class: "num", style: { top: `${MY - 0.0485 * FS}px` } });
+      n.hhF = el("div", { class: "num fr", style: { left: `${DXH}px`, top: `${HY - 0.0485 * FS}px` } });
+      n.mmF = el("div", { class: "num fr", style: { left: `${DXM}px`, top: `${MY - 0.0485 * FS}px` } });
+      n.hh = el("div", { class: "num", style: { left: `${DXH}px`, top: `${HY - 0.0485 * FS}px` } });
+      n.mm = el("div", { class: "num", style: { left: `${DXM}px`, top: `${MY - 0.0485 * FS}px` } });
       n.ampm = el("div", { class: "ampm" });
       n.temp = el("div", { class: "temp" });
       n.cond = el("div", { class: "cond" });
@@ -410,7 +419,7 @@ export default {
 
     function writeReadouts(s) {
       const tx = s.text;
-      if (put("date", tx.date)) for (const L of layers) fitText(L.date, 690);
+      if (put("date", tx.date)) for (const L of layers) fitText(L.date, 660); // leaves 80 px before the slug
       if (put("temp", tx.temp)) for (const L of layers) fitText(L.temp, CW);
       if (put("cond", tx.condition)) {
         // wraps in its column; shrinks only if one word is too long for it
@@ -456,7 +465,7 @@ export default {
       L.mm.textContent = L.mmF.textContent = s.text.mm;
       L.ampm.textContent = s.text.ampm;
       const no = String(c.h24 * 60 + c.m + 1).padStart(4, "0");
-      L.pull.innerHTML = `Pull <b>${no}</b> / 1440`;
+      L.pull.innerHTML = `Pull <b>${no}</b>`;
     }
 
     // ---- colour ------------------------------------------------------------------
@@ -502,8 +511,17 @@ export default {
       const sky = toOklch(s.sky.mean);
       const hA = lerpAngle(255, sky.h, smoothstep(0.004, 0.02, sky.c));
       const Ad = oklch(clamp(sky.l, 0.66, 0.8), clamp(sky.c * 1.15, 0.045, 0.15), hA);
-      // at night the sky ink is a deep, saturated version of itself on black stock
-      const An = oklch(0.265, clamp(sky.c * 1.6, 0.075, 0.12), hA);
+      // at night the sky ink is a deep version of itself on black stock, and it
+      // carries the night's weather as the day ink does: a clear night is a rich
+      // saturated ink, cloud turns it to a murky grey lit from below by the city,
+      // fog to a paler sea-grey, falling snow to a cold, pale blue
+      const wxn = s.weather;
+      const murk = smoothstep(45, 95, wxn.cloud);
+      const fogN = wxn.fog ? 1 : 0, snowN = wxn.falling === "snow" ? 1 : 0;
+      let hAn = lerpAngle(hA, 196, fogN * 0.85);
+      hAn = lerpAngle(hAn, 238, snowN * 0.8);
+      const An = oklch(0.25 + 0.03 * murk + 0.035 * fogN + 0.03 * snowN,
+        lerp(clamp(sky.c * 1.8, 0.09, 0.135), 0.032 + 0.02 * fogN + 0.025 * snowN, murk), hAn);
       // ink B from the temperature ladder
       let f = 0;
       for (const th of STEPS) f += smoothstep(th - 2.5, th + 2.5, s.weather.temp);
@@ -687,7 +705,7 @@ export default {
         // where it blows to on the sheet (east is right, north is up)
         const head = ((wx.windDir + 180) * Math.PI) / 180;
         const vx = Math.sin(head), vy = -Math.cos(head);
-        const amp = remap(wx.wind, 0, 28, 0.45, MAXREG);
+        const amp = remap(wx.wind, 0, 28, 1.0, MAXREG); // even in still air the plates breathe a little
         const sp = 0.035 + wx.wind * 0.004;
         if (t > nextJolt) {
           // a gust knocks one plate along the wind
@@ -722,7 +740,7 @@ export default {
         }
 
         // ---- the weather, as print texture -------------------------------------------
-        const drift = Math.max(1.6, wx.wind * 0.9) * dt;
+        const drift = Math.max(3, wx.wind * 0.9) * dt;
         driftX -= vx * drift;
         driftY -= vy * drift;
         uSky[0] = clamp(wx.cloud / 100);
@@ -749,7 +767,7 @@ export default {
         uGale[1] += dt * (0.15 + wx.wind * 0.012);
 
         // ---- draw the plates when something on them has changed ---------------------
-        const crawling = uWx[0] > 0 || uWx[2] > 0 || uWx[3] > 0 || uFx[1] > 0.05 || uSky[0] > 0.08 || Math.abs(uGale[0]) > 1;
+        const crawling = uFx[0] > 0.02 || uWx[0] > 0 || uWx[2] > 0 || uWx[3] > 0 || uFx[1] > 0.05 || uSky[0] > 0.08 || Math.abs(uGale[0]) > 1;
         const since = t - lastDraw;
         const resized = gl.canvas.width !== drawnW || gl.canvas.height !== drawnH;
         if (dirty || resized || jumped || moved || rolling || (crawling && since >= 1 / 15) || since >= 0.5 || s.frame < 2) {

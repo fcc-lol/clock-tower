@@ -43,7 +43,7 @@
 
 import {
   W, H, TAU, clamp, lerp, remap, smoothstep, rng,
-  mix, adjust, toOklch, luminance, vec3,
+  mix, adjust, toOklch, oklch, ramp, luminance, vec3,
   el, svg, addStyle, canvas2d, shader, mask, grain, fitText,
 } from "../lib/kit.js";
 import { zoned } from "../lib/time.js";
@@ -67,7 +67,11 @@ const NUM_TOP = 300; // top of the hour figures
 const ROW_GAP = 74; // between the hour and the minute figures
 const HEAD_Y = 290; // the quiet head (date, countdown) fades out above here
 const FOOT_Y = 1450; // and the quiet foot (weather, fact) below here
-const SEAL_X = 916; // left edge of the AM/PM seal
+const SEAL_COL = 946; // centre line of the seal column down the right margin
+const SEAL_W = 100, SEAL_H = 176; // the AM/PM seal
+const SEAL_X = SEAL_COL - SEAL_W / 2; // its left edge
+const RS = 140; // the AQI and UV seals: their figures at 54 px, captions at 28
+const RS_GAP = 34;
 const MORPH_S = 2.6; // seconds a changed numeral takes to melt into the next
 
 const SUMI = "#16130f";
@@ -512,11 +516,11 @@ export default {
       .sm .wx { display: flex; align-items: flex-end; }
       .sm .temp { font-family: ${NUM_FAMILY}, serif; font-weight: 800; font-size: 176px; line-height: 0.74; letter-spacing: -0.03em;
         margin-right: 46px; white-space: nowrap; }
-      .sm .temp.none .tn { display: inline-block; font-family: "Cormorant Garamond", serif; font-weight: 700; transform: translateY(-0.27em); margin-right: 0.06em; }
+      .sm .temp.none .tn { display: inline-block; margin-right: 0.04em; transform: translateY(-0.15em) scaleY(1.45); }
       .sm .lines { padding-bottom: 1px; min-width: 0; }
       .sm .cond { font-style: italic; font-size: 62px; line-height: 1; white-space: nowrap; margin-bottom: 32px; }
       .sm .moon { font-weight: 500; font-size: 48px; line-height: 0.86; white-space: nowrap; letter-spacing: 0.01em; }
-      .sm .seals { position: absolute; display: flex; flex-direction: column; gap: 40px; }
+      .sm .seals { position: absolute; display: flex; flex-direction: column; gap: ${RS_GAP}px; }
       .sm .seal .cap { font-family: "Cormorant Garamond", serif; font-weight: 700; letter-spacing: 0.14em; }
       .sm .fact { margin-top: 56px; }
       .sm .flabel { font-weight: 700; font-size: 28px; line-height: 1; letter-spacing: 0.16em; text-transform: uppercase; }
@@ -543,7 +547,6 @@ export default {
     const sunValue = el("span");
     const head = el("div", { class: "head" }, el("div", { class: "date" }, dateNode), el("div", { class: "sun" }, el("span", { class: "dot" }), sunLabel, sunValue));
 
-    const SEAL_W = 100, SEAL_H = 176;
     const ampmSeal = makeSeal(SEAL_W, SEAL_H, false, r);
     const amA = svg("text", { x: SEAL_W / 2, y: 78, "font-size": 68 });
     const amM = svg("text", { x: SEAL_W / 2, y: 148, "font-size": 68, text: "M" });
@@ -557,11 +560,10 @@ export default {
     const moonNode = el("div", { class: "moon" });
     // AQI and UV: round seals stamped down the margin under the AM/PM seal,
     // each carved with its figure and a small caption
-    const RS = 112;
     const roundSeal = (caption) => {
       const s = makeSeal(RS, RS, true, r);
-      const t = svg("text", { x: RS / 2, y: 62, "font-size": 44 });
-      s.append(t, svg("text", { class: "cap", x: RS / 2 + 2, y: 90, "font-size": 24, text: caption }));
+      const t = svg("text", { x: RS / 2, y: 76, "font-size": 54 });
+      s.append(t, svg("text", { class: "cap", x: RS / 2 + 2, y: 109, "font-size": 28, text: caption }));
       return { box: s, text: t };
     };
     const aqi = roundSeal("AQI");
@@ -603,8 +605,8 @@ export default {
     }
     ampmSeal.style.left = `${SEAL_X}px`;
     ampmSeal.style.top = `${Math.round(baseM - SEAL_H + 4)}px`;
-    sealsNode.style.left = `${SEAL_X + (SEAL_W - RS) / 2}px`;
-    sealsNode.style.top = `${Math.round(baseM + 4 + 48)}px`;
+    sealsNode.style.left = `${SEAL_COL - RS / 2}px`;
+    sealsNode.style.top = `${Math.round(baseM + 4 + 44)}px`;
 
     // ----- the field, three buffers taking turns: this minute, the last, the next -----
     let bufCur = new Uint16Array(NCELL);
@@ -842,6 +844,46 @@ export default {
       }
       return mix(mix(best.west, best.east, 0.5), mix(best.northWest, best.northEast, 0.5), 0.5);
     }
+    // The second ink is the sky as the camera measures it, but a grey sky does
+    // not make a grey ink: what the day is like steeps into it. The air's
+    // temperature (indigo in frost, asagi blue-green when mild, ochre in the
+    // warmth, bengara rust in a heat wave) with a breath of the season (plum in
+    // spring, persimmon in autumn), then the weather: rain turns it a grey
+    // mauve, a storm a deep violet, snow an icy blue, fog thins it. A coloured
+    // sky (a blue noon, a red dusk) still wins.
+    const TEMP_INK = ramp([
+      [0, oklch(0.56, 0.11, 290)], //       10 F and below
+      [0.24, oklch(0.56, 0.11, 262)], //    32
+      [0.44, oklch(0.6, 0.09, 222)], //     50
+      [0.61, oklch(0.62, 0.09, 172)], //    65
+      [0.76, oklch(0.66, 0.11, 84)], //     78
+      [0.91, oklch(0.58, 0.13, 42)], //     92
+      [1, oklch(0.56, 0.14, 34)], //        100 and above
+    ]);
+    const SEASON_INK = ramp([
+      [0, oklch(0.58, 0.08, 270)],
+      [0.05, oklch(0.58, 0.08, 255)], //    winter: indigo
+      [0.3, oklch(0.62, 0.08, 352)], //     spring: plum, sakura
+      [0.55, oklch(0.62, 0.08, 192)], //    summer: teal
+      [0.84, oklch(0.6, 0.1, 52)], //       autumn: persimmon
+      [1, oklch(0.58, 0.08, 270)],
+    ]);
+    const RAIN_INK = oklch(0.55, 0.06, 318);
+    const STORM_INK = oklch(0.46, 0.11, 292);
+    const ICE_INK = oklch(0.66, 0.07, 236);
+    let steep = "#888888";
+    function dayInk(s) {
+      const wx = s.weather;
+      let c = mix(TEMP_INK(clamp((wx.temp - 10) / 90)), SEASON_INK(s.clock.yearFrac), 0.38);
+      const fall = wx.falling;
+      if (fall === "storm") c = mix(c, STORM_INK, 0.55);
+      else if (fall === "snow") c = mix(c, ICE_INK, 0.4);
+      else if (fall) c = mix(c, RAIN_INK, fall === "drizzle" ? 0.32 : 0.48);
+      const k = (wx.fog ? 0.55 : 1) * (1 - 0.25 * (wx.cloud / 100));
+      return adjust(c, { c: (v) => v * k });
+    }
+    const steeped = (c) => mix(steep, c, 0.22 + 0.68 * smoothstep(0.012, 0.075, toOklch(c).c));
+
     function palette(s) {
       const wx = s.weather;
       const cloud = wx.cloud / 100;
@@ -870,10 +912,13 @@ export default {
       ink.set("u_sumi", vec3(mix("#1b1814", ground, 0.04)));
       ink.set("u_film", vec3(mix("#c9ccd0", "#e4e6ea", moonlight)));
       ink.set("u_night", night);
-      const skyInk = (c) =>
-        dark
+      steep = dayInk(s);
+      const skyInk = (raw) => {
+        const c = steeped(raw);
+        return dark
           ? adjust(c, { l: (v) => clamp(v * 0.8, 0.34, Math.max(0.36, groundL - 0.26)), c: (v) => v * 1.3 + 0.018 })
           : adjust(c, { l: 0.7, c: (v) => Math.min(v * 1.5 + 0.02, 0.11) });
+      };
       ink.set("u_skyW", vec3(skyInk(s.sky.west)));
       ink.set("u_skyNW", vec3(skyInk(s.sky.northWest)));
       ink.set("u_skyNE", vec3(skyInk(s.sky.northEast)));
@@ -989,7 +1034,7 @@ export default {
         const relaid = put("cond", condNode, s.text.condition) | (shown.tempW !== s.text.temp);
         if (relaid) {
           shown.tempW = s.text.temp;
-          fitText(condNode, SEAL_X - 44 - foot.offsetLeft - condNode.parentNode.offsetLeft, 62);
+          fitText(condNode, SEAL_COL - RS / 2 - 44 - foot.offsetLeft - condNode.parentNode.offsetLeft, 62);
         }
         if (s.text.factValue !== lastFact || s.text.factLabel !== lastFactLabel) {
           const fact = s.text.factValue;
