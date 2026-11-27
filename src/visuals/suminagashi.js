@@ -66,7 +66,8 @@ const NUM_LEFT = 88; // left edge of the numerals
 const NUM_TOP = 300; // top of the hour figures
 const ROW_GAP = 74; // between the hour and the minute figures
 const HEAD_Y = 290; // the quiet head (date, countdown) fades out above here
-const FOOT_Y = 1450; // and the quiet foot (weather, fact) below here
+const FOOT_Y = 1450; // and the quiet foot (weather, fact) below about here: the shader follows the
+                      // foot's real top (u_foot), which rises when the fact wraps
 const SEAL_COL = 946; // centre line of the seal column down the right margin
 const SEAL_W = 100, SEAL_H = 176; // the AM/PM seal
 const SEAL_X = SEAL_COL - SEAL_W / 2; // its left edge
@@ -111,6 +112,7 @@ uniform float u_seed;
 uniform float u_night;      // 0 ink on paper .. 1 pale film on black water
 uniform float u_lift;       // storm: soft brightening
 uniform float u_px;         // stage px per shader pixel
+uniform float u_foot;       // the ink thins away from here down to the foot's type
 uniform vec4 u_tone;        // ink density, rim strength, film fill, film line
 uniform vec3 u_paper;
 uniform vec3 u_num;
@@ -242,7 +244,7 @@ void main() {
   sky = mix(sky, u_skyOld, clamp(age / 30.0, 0.0, 1.0) * 0.85);
 
   // Where the ink is allowed to be.
-  float quiet = 1.0 - 0.88 * max(1.0 - smoothstep(${HEAD_Y - 84}.0, ${HEAD_Y}.0, v_pos.y), smoothstep(${FOOT_Y}.0, ${FOOT_Y + 150}.0, v_pos.y));
+  float quiet = 1.0 - 0.88 * max(1.0 - smoothstep(${HEAD_Y - 84}.0, ${HEAD_Y}.0, v_pos.y), smoothstep(u_foot, u_foot + 150.0, v_pos.y));
   float fade = mix(1.0, 0.62, smoothstep(180.0, 640.0, dd)) * quiet * smoothstep(7.0, 13.0, d) * (1.0 - hole);
   cov *= fade;
 
@@ -1047,6 +1049,12 @@ export default {
           fValue.style.fontSize = "";
           // two lines at 50 px; only a fact that would need a third steps down
           if (fact && fValue.offsetHeight > 50 * 1.4 * 2 + 4) fValue.style.fontSize = "44px";
+          shown.footTop = -1;
+        }
+        if (shown.footTop < 0 || relaid) {
+          // the quiet margin sits just above the foot's first line, wherever the fact puts it
+          shown.footTop = foot.offsetTop;
+          ink.set("u_foot", shown.footTop - 140);
         }
 
         // ----- temperature: viscosity -----
