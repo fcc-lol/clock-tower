@@ -30,8 +30,9 @@
 //   snow         settles on every ledge left standing (the numerals' shoulders
 //                too) and along the horizon, is knocked loose by the ball, and
 //                muffles the bounce
-//   heat / cold  hot days quicken play and draw a long molten trail; cold
-//                slows it to a short icy one and frosts the brick edges
+//   heat / cold  hot days quicken play, draw a long molten trail and lay an
+//                amber haze over the river; cold slows play to a short icy
+//                trail and frosts the brick edges
 //   fog          a bank hides the upper wall (never the numerals)
 //   thunder      a second ball enters, the wall shivers on a slow rumble and
 //                now and then the whole glaze is softly lit
@@ -809,7 +810,7 @@ export default {
     }
 
     // Lay the whole wall for this instant and play the quarter hour so far.
-    function rebuild(s) {
+    function rebuild(s, tail = 30) {
       const c = s.clock;
       shownH = c.hh; shownM = c.mm; shownA = c.ampm;
       buildSteel(steel, shownH, shownM, shownA);
@@ -840,9 +841,10 @@ export default {
       const elapsed = (((s.ms % QUARTER) + QUARTER) % QUARTER) / 1000;
       const m0 = Math.floor(c.m / 15) * 15;
       // Most of the quarter hour so far is carved analytically (quick); only
-      // the last 30 seconds are actually played, so the ball's own marks,
-      // the paddle and the shards are all where they would be.
-      const pre = Math.max(0, elapsed - 30);
+      // last half minute is actually played, so the ball's own marks, the
+      // paddle and the shards are all where they would be. (In a time-lapse,
+      // which jumps every frame, a few seconds of play is all that shows.)
+      const pre = Math.max(0, elapsed - tail);
       instant = true;
       if (pre > 0) {
         preCarve(keepAt(pre / 900), q); // a deeper cavern along the same grain
@@ -1127,6 +1129,7 @@ export default {
     };
     let lastMs = null;
     let lastQ = null;
+    let jumpRun = 0; // > 0 just after a jump: another one means a time-lapse
     let ink = STEEL_DAY;
     let ground = NIGHT_GROUND;
     let trailCol = STEEL_DAY;
@@ -1151,7 +1154,8 @@ export default {
       // ----- the game -----
       let jumped = false;
       if (first || Math.abs(dms) > 60000) {
-        rebuild(s);
+        rebuild(s, jumpRun > 0 ? 3 : 30);
+        jumpRun = 3;
         jumped = true;
       } else {
         const fast = dms > 1000 * dt * 3 + 200; // the clock is being run fast: play to keep up, without ceremony
@@ -1168,7 +1172,7 @@ export default {
         } else if (!env.storm) balls[1].keep = false;
         if (fast) {
           const span = Math.min(60, dms / 1000);
-          const n = Math.ceil(span * 40);
+          const n = Math.ceil(span * 20);
           instant = true;
           for (let k = 0; k < n; k++) simStep(span / n, false, p);
           instant = false;
@@ -1179,6 +1183,7 @@ export default {
         }
       }
       lastQ = q;
+      if (!jumped && jumpRun > 0) jumpRun--;
 
       // ----- light and colour -----
       const dl = s.daylight;

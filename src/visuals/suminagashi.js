@@ -493,6 +493,7 @@ export default {
   title: "Suminagashi",
   description: "The time floats in sumi ink on a tray of water; its rings are combed by the wind, holed by the rain and dyed by the sky.",
   fonts: ["Shippori Mincho B1:wght@800", "Cormorant Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600"],
+  fps: 24, // slow water: 24 frames are plenty, and spare the Pi's GPU a fifth of the shader work
 
   mount(root, { state, seed }) {
     addStyle(root, `
@@ -511,9 +512,9 @@ export default {
       .sm .wx { display: flex; align-items: flex-end; }
       .sm .temp { font-family: ${NUM_FAMILY}, serif; font-weight: 800; font-size: 176px; line-height: 0.74; letter-spacing: -0.03em;
         margin-right: 46px; white-space: nowrap; }
-      .sm .temp.none .tn { display: inline-block; font-family: "Cormorant Garamond", serif; font-weight: 700; transform: translateY(-0.12em); margin-right: 0.06em; }
+      .sm .temp.none .tn { display: inline-block; font-family: "Cormorant Garamond", serif; font-weight: 700; transform: translateY(-0.2em); margin-right: 0.06em; }
       .sm .lines { padding-bottom: 1px; min-width: 0; }
-      .sm .cond { font-style: italic; font-size: 62px; line-height: 1; white-space: nowrap; margin-bottom: 24px; }
+      .sm .cond { font-style: italic; font-size: 62px; line-height: 1; white-space: nowrap; margin-bottom: 32px; }
       .sm .moon { font-weight: 500; font-size: 48px; line-height: 0.86; white-space: nowrap; letter-spacing: 0.01em; }
       .sm .seals { position: absolute; display: flex; flex-direction: column; gap: 40px; }
       .sm .seal .cap { font-family: "Cormorant Garamond", serif; font-weight: 700; letter-spacing: 0.14em; }

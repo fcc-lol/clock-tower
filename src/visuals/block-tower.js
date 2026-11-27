@@ -139,13 +139,12 @@ const CSS = `
 .bt .fact{padding:0 40px 4px;text-shadow:0 1px 0 var(--hi),0 0 5px var(--scorch)}
 .bt .flab{font-size:28px;line-height:1;letter-spacing:.14em;font-weight:700;margin-bottom:12px}
 .bt .fval{font-size:46px;line-height:1.25;font-weight:600;white-space:normal;text-transform:none;letter-spacing:.005em;max-width:826px;text-wrap:balance}
-.bt .stamp{font-size:30px;letter-spacing:.3em;font-weight:600;opacity:.5}
 .bt .marble{position:absolute;left:0;top:0;width:44px;height:44px;margin:-22px 0 0 -22px;will-change:transform}
 .bt .marble b{position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle at 50% 50%,var(--m1) 0 46%,var(--m2) 47% 100%);overflow:hidden}
 .bt .marble b:before{content:"";position:absolute;left:-20%;top:38%;width:140%;height:26%;border-radius:50%;background:var(--m3)}
 .bt .marble u{position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle at 34% 28%,rgba(255,255,255,var(--mh)) 0 7%,rgba(255,255,255,0) 26%),radial-gradient(circle at 60% 70%,rgba(255,255,255,0) 40%,rgba(0,0,0,.35) 100%)}
 .bt .mound{position:absolute;left:0;top:0;transform-origin:0 ${GROUND + 26}px}
-.bt .pen{position:absolute;overflow:visible;left:0;top:0}
+.bt .pen{position:absolute;overflow:visible;left:0;top:0;will-change:transform}
 .bt .ao{position:absolute;left:0;height:26px;background:linear-gradient(rgba(0,0,0,var(--ao)),rgba(0,0,0,0))}
 `;
 
@@ -652,8 +651,7 @@ export default {
     uvB.face.append(el("div", { class: "lab", text: "UV" }), T.uv);
     T.factLabel = el("div", { class: "flab" });
     T.factValue = el("div", { class: "fval" });
-    T.stamp = el("div", { class: "stamp", text: "Clock Tower · Long Island City" });
-    base.face.append(T.factLabel, T.factValue, T.stamp);
+    base.face.append(T.factLabel, T.factValue);
 
     // ----- in front of the tower ---------------------------------------------
     const moundEl = el("div", { class: "mound" });
@@ -807,7 +805,12 @@ export default {
     const newDrip = (i, fresh) => {
       const fi = r.int(0, faces.length - 1);
       const b = faces[fi][1];
-      drip.set([fi, r.range(0.04, 0.96), fresh ? r.range(0, b.o.h) : -r.range(0, 30), r.range(26, 120), r.range(12, 38)], i * 5);
+      const j = i * 5;
+      drip[j] = fi;
+      drip[j + 1] = r.range(0.04, 0.96);
+      drip[j + 2] = fresh ? r.range(0, b.o.h) : -r.range(0, 30);
+      drip[j + 3] = r.range(26, 120);
+      drip[j + 4] = r.range(12, 38);
     };
     for (let i = 0; i < ND; i++) newDrip(i, true);
     const NRING = 8;
@@ -931,7 +934,6 @@ export default {
         shown.factInit = true;
         const has = tx.factValue !== "";
         T.factLabel.style.display = T.factValue.style.display = has ? "" : "none";
-        T.stamp.style.display = has ? "none" : "";
         if (has) {
           const st = T.factValue.style;
           st.fontStretch = "100%";
@@ -1347,11 +1349,12 @@ export default {
     roofG.style.transformOrigin = `${roofB.o.x + roofB.o.w / 2}px ${roofB.o.y + roofB.o.h}px`;
 
     function marbleStep(dt, jump) {
-      const tilt = phi[0] + phi[1] + phi[2] + phi[3] + phi[4];
+      // the plank's visible tilt (the time cubes below only shift)
+      const tilt = phi[2] + phi[3] + phi[4];
       const n = Math.max(1, Math.round(dt * 120));
       const h = dt / n;
       for (let i = 0; i < n; i++) {
-        MAR.v += (52000 * Math.sin(tilt) - 0.9 * MAR.v) * h;
+        MAR.v += (68000 * Math.sin(tilt) - 0.9 * MAR.v) * h;
         MAR.s += MAR.v * h;
         if (MAR.s < MAR.u0) {
           MAR.s = MAR.u0;

@@ -554,9 +554,12 @@ export default {
     // film grain: black and white specks in equal measure, tiled
     const grainC = offscreen(256, 256);
     {
-      const x = grainC.getContext("2d"), img = x.createImageData(256, 256), gr = rng(7);
+      // (an inline xorshift: 65k calls to rng() would cost mount ~14 ms)
+      const x = grainC.getContext("2d"), img = x.createImageData(256, 256);
+      let st = 0x9e3779b9;
       for (let i = 0; i < img.data.length; i += 4) {
-        const v = gr();
+        st ^= st << 13; st ^= st >>> 17; st ^= st << 5;
+        const v = (st >>> 0) / 4294967296;
         img.data[i] = img.data[i + 1] = img.data[i + 2] = v > 0.5 ? 255 : 0;
         img.data[i + 3] = Math.abs(v - 0.5) * 2 * 255;
       }
@@ -1106,10 +1109,10 @@ export default {
 
         // ---- the wall: rebuilt only when the light, the weather or the
         // windows have settled into something new
-        // (a fast clock moves the light every frame: then at most every 4th frame)
+        // (a fast clock moves the light every frame: then at most every 8th frame)
         if (palChanged) palPending = true;
         sinceBuild++;
-        if (winDirty || jumped || (wasMoving && !moving) || (palPending && sinceBuild >= 4)) {
+        if (winDirty || jumped || (wasMoving && !moving) || (palPending && sinceBuild >= 8)) {
           winDirty = false; palPending = false; sinceBuild = 0;
           buildWall(dl, cloudK, murk, sunS, light);
         }

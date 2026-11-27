@@ -69,9 +69,9 @@ const INK_RAMP = ramp([
   [0.42, "#3b3ab4"], // 46 F: ultramarine violet
   [0.54, "#6a2a8c"], // 56 F: aubergine
   [0.65, "#9a2262"], // 66 F: claret
-  [0.76, "#bf283c"], // 76 F: carmine
-  [0.88, "#c9321e"], // 86 F: tomato
-  [1.0, "#c63c14"], // 97 F and above
+  [0.76, "#ab2236"], // 76 F: carmine
+  [0.88, "#b62b18"], // 86 F: tomato
+  [1.0, "#b2340f"], // 97 F and above
 ]);
 
 const LAMP_COL = [0.14, 0.084, 0.0392];
@@ -173,9 +173,9 @@ void main() {
   vec3 lv = u_lamp.xyz - v_p; float ld = dot(lv, lv);
   float la = u_lamp.w * 2.4 / (1.0 + ld / 380000.0);
   float lamb = 0.35 + 0.65 * max(dot(n, lv * inversesqrt(ld)), 0.0);
-  vec3 nightC = u_night * (0.7 + 0.6 * mix(u_moonL.z, max(dot(n, u_moonL), 0.0), u_shade)) + u_lampCol * la * lamb;
+  vec3 nightC = u_night * (0.42 + 1.05 * mix(u_moonL.z, max(dot(n, u_moonL), 0.0), u_shade)) + u_lampCol * la * lamb;
   nightC *= 1.0 - 0.3 * wet;
-  vec3 inkN = u_inkNight * (0.86 + 0.14 * n.z);
+  vec3 inkN = u_inkNight * (0.8 + 0.2 * n.z) + u_lampCol * la * lamb * 0.6;
   vec3 night = mix(nightC, inkN, ink) * (1.0 - pr.b * 0.25);
 
   float f = nightF(v_p.xy);
@@ -1000,11 +1000,11 @@ export default {
       const spd = Math.max(env.wind + (env.gust - env.wind) * pulse, 1 + 0.8 * pulse);
       const wob = noise.n2(t * 0.06 + c.i * 1.9, 7.7) * (0.3 + 0.5 / (1 + spd * 0.3));
       const dir = env.dirRad + wob;
-      const A = GRAV * 0.72 * Math.tanh(spd / 22) * (1 - 0.45 * c.wetAmt) * (c.tether ? 1.2 : 1);
+      const A = GRAV * 0.72 * Math.tanh(spd / 22) * (1 - 0.45 * c.wetAmt * (1 - 0.7 * env.storm)) * (c.tether ? 1.2 : 1);
       c.ax = -Math.sin(dir) * A;
       // the gusts make the wash breathe in and out, whatever the bearing
       c.az = Math.cos(dir) * A + A * 0.55 * (pulse - 0.45) * (c.tether ? 1 : 0.6);
-      c.rip = A * 1.05 + GRAV * 0.035;
+      c.rip = A * (1 + 0.6 * clamp((env.gust - env.wind) / 14)) + GRAV * 0.035;
       c.damp = 1.5 + 2.2 * c.wetAmt * (1 - 0.6 * env.storm);
       // the cords at a sheet's bottom corners give in a wind, so it can belly like a sail; in a calm it hangs plumb
       c.slack = approach(c.slack, 0.12 * smoothstep(3, 30, spd) * (1 - 0.7 * env.frz) * (1 - 0.3 * c.wetAmt), dt, 1.5);
@@ -1323,7 +1323,7 @@ export default {
       const ly = -(0.26 + 0.4 * clamp(alt / 60));
       const ln = Math.hypot(lx, ly, 0.62);
       col.L[0] = lx / ln; col.L[1] = ly / ln; col.L[2] = 0.62 / ln;
-      env.level = (0.64 + 0.36 * dl) * (1 - 0.1 * env.rain - 0.1 * env.storm);
+      env.level = (0.72 + 0.28 * dl) * (1 - 0.1 * env.rain - 0.1 * env.storm);
       const S = 0.62 * env.sunVis;
       const A = 0.93 - S * col.L[2];
       const mx = Math.max(col.mean[0], col.mean[1], col.mean[2], 0.02);

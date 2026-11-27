@@ -42,8 +42,8 @@ import {
 
 const MX = 64; // side margin for type
 const TOP = 70; // top of the hour numerals
-const HD = 660; // height of a numeral
-const STRIP = 106; // the letterpress strip between the rows
+const HD = 612; // height of a numeral
+const STRIP = 128; // the letterpress strip between the rows (the date has clear air above and below)
 const R1 = TOP;
 const R1B = R1 + HD;
 const R2 = R1B + STRIP;
@@ -99,10 +99,10 @@ export default {
       .dc .date { font-size: 52px; font-weight: 700; letter-spacing: .01em; white-space: nowrap; line-height: 1; padding-bottom: 6px; }
       .dc .rule { flex: 1; height: 2px; background: currentColor; opacity: .55; margin: 0 30px; box-shadow: 0 1.2px 0 var(--hl); }
       .dc .ampmgap { flex: none; }
-      .dc .foot { position: absolute; left: ${MX}px; width: ${W - 2 * MX}px; top: ${R2B + 30}px; height: ${H - MX - R2B - 30}px;
+      .dc .foot { position: absolute; left: ${MX}px; width: ${W - 2 * MX}px; top: ${R2B + 58}px; height: ${H - 64 - R2B - 58}px;
                   display: flex; flex-direction: column; justify-content: space-between; }
       .dc .title { display: flex; align-items: baseline; white-space: nowrap; }
-      .dc .temp { font-family: ${DFONT}; font-weight: 700; font-size: 128px; line-height: .84; letter-spacing: -.01em; }
+      .dc .temp { font-family: ${DFONT}; font-weight: 700; font-size: 120px; line-height: .84; letter-spacing: -.01em; }
       .dc .cond { font-style: italic; font-weight: 600; font-size: 60px; line-height: 1; margin-left: 24px; }
       .dc .sp { flex: 1; }
       .dc .lab { font-weight: 700; font-size: 27px; letter-spacing: .16em; text-transform: uppercase; }
@@ -112,9 +112,9 @@ export default {
       .dc .line2 { display: flex; align-items: baseline; justify-content: space-between; white-space: nowrap; }
       .dc .line2 .val { margin-left: 14px; }
       .dc .line2 .moon { font-style: italic; font-weight: 600; }
-      .dc .fact .lab { display: block; margin-bottom: 4px; }
-      .dc .fact .fv { font-style: italic; font-weight: 600; font-size: 42px; line-height: 1.08; max-height: 2.16em; overflow: hidden; }
-      .dc.nofact .foot { justify-content: center; gap: 44px; }
+      .dc .fact .lab { display: block; margin-bottom: 6px; }
+      .dc .fact .fv { font-style: italic; font-weight: 600; font-size: 42px; line-height: 1.2; max-height: 2.4em; overflow: hidden; }
+      .dc.nofact .foot { justify-content: center; gap: 64px; }
       .dc.nofact .temp { font-size: 150px; }
       .dc.nofact .cond { font-size: 64px; }
       .dc.nofact .fact { display: none; }
@@ -1361,6 +1361,7 @@ export default {
       }
       x.fill();
     };
+    const vy = new Float32Array(3), vs = new Float32Array(3); // the cloud sheets: how far down, and where
     let cityPf = 0, cityPm = 0, cityPb = 0, cityV3 = 0, cityTw = 0, cityVer = -1, cityV3a = 0;
 
     const drawScene = (s) => {
@@ -1378,17 +1379,26 @@ export default {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = "source-over";
-      // No full clear: the sheet is opaque outside the cuts, and the sky is copied opaquely over
-      // every cut each frame, so whatever lies outside them never shows.
+      // A whole-canvas clear lets the browser drop the last frame's drawing instead of keeping it
+      // queued (frames that are never shown, while warming up, would otherwise pile up).
+      scene.clear();
       // everything is drawn only inside the numerals' boxes: nothing else can be seen
       ctx.save();
       ctx.beginPath();
       for (let i = 0; i < nClip; i++) ctx.rect(clip[i * 4], clip[i * 4 + 1], clip[i * 4 + 2], clip[i * 4 + 3]);
       ctx.clip();
-      // the sky
+      // where the cloud sheets hang: above the lowest one's scallops they are solid paper
+      let skyFrom = 0;
+      for (let depth = 2; depth >= 0; depth--) {
+        vs[depth] = smoothstep(58 + depth * 13, 76 + depth * 12, w.cloud) * fogHide;
+        vy[depth] = Math.round(valances[depth].y - (1 - ease.cubicOut(vs[depth])) * 760 + swayY * (1 + depth));
+        if (vs[depth] > 0.003) skyFrom = Math.max(skyFrom, vy[depth] - VTOP + 4);
+      }
+      // the sky, where it can be seen
       for (let i = 0; i < nClip; i++) {
-        const x = clip[i * 4], y = clip[i * 4 + 1], cw = clip[i * 4 + 2], ch = clip[i * 4 + 3];
-        ctx.drawImage(skyB.can, x * SKS, y * SKS, cw * SKS, ch * SKS, x, y, cw, ch);
+        const x = clip[i * 4], cw = clip[i * 4 + 2];
+        const y = Math.max(clip[i * 4 + 1], skyFrom), ch = clip[i * 4 + 1] + clip[i * 4 + 3] - y;
+        if (ch > 0) ctx.drawImage(skyB.can, x * SKS, y * SKS, cw * SKS, ch * SKS, x, y, cw, ch);
       }
 
       // stars, on a clear night: pin-pricks, a few of them flickering slowly
@@ -1505,11 +1515,6 @@ export default {
       const count = smoothstep(4, 72, w.cloud) * NCLOUD * fogHide;
       const span = W + 900;
       let coverTop = 0; // below this, a nearer cloud sheet already hides everything
-      const vy = [0, 0, 0], vs = [0, 0, 0];
-      for (let depth = 2; depth >= 0; depth--) {
-        vs[depth] = smoothstep(58 + depth * 13, 76 + depth * 12, w.cloud) * fogHide;
-        vy[depth] = Math.round(valances[depth].y - (1 - ease.cubicOut(vs[depth])) * 760 + swayY * (1 + depth));
-      }
       for (let depth = 0; depth < 3; depth++) {
         const vl = valances[depth];
         if (vs[depth] > 0.003) {
@@ -1662,7 +1667,6 @@ export default {
       ctx.fill();
 
       // rain: threads hung from above, leaning with the wind
-      if (s.frame > 3) { ctx.restore(); return; }
       if (w.falling && w.falling !== "snow" && w.intensity > 0.01) {
         const nThreads = Math.min(NR, Math.round(30 + 120 * w.intensity));
         const slant = clamp(lat * w.wind * 0.012, -0.38, 0.38);
