@@ -1569,18 +1569,19 @@ export default {
 
       // the city, far to near; each layer's windows that are on the turn twinkle
       const lit = P.lit;
-      const pf = Math.round(swayX * 2), pm = Math.round(swayX * 5), pb = Math.round(swayX * 8);
+      // the three layers move together on one whole-pixel step of the nearest, so the bitmap is rebuilt rarely
+      const pb = Math.round(swayX * 8), pm = Math.round(pb * 0.625), pf = Math.round(pb * 0.25);
       const v3 = vellums[3];
       const v3a = vA > 0.01 ? vA * VEL_A[3] : 0;
       const v3off = v3a > 0 ? Math.round(-wrapX(v3.x0 - drift * v3.speed, VW)) : 0;
-      const tw = lit >= 0.01 ? Math.floor(t * 2) : 0; // the twinkle is slow: twice a second is plenty
+      const tw = lit >= 0.01 ? Math.floor(t / 2) : 0; // windows switch on and off: a two-second clock is plenty
       if (cityPf !== pf || cityPm !== pm || cityPb !== pb || cityV3 !== v3off || cityTw !== tw || cityVer !== cityB.ver || cityV3a !== v3a) {
         cityPf = pf; cityPm = pm; cityPb = pb; cityV3 = v3off; cityTw = tw; cityVer = cityB.ver; cityV3a = v3a;
         const x = cityB.x;
         x.setTransform(1, 0, 0, 1, 0, 0);
         x.clearRect(0, 0, cityB.can.width, cityB.can.height);
         x.setTransform(1, 0, 0, 1, 0, -CITY_TOP);
-        const tt = tw * 0.5 * 0.05;
+        const tt = tw * 2 * 0.05;
         x.drawImage(farB.can, pf - PAD, far.top);
         twinkle(x, far.wins, pf, P.winC[0], lit, tt);
         x.drawImage(midB.can, pm - PAD, mid.top);

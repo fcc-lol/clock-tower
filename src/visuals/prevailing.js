@@ -440,7 +440,7 @@ export default {
         }
 
         const { ctx } = field;
-        ctx.clearRect(0, 0, W, FIELD_H + 4); // nothing is ever drawn below the field
+        field.clear(); // the whole surface: a full clear lets the browser drop the last frame's drawing outright
         // Band edges on whole device pixels, so neighbouring bands meet without a seam.
         const ratio = field.ratio;
         for (let k = 0; k <= BANDS; k++) bandX[k] = Math.round(((k * W) / BANDS) * ratio) / ratio;
