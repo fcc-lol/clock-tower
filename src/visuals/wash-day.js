@@ -74,6 +74,7 @@ const INK_RAMP = ramp([
   [1.0, "#b2340f"], // 97 F and above
 ]);
 
+const HAZE = [0.86, 0.8, 0.7];
 const LAMP_COL = [0.14, 0.084, 0.0392];
 const SIL_DAY = [0.07, 0.08, 0.11];
 const CLOUD_NIGHT = [0.09, 0.1, 0.13];
@@ -101,7 +102,7 @@ uniform vec3 u_c0; uniform vec3 u_c1; uniform vec3 u_c2; uniform vec3 u_c3;
 uniform vec3 u_sil; uniform float u_silA; uniform vec3 u_win;
 uniform vec3 u_cloudCol; uniform vec3 u_cloud; uniform vec2 u_drift;
 uniform float u_stars; uniform float u_time; uniform float u_flash;
-uniform vec4 u_lamp; uniform vec3 u_lampCol; uniform vec2 u_vert;
+uniform vec4 u_lamp; uniform vec3 u_lampCol; uniform vec2 u_vert; uniform vec4 u_glow; uniform vec3 u_glowCol;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 void main() {
   float x = v_pos.x / 1080.0; float y = v_pos.y / 1920.0; float t = x * 3.0;
@@ -121,6 +122,8 @@ void main() {
       c += u_stars * tw * (0.2 + 0.8 * fract(h * 17.0)) * smoothstep(1.8, 0.4, d) * vec3(0.8, 0.86, 1.0);
     }
   }
+  vec2 gd = (v_pos - u_glow.xy) / u_glow.z;
+  c += u_glowCol * (u_glow.w * exp(-dot(gd, gd)));
   vec2 lv = v_pos - u_lamp.xy;
   c += u_lampCol * (u_lamp.w * 0.55 / (1.0 + dot(lv, lv) / 7000.0));
   float sy = (v_pos.y - 1770.0) / 150.0;
@@ -147,7 +150,7 @@ uniform vec2 u_size; uniform float u_ratio; uniform float u_seed; uniform float 
 uniform vec3 u_L; uniform vec3 u_amb; uniform vec3 u_sun; uniform vec3 u_cloth; uniform vec3 u_wetTint;
 uniform vec3 u_inkDay; uniform vec3 u_inkNight; uniform vec3 u_night; uniform vec3 u_moonL;
 uniform vec4 u_lamp; uniform vec3 u_lampCol;
-uniform vec2 u_wet; uniform float u_frost; uniform vec4 u_fog; uniform float u_flash;
+uniform vec2 u_wet; uniform float u_frost; uniform vec4 u_fog; uniform float u_flash; uniform float u_clothNight;
 ${FRONT}
 void main() {
   vec4 pr = texture2D(u_tex, v_uv);
@@ -178,7 +181,7 @@ void main() {
   vec3 inkN = u_inkNight * (0.8 + 0.2 * n.z) + u_lampCol * la * lamb * 0.6;
   vec3 night = mix(nightC, inkN, ink) * (1.0 - pr.b * 0.25);
 
-  float f = nightF(v_p.xy);
+  float f = u_clothNight;
   vec3 col = mix(day, night, f);
 
   if (u_frost > 0.003) {
@@ -940,7 +943,7 @@ export default {
     // The weather as the wash feels it
     // ------------------------------------------------------------------
     const env = {
-      wind: 0, gust: 0, dirX: 0, dirZ: 1, dirRad: 0, frz: 0, frost: 0, wet: 0, damp: 0, rain: 0, snow: 0, snowCap: 0, fog: 0, storm: 0, flash: 0,
+      haze: 0, glow: 0, wind: 0, gust: 0, dirX: 0, dirZ: 1, dirRad: 0, frz: 0, frost: 0, wet: 0, damp: 0, rain: 0, snow: 0, snowCap: 0, fog: 0, storm: 0, flash: 0,
       cover: 0, sunVis: 0, level: 1, front: 0, night: 0, lampOn: 0, simT: r.range(0, 500), lastH: 1 / 30, warm: true,
     };
     function readWeather(s, dt, snap) {
@@ -1319,12 +1322,16 @@ export default {
       }
       const dl = smoothstep(0.3, 0.9, d);
       const keep = 0.32 + 0.68 * d;
+      // heat and bad air bleach the sky toward a warm haze; a low sun puts a warm glow low on its own side
+      env.haze = clamp(smoothstep(86, 99, s.weather.temp) * 0.38 + smoothstep(90, 200, s.weather.aqi) * 0.3) * smoothstep(0.3, 0.8, d);
+      env.glow = (1 - smoothstep(3, 24, s.sun.alt)) * smoothstep(-7, 0, s.sun.alt) * (1 - 0.7 * env.cover) * (1 - env.fog) * 0.75;
       col.mean.fill(0);
       for (let i = 0; i < 4; i++) {
         for (let k = 0; k < 3; k++) {
           const v = lerp(k === 2 ? 0.04 : k === 1 ? 0.018 : 0.012, col.skyRaw[i][k], keep);
           col.sky[i][k] = v;
           col.mean[k] += v * 0.25;
+          col.sky[i][k] = lerp(v, HAZE[k] * keep, env.haze);
         }
       }
       const alt = s.sun.alt;
@@ -1549,6 +1556,8 @@ export default {
       gl.uniform4f(u.u_lamp, WALL + 2, LAMP[1], 0, lampW);
       gl.uniform3f(u.u_lampCol, LAMP_COL[0], LAMP_COL[1], LAMP_COL[2]);
       gl.uniform2f(u.u_vert, lerp(0.8, 0.86, s.daylight), lerp(1.16, 1.07, s.daylight));
+      gl.uniform4f(u.u_glow, 540 + 640 * Math.tanh((180 - s.sun.az) / 28), 1760, 820, env.glow);
+      gl.uniform3f(u.u_glowCol, 0.62, 0.3, 0.09);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
 
       // ropes and cords
@@ -1600,6 +1609,9 @@ export default {
         gl.uniform1f(u.u_crumple, 0.1 + 0.07 * c.wetAmt + 0.22 * env.frz);
         gl.uniform3f(u.u_sun, col.sun[0] * c.cs, col.sun[1] * c.cs, col.sun[2] * c.cs);
         gl.uniform2f(u.u_wet, c.wetA > 0.001 ? c.wetA : -1, c.wetB > 0.001 ? 1.03 - c.wetB : 2);
+        // each cloth turns from sunlit to lamp-lit as a whole, so no line of type is ever split by the shadow
+        const cy = 1 - (lines[c.line].y + c.h * 0.5) / H;
+        gl.uniform1f(u.u_clothNight, smoothstep(-0.015, 0.015, env.front - cy - ((c.x + c.w * 0.5) / W - 0.5) * 0.14));
         gl.uniform4f(u.u_fog, col.fog[0], col.fog[1], col.fog[2], env.fog * (0.1 + 0.07 * (3 - c.line)));
         gl.drawElements(gl.TRIANGLES, c.idxN, gl.UNSIGNED_SHORT, c.idx0 * 2);
       }
@@ -1670,7 +1682,7 @@ export default {
     const snow = new Float32Array(RN * 4);
     for (let i = 0; i < RN; i++) {
       rain.set([r.range(0, W + 240), r.range(0, H + 160), r.range(0.75, 1.25)], i * 3);
-      snow.set([r.range(0, W + 80), r.range(0, H + 40), r(), r.range(0, TAU)], i * 4);
+      snow.set([r.range(0, W + 80), r.range(0, H + 40), ((i % 3) + r()) / 3, r.range(0, TAU)], i * 4);
     }
     let overUsed = false;
     function drawWeather(s) {
@@ -1766,19 +1778,23 @@ export default {
       if (env.snow > 0.01) {
         const n = Math.min(RN, Math.floor(110 + 530 * env.snow));
         const drift = windX * 7;
-        ctx.fillStyle = nt > 0.5 ? "rgba(150,162,188,0.6)" : "rgba(255,255,255,0.93)";
-        ctx.beginPath();
-        for (let i = 0; i < n; i++) {
-          const j = i * 4;
-          const k = snow[j + 2];
-          const y = ((snow[j + 1] + t * (50 + 80 * k) * (1 + 0.5 * env.snow)) % (H + 40)) - 20;
-          let x = snow[j] + t * drift * (0.6 + 0.4 * k) + Math.sin(t * 0.8 + snow[j + 3]) * 12;
-          x = (((x % (W + 80)) + (W + 80)) % (W + 80)) - 40;
-          const rad = 1.4 + 2.6 * k;
-          ctx.moveTo(x + rad, y);
-          ctx.arc(x, y, rad, 0, TAU);
+        ctx.strokeStyle = nt > 0.5 ? "rgba(150,162,188,0.6)" : "rgba(255,255,255,0.93)";
+        ctx.lineCap = "round";
+        for (let band = 0; band < 3; band++) {
+          // flakes are sorted into three sizes; each size is one stroke of zero-length round-capped dashes
+          ctx.lineWidth = 3 + 2.6 * band;
+          ctx.beginPath();
+          for (let i = band; i < n; i += 3) {
+            const j = i * 4;
+            const k = snow[j + 2];
+            const y = ((snow[j + 1] + t * (50 + 80 * k) * (1 + 0.5 * env.snow)) % (H + 40)) - 20;
+            let x = snow[j] + t * drift * (0.6 + 0.4 * k) + Math.sin(t * 0.8 + snow[j + 3]) * 12;
+            x = (((x % (W + 80)) + (W + 80)) % (W + 80)) - 40;
+            ctx.moveTo(x, y);
+            ctx.lineTo(x + 0.01, y);
+          }
+          ctx.stroke();
         }
-        ctx.fill();
       }
     }
 
