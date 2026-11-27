@@ -49,7 +49,7 @@ import { W, H, TAU, clamp, lerp, smoothstep, approach, rng, hash, createNoise, o
 const FONT = '"Fraunces", Georgia, serif';
 const WALL = 50; // width of each brick sliver
 const GRAV = 900; // px/s^2: a little slower than life, so it is calm to live with
-const LINE_Y = [64, 674, 1300, 1630];
+const LINE_Y = [64, 674, 1294, 1614];
 const SHEET_H = 550;
 const PERSP = 4200;
 const HORIZON = 860;
@@ -63,9 +63,9 @@ const SPEC = [
   { key: "m2", line: 1, x: 548, w: 448, h: SHEET_H, cols: 16, rows: 20, pegs: [0, 5, 10, 15], tether: true },
   { key: "temp", line: 2, x: 84, w: 232, h: 196, cols: 9, rows: 8, pegs: [0, 8] },
   { key: "sun", line: 2, x: 332, w: 232, h: 190, cols: 9, rows: 8, pegs: [0, 8] },
-  { key: "moon", line: 2, x: 580, w: 220, h: 206, cols: 8, rows: 8, pegs: [0, 7] },
-  { key: "air", line: 2, x: 816, w: 180, h: 256, cols: 7, rows: 10, pegs: [0, 6] },
-  { key: "fact", line: 3, x: 84, w: 912, h: 196, cols: 30, rows: 8, pegs: [0, 10, 19, 29] },
+  { key: "moon", line: 2, x: 580, w: 220, h: 262, cols: 8, rows: 10, pegs: [0, 7] },
+  { key: "air", line: 2, x: 816, w: 180, h: 292, cols: 7, rows: 11, pegs: [0, 6] },
+  { key: "fact", line: 3, x: 84, w: 912, h: 244, cols: 30, rows: 9, pegs: [0, 10, 19, 29] },
 ];
 
 // One ink at a time, chosen by the temperature. All dark enough for small type on cotton.
@@ -403,6 +403,10 @@ export default {
       x.translate(cx, bottom - (m0.actualBoundingBoxDescent * size) / 100);
       x.scale(sx, 1);
       x.fillText(d, -(m.actualBoundingBoxRight - m.actualBoundingBoxLeft) / 2, 0);
+      // a little ink spread: the Didone hairlines (the diagonal of a 4, the neck of a 2) must carry across a room
+      x.lineWidth = size * 0.014;
+      x.lineJoin = "round";
+      x.strokeText(d, -(m.actualBoundingBoxRight - m.actualBoundingBoxLeft) / 2, 0);
       x.restore();
       x.textAlign = "center";
     }
