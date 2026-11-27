@@ -1310,10 +1310,10 @@ export default {
       if (env.rain > 0.01) {
         const n = Math.min(RN, Math.round(70 + 300 * env.rain));
         const slant = env.wind * 9;
-        fc.strokeStyle = rainCol;
-        fc.lineCap = "butt";
+        // each streak a thin slanted sliver, filled (several times cheaper than stroking)
+        fc.fillStyle = rainCol;
         for (let pass = 0; pass < 2; pass++) {
-          fc.lineWidth = pass ? 3 : 2;
+          const lw = pass ? 3 : 2;
           fc.beginPath();
           for (let i = pass; i < n; i += 2) {
             const v = rV[i];
@@ -1334,8 +1334,11 @@ export default {
             if (behind(rX[i], rY[i]) || behind(tx, ty)) continue;
             fc.moveTo(rX[i], rY[i]);
             fc.lineTo(tx, ty);
+            fc.lineTo(tx + lw, ty);
+            fc.lineTo(rX[i] + lw, rY[i]);
+            fc.closePath();
           }
-          fc.stroke();
+          fc.fill();
         }
       }
       if (env.snow > 0.01) {
