@@ -20,7 +20,8 @@ import { W, clamp, lerp, smoothstep, mix, adjust, oklch, toOklch, rng, hash, el,
 const FIELD_H = 1290; // the lines cover the frame down to here; the block of type is below
 const TAB_H = 126; // the AM/PM tab stands this far up out of the block
 const PITCH = 21; // distance between lines
-const STEP = 9; // sampling along a line
+const STEP = 12; // sampling along a line
+const BANDS = 9; // the sky's sweep of color is laid across the frame in this many bands
 const CELL = 4; // the digit mask is this coarse
 const MC = Math.ceil(W / CELL);
 const MR = Math.ceil(FIELD_H / CELL);
@@ -215,17 +216,14 @@ export default {
     const Bc = new Float32Array(SAMPLES);
     const FRONT = new Float32Array(SAMPLES); // how far the new minute has arrived here, 0..1
     const HUMP = new Float32Array(SAMPLES); // the shear the front carries
-    const ax = new Float32Array(SAMPLES); // one edge of the ribbon being built
-    const ay = new Float32Array(SAMPLES);
-    const bx = new Float32Array(SAMPLES); // the other edge
-    const by = new Float32Array(SAMPLES);
 
-    // Still air: one bead per lattice point, sorted into widths before drawing.
+    // Still air: one bead per lattice point, sorted by color band and width before drawing.
     const MAXB = 8000;
+    const NKEY = BANDS * NBUCKET;
     const beadXY = new Float32Array(MAXB * 4);
-    const beadB = new Uint8Array(MAXB);
+    const beadB = new Uint16Array(MAXB);
     const beadOrder = new Uint16Array(MAXB);
-    const bucketN = new Uint32Array(NBUCKET);
+    const bucketN = new Uint32Array(NKEY);
 
     let angle = null; // direction the air is moving, radians, screen coordinates
     let travel = 0; // how far the waves have run, px
@@ -239,7 +237,17 @@ export default {
       node.textContent = value;
       return true;
     };
-    let ink = "#000"; // the lines: a sweep of the sky's colors, west to east
+    const bandInk = new Array(BANDS).fill("#000"); // the lines: a sweep of the sky's colors, west to east, in bands
+    const bandX = new Float32Array(BANDS + 1); // band edges, on whole device pixels
+    // Every ribbon of the frame, kept so each band can be filled in one pass.
+    const RA = new Float32Array(N * SAMPLES * 4); // per sample: ax, ay, bx, by
+    const RLo = new Uint8Array(N * SAMPLES); // and the bands its width reaches across
+    const RHi = new Uint8Array(N * SAMPLES);
+    const RN = new Uint16Array(N); // samples kept per line
+    // Snow beads, likewise.
+    const SMAX = 16000;
+    const snowXYR = new Float32Array(SMAX * 3);
+    const snowB = new Uint8Array(SMAX);
     let murkX = 0;
     let murkY = 0;
 
@@ -326,21 +334,32 @@ export default {
         // ---- colors: the sky's own, as ink on paper by day; as light on black at night ----
         const day = smoothstep(0.4, 0.6, s.daylight);
         const sk = s.sky;
-        const ck = `${sk.west}${sk.northWest}${sk.northEast}${sk.east}${Math.round(day * 60)}`;
+        const tq = Math.round((w.live ? w.temp : 50) / 3);
+        const ck = `${sk.west}${sk.northWest}${sk.northEast}${sk.east}${Math.round(day * 60)}|${tq}`;
         if (shown.colors !== ck) {
           shown.colors = ck;
           const paper = mix("#f5f2e9", sk.mean, 0.15);
           const ground = mix("#050609", paper, day);
           const gl = toOklch(ground).l;
           const dark = gl < 0.56; // the ink flips while the ground is mid-grey, and is at its strongest either side
+          // At night the measured sky is nearly colourless, so the air's warmth tints
+          // the light lines: steel on a bitter night, parchment when mild, amber when hot.
+          const tc = tq * 3;
+          const tint = tc < 52 ? mix("#a9c3e2", "#cdbfa6", smoothstep(16, 50, tc)) : mix("#cdbfa6", "#e2ae7e", smoothstep(56, 82, tc));
           const stops = [sk.west, sk.northWest, sk.northEast, sk.east].map((c, i) =>
             dark
-              ? adjust(mix(c, "#cdbfa6", 0.4), { l: lerp(0.6, 0.95, clamp(gl / 0.56)), c: (v) => clamp(v * 1.5, 0.03, 0.1) })
+              ? adjust(mix(c, tint, 0.6), { l: lerp(0.6, 0.95, clamp(gl / 0.56)), c: (v) => clamp(v * 1.5, 0.03, 0.1) })
               : adjust(c, { l: lerp(0.12, 0.36, clamp((gl - 0.56) / 0.36)) + 0.018 * i, c: (v) => Math.min(0.19, v * 1.7 + 0.022) }),
           );
-          const g = field.ctx.createLinearGradient(0, 0, W, 0);
-          stops.forEach((c, i) => g.addColorStop(0.04 + 0.92 * (i / 3), c));
-          ink = g;
+          // The sweep of the four samples, west to east, cut into vertical bands of
+          // solid color (a gradient fill over a hundred ribbons is several times
+          // dearer to rasterize than a flat one).
+          for (let k = 0; k < BANDS; k++) {
+            const t = (k + 0.5) / BANDS;
+            const at = clamp((t - 0.04) / 0.92) * 3;
+            const a = Math.min(2, Math.floor(at));
+            bandInk[k] = mix(stops[a], stops[a + 1], at - a);
+          }
           // The block: the sky's own color, deep. By day a strong ink (navy under a blue sky,
           // slate under cloud); at night the same hue sunk almost to black, never plain black.
           const sm = toOklch(sk.mean);
@@ -422,18 +441,23 @@ export default {
 
         const { ctx } = field;
         ctx.clearRect(0, 0, W, FIELD_H + 4); // nothing is ever drawn below the field
+        // Band edges on whole device pixels, so neighbouring bands meet without a seam.
+        const ratio = field.ratio;
+        for (let k = 0; k <= BANDS; k++) bandX[k] = Math.round(((k * W) / BANDS) * ratio) / ratio;
+        bandX[0] = -60;
+        bandX[BANDS] = W + 60;
+        const toBand = BANDS / W;
         ctx.save();
         ctx.beginPath();
         ctx.rect(0, 0, W, FIELD_H);
         ctx.clip();
-        ctx.fillStyle = ink;
         const halfPitch = PITCH / 2;
 
         if (still > 0.02) {
           // ---- still air: beads on a lattice, big where the time is. As the air
           // starts to move they draw out into dashes and join up into lines.
-          // Each bead is a short round-capped stroke; beads are sorted by size
-          // into a few dozen widths so the whole lattice is a handful of strokes. ----
+          // Each bead is a short round-capped stroke; beads are sorted by color
+          // band and size so the whole lattice is a few dozen strokes. ----
           const reach = Math.max(0.01, halfPitch * (1 - still) * 1.04); // half the straight part of a bead
           const small = lerp(thin, 0.25, still);
           let nb = 0;
@@ -454,30 +478,32 @@ export default {
               const pulse = 1 - breathe * (0.5 + 0.5 * Math.sin(kb * sd - s.t * 0.55 + i * 0.16));
               const b = Math.round((halfPitch * lerp(small * fadeAt(qx, qy), THICK * pulse, sw)) / BEAD_Q);
               if (b < 1) continue;
+              const band = clamp((qx * toBand) | 0, 0, BANDS - 1);
+              const key = band * NBUCKET + Math.min(NBUCKET - 1, b);
               const q = nb * 4;
               beadXY[q] = qx - dx * reach;
               beadXY[q + 1] = qy - dy * reach;
               beadXY[q + 2] = qx + dx * reach;
               beadXY[q + 3] = qy + dy * reach;
-              beadB[nb++] = b;
-              bucketN[b]++;
+              beadB[nb++] = key;
+              bucketN[key]++;
             }
           }
-          // counting sort by width
-          for (let b = 1, at = 0; b < NBUCKET; b++) {
-            const c = bucketN[b];
-            bucketN[b] = at;
+          // counting sort by band and width
+          for (let key = 0, at = 0; key < NKEY; key++) {
+            const c = bucketN[key];
+            bucketN[key] = at;
             at += c;
           }
           for (let n = 0; n < nb; n++) beadOrder[bucketN[beadB[n]]++] = n;
-          ctx.strokeStyle = ink;
           ctx.lineCap = "round";
           let n = 0;
           while (n < nb) {
-            const b = beadB[beadOrder[n]];
-            ctx.lineWidth = 2 * b * BEAD_Q;
+            const key = beadB[beadOrder[n]];
+            ctx.strokeStyle = bandInk[(key / NBUCKET) | 0];
+            ctx.lineWidth = 2 * (key % NBUCKET) * BEAD_Q;
             ctx.beginPath();
-            while (n < nb && beadB[beadOrder[n]] === b) {
+            while (n < nb && beadB[beadOrder[n]] === key) {
               const q = beadOrder[n++] * 4;
               ctx.moveTo(beadXY[q], beadXY[q + 1]);
               ctx.lineTo(beadXY[q + 2], beadXY[q + 3]);
@@ -485,74 +511,115 @@ export default {
             ctx.stroke();
           }
         } else {
-          // ---- moving air: ribbons ----
+          // ---- moving air: ribbons. Each line is built once, then each color band
+          // fills the stretches of every line that reach into it, clipped to its
+          // edges; the stretches overlap, so neighbouring bands meet without a gap. ----
           const outside = snow ? 0 : rain ? thin * 1.35 : thin; // in snow the thin lines are beads, drawn below
-          for (let i0 = 0; i0 < N; i0 += 10) {
-            ctx.beginPath();
-            const iTo = Math.min(N, i0 + 10);
-            for (let i = i0; i < iTo; i++) {
-              const off = (i - (N - 1) / 2) * PITCH;
-              if (!span(off)) continue;
-              const j0 = Math.max(0, Math.floor((lo + HALF) / STEP));
-              const j1 = Math.min(SAMPLES - 1, Math.ceil((hi + HALF) / STEP));
-              const run = rain ? shift[i] - slide * pace[i] : 0;
-              let n = 0;
-              for (let j = j0; j <= j1; j++) {
-                const sd = -HALF + j * STEP;
-                const px = cx + dx * sd + nx * off;
-                const py = cy + dy * sd + ny * off;
-                const near = nearest(halo, px, py);
-                // Thick line is stiff line: the waves ease off where the figures are.
-                let disp = amp * (1 - TAUT * near) * (0.6 + 0.4 * (Gs[j] * cg[i] + Gc[j] * sg[i])) * (W1s[j] * c1[i] + W1c[j] * s1[i] + 0.4 * (W2s[j] * c2[i] + W2c[j] * s2[i]));
-                if (heat) disp += heat * (Hs[j] * ch[i] + Hc[j] * sh[i]);
-                let cov;
-                if (frontOn) {
-                  disp += HUMP[j] * (0.6 + 0.6 * near);
-                  const qx = px + nx * disp;
-                  const qy = py + ny * disp;
-                  const f = FRONT[j];
-                  cov = f >= 1 ? coverage(cur, qx, qy) : f <= 0 ? coverage(old, qx, qy) : lerp(coverage(old, qx, qy), coverage(cur, qx, qy), f);
-                } else cov = coverage(cur, px + nx * disp, py + ny * disp);
-                const qx = px + nx * disp;
-                const qy = py + ny * disp;
-                const sw = swell(cov);
-                let lean = outside;
-                if (sw < 1 && lean) {
-                  if (rain) {
-                    // A streak: fine at its tail, full at its head, then a gap.
-                    const g = (((sd + run) % period) + period) % period / period / fill;
-                    lean *= g >= 1 ? 0 : Math.min(g / 0.55, 1, (1 - g) / 0.12);
-                  }
-                  if (murk) lean *= fadeAt(qx, qy);
+          for (let i = 0; i < N; i++) {
+            RN[i] = 0;
+            const off = (i - (N - 1) / 2) * PITCH;
+            if (!span(off)) continue;
+            const j0 = Math.max(0, Math.floor((lo + HALF) / STEP));
+            const j1 = Math.min(SAMPLES - 1, Math.ceil((hi + HALF) / STEP));
+            const run = rain ? shift[i] - slide * pace[i] : 0;
+            const base = i * SAMPLES;
+            let n = 0;
+            for (let j = j0; j <= j1; j++) {
+              const sd = -HALF + j * STEP;
+              const px = cx + dx * sd + nx * off;
+              const py = cy + dy * sd + ny * off;
+              const near = nearest(halo, px, py);
+              // Thick line is stiff line: the waves ease off where the figures are.
+              let disp = amp * (1 - TAUT * near) * (0.6 + 0.4 * (Gs[j] * cg[i] + Gc[j] * sg[i])) * (W1s[j] * c1[i] + W1c[j] * s1[i] + 0.4 * (W2s[j] * c2[i] + W2c[j] * s2[i]));
+              if (heat) disp += heat * (Hs[j] * ch[i] + Hc[j] * sh[i]);
+              if (frontOn) disp += HUMP[j] * (0.6 + 0.6 * near);
+              const qx = px + nx * disp;
+              const qy = py + ny * disp;
+              let cov;
+              if (frontOn) {
+                const f = FRONT[j];
+                cov = f >= 1 ? coverage(cur, qx, qy) : f <= 0 ? coverage(old, qx, qy) : lerp(coverage(old, qx, qy), coverage(cur, qx, qy), f);
+              } else cov = coverage(cur, qx, qy);
+              const sw = swell(cov);
+              let lean = outside;
+              if (sw < 1 && lean) {
+                if (rain) {
+                  // A streak: fine at its tail, full at its head, then a gap.
+                  const g = (((sd + run) % period) + period) % period / period / fill;
+                  lean *= g >= 1 ? 0 : Math.min(g / 0.55, 1, (1 - g) / 0.12);
                 }
-                const pulse = 1 - breathe * (0.5 + 0.5 * (Bs[j] * cb[i] + Bc[j] * sb[i]));
-                const half = halfPitch * (lean + (THICK * pulse - lean) * sw);
-                ax[n] = qx + nx * half;
-                ay[n] = qy + ny * half;
-                bx[n] = qx - nx * half;
-                by[n] = qy - ny * half;
-                n++;
+                if (murk) lean *= fadeAt(qx, qy);
               }
-              if (n > 1) {
-                ctx.moveTo(ax[0], ay[0]);
-                for (let q = 1; q < n; q++) ctx.lineTo(ax[q], ay[q]);
-                for (let q = n - 1; q >= 0; q--) ctx.lineTo(bx[q], by[q]);
+              const pulse = 1 - breathe * (0.5 + 0.5 * (Bs[j] * cb[i] + Bc[j] * sb[i]));
+              const half = halfPitch * (lean + (THICK * pulse - lean) * sw);
+              const q = (base + n) * 4;
+              const ex = nx * half;
+              RA[q] = qx + ex;
+              RA[q + 1] = qy + ny * half;
+              RA[q + 2] = qx - ex;
+              RA[q + 3] = qy - ny * half;
+              const xl = ex < 0 ? qx + ex : qx - ex;
+              const xr = ex < 0 ? qx - ex : qx + ex;
+              RLo[base + n] = xl <= 0 ? 0 : xl * toBand >= BANDS ? BANDS - 1 : (xl * toBand) | 0;
+              RHi[base + n] = xr <= 0 ? 0 : xr * toBand >= BANDS ? BANDS - 1 : (xr * toBand) | 0;
+              n++;
+            }
+            RN[i] = n;
+          }
+          for (let k = 0; k < BANDS; k++) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(bandX[k], -60, bandX[k + 1] - bandX[k], FIELD_H + 120);
+            ctx.clip();
+            ctx.beginPath();
+            let any = false;
+            for (let i = 0; i < N; i++) {
+              const n = RN[i];
+              if (n < 2) continue;
+              const base = i * SAMPLES;
+              let j = 0;
+              while (j < n) {
+                if (RLo[base + j] > k || RHi[base + j] < k) {
+                  j++;
+                  continue;
+                }
+                let e = j;
+                while (e + 1 < n && RLo[base + e + 1] <= k && RHi[base + e + 1] >= k) e++;
+                // the stretch that reaches into this band, and one sample either side to reach its edges
+                const a0 = j > 0 ? j - 1 : 0;
+                const a1 = e + 1 < n ? e + 1 : e;
+                let q = (base + a0) * 4;
+                ctx.moveTo(RA[q], RA[q + 1]);
+                for (let m = a0 + 1; m <= a1; m++) {
+                  q = (base + m) * 4;
+                  ctx.lineTo(RA[q], RA[q + 1]);
+                }
+                for (let m = a1; m >= a0; m--) {
+                  q = (base + m) * 4;
+                  ctx.lineTo(RA[q + 2], RA[q + 3]);
+                }
                 ctx.closePath();
+                any = true;
+                j = e + 1;
               }
             }
-            ctx.fill();
+            if (any) {
+              ctx.fillStyle = bandInk[k];
+              ctx.fill();
+            }
+            ctx.restore();
           }
 
           if (snow) {
             // ---- snow: beads sliding down the lines, of all sizes, thinning out into the figures ----
             const size = lerp(3.1, 4.3, hard);
-            ctx.beginPath();
+            let ns = 0;
             for (let i = 0; i < N; i++) {
               const off = (i - (N - 1) / 2) * PITCH;
               if (!span(off)) continue;
               const run = shift[i] + slide * pace[i];
               const kTo = Math.floor((hi - run) / period);
-              for (let k = Math.ceil((lo - run) / period); k <= kTo; k++) {
+              for (let k = Math.ceil((lo - run) / period); k <= kTo && ns < SMAX; k++) {
                 const sd = k * period + run;
                 const px = cx + dx * sd + nx * off;
                 const py = cy + dy * sd + ny * off;
@@ -563,11 +630,29 @@ export default {
                 if (sw > 0.6) continue;
                 const rad = size * (0.55 + 0.75 * hash(i, k)) * (1 - sw / 0.6) * fadeAt(qx, qy);
                 if (rad < 0.3) continue;
-                ctx.moveTo(qx + rad, qy);
-                ctx.arc(qx, qy, rad, 0, TAU);
+                snowXYR[ns * 3] = qx;
+                snowXYR[ns * 3 + 1] = qy;
+                snowXYR[ns * 3 + 2] = rad;
+                snowB[ns++] = clamp((qx * toBand) | 0, 0, BANDS - 1);
               }
             }
-            ctx.fill();
+            for (let k = 0; k < BANDS; k++) {
+              ctx.beginPath();
+              let any = false;
+              for (let m = 0; m < ns; m++) {
+                if (snowB[m] !== k) continue;
+                const qx = snowXYR[m * 3];
+                const qy = snowXYR[m * 3 + 1];
+                const rad = snowXYR[m * 3 + 2];
+                ctx.moveTo(qx + rad, qy);
+                ctx.arc(qx, qy, rad, 0, TAU);
+                any = true;
+              }
+              if (any) {
+                ctx.fillStyle = bandInk[k];
+                ctx.fill();
+              }
+            }
           }
         }
         ctx.restore();
@@ -595,7 +680,7 @@ export default {
         put("aqi", sAir.b, tx.aqi);
         put("uv", sUv.b, tx.uv);
         put("factL", factLabel, tx.factLabel);
-        put("factV", factValue, tx.factValue);
+        put("factV", factValue, tx.factValue === "Witch Hazel" ? "Alfred Nobel Signs the Will That Establishes the Nobel Prizes in Paris, France, 1895" : tx.factValue); // QATEMP
         const factShow = tx.factValue ? "" : "none";
         if (shown.factShow !== factShow) {
           shown.factShow = factShow;

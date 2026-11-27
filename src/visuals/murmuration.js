@@ -558,7 +558,7 @@ export default {
       const tp = svg("textPath", { href: `#mu-w${w}` }, kids);
       const text = svg("text", { class: cls, "text-anchor": anchor, dy: -17 }, tp);
       bands[w].append(text);
-      return { text, tp, w, right: anchor === "end", width: 0 };
+      return { text, tp, w, right: anchor === "end", width: 0, dx: 0 };
     };
     const place = (item, x) => {
       const f = (x - WX0) / 8;
@@ -580,6 +580,9 @@ export default {
     const sunLab = svg("tspan", { class: "soft" });
     const sunVal = svg("tspan", { class: "val", dx: 12 });
     const tSun = onWire(2, "val", "end", sunLab, sunVal);
+    // the computed text length leaves out the tspans' dx gaps: count them in
+    tAir.dx = 12 + 44 + 12;
+    tSun.dx = 12;
     const ampmBox = svg("svg", { class: "ampmBox", width: 320, height: 160, viewBox: `${W - MARGIN - 320} ${MIN_BASE - 130} 320 160` });
     Object.assign(ampmBox.style, { left: `${W - MARGIN - 320}px`, top: `${MIN_BASE - 130}px`, transformOrigin: "320px 130px" });
     const ampm = svg("text", { class: "ampm", "text-anchor": "end", x: W - MARGIN, y: MIN_BASE });
@@ -656,7 +659,7 @@ export default {
       tFactLab.text.style.display = hasFact ? "" : "none";
       fact.style.display = hasFact ? "" : "none";
       for (const t of caps) t.text.style.fontStretch = "";
-      for (const t of caps) t.width = len(t);
+      for (const t of caps) t.width = len(t) + t.dx;
       const wt = tTemp.width;
       const s1 = stretchFor([tCond, tAir], full - wt - 22 - 40);
       const s2 = stretchFor([tDate, tMoon], full - 48);
@@ -664,7 +667,7 @@ export default {
       tCond.text.style.fontStretch = tAir.text.style.fontStretch = s1;
       tDate.text.style.fontStretch = tMoon.text.style.fontStretch = s2;
       tFactLab.text.style.fontStretch = tSun.text.style.fontStretch = s3;
-      if (s1 || s2 || s3) for (const t of caps) t.width = len(t);
+      if (s1 || s2 || s3) for (const t of caps) t.width = len(t) + t.dx;
       // wire 1: the air now
       place(tTemp, MARGIN);
       place(tCond, MARGIN + wt + 18);
@@ -1394,6 +1397,7 @@ export default {
         syncLook(s);
         step(s, s.dt, s.t);
         syncLayers(s, s.dt);
+        draw(s, s.t);
       },
     };
   },

@@ -38,10 +38,12 @@
 //              a frost line along the top edges.
 //
 // Type is DOM (Fredoka); the blocks are inline SVG inside nested groups, one
-// per course. The rocking is shown as each course's displacement (a translate
-// snapped to whole device pixels), because rotated or sub-pixel layers cost far
-// more to composite than everything else here. One canvas in front carries
-// rain, snow, drips, the puddle and glints.
+// per course. The two courses of time cubes show their rocking as a shift
+// (snapped to whole device pixels, so the numerals stay crisp); the plank and
+// everything above it really tilt, each on an edge of the course below. Behind
+// the tower stands a plywood flat of the Manhattan skyline across the river,
+// painted in the measured western sky, its windows lit at night. One canvas in
+// front carries rain, snow, drips, the puddle and glints.
 
 import { W, H, TAU, clamp, lerp, smoothstep, approach, ease, rng, createNoise, mix, adjust, rgba, luminance, toOklab, fromOklab, el, addStyle, canvas2d, grain } from "../lib/kit.js";
 
@@ -94,6 +96,7 @@ const CSS = `
 .bt .floor{position:absolute;left:0;top:${GROUND}px;width:${W}px;height:${H - GROUND}px;background:var(--floor);overflow:hidden}
 .bt .floor:before{content:"";position:absolute;left:0;top:0;right:0;height:3px;background:var(--floorline)}
 .bt .floor svg{position:absolute;left:0;top:0}
+.bt .sk1{fill:var(--sk1)}.bt .sk2{fill:var(--sk2)}.bt .sk3{fill:var(--sk3)}.bt .skw{fill:var(--skw)}
 .bt .seam{fill:none;stroke:var(--seam);stroke-width:2}
 .bt .shadow{position:absolute;left:44px;top:${GROUND}px;width:1000px;height:${H - GROUND}px;transform-origin:0 0;background:linear-gradient(to bottom,rgba(0,0,0,.62),rgba(0,0,0,.3))}
 .bt .contact{position:absolute;left:14px;top:${GROUND}px;width:1052px;height:30px;background:linear-gradient(to bottom,rgba(0,0,0,.42),rgba(0,0,0,0))}
@@ -477,6 +480,55 @@ export default {
       const inner = `<defs><clipPath id="${id}">${shape}</clipPath></defs><g class="drop">${drops}</g><g class="flake">${flakes}</g>${slab(shape, "cf", "cs")}<g clip-path="url(#${id})"><rect class="cb" x="${f1(-cw / 2 - ox)}" y="${f1(ch * 0.78 - oy)}" width="${f1(cw)}" height="${f1(ch)}"/><path class="cg" d="${gr}"/></g><path class="chi" d="${hl}"/>`;
       hangNode(c.x, c.L, inner, r.range(2.6, 4.2), "cloud", c.th);
     }
+    // Behind the tower, a toy-theatre flat of what the studio window looks at:
+    // the Manhattan skyline across the East River, cut from plywood (a far row
+    // of low blocks, then the near towers with a visible edge), painted in the
+    // measured western sky and dark against it. It shows round the sides of the
+    // stack, and fully in the gaps beside a single hour cube. Windows glow at night.
+    const skylineEl = el("div", { class: "sky" });
+    {
+      const sr = rng(seed ^ 0x2c1f);
+      const G = GROUND;
+      const outline = (cx, pts) => {
+        let d = "";
+        for (let i = 0; i < pts.length; i++) d += `${i ? "L" : "M"}${f1(cx + pts[i][0])} ${f1(pts[i][1])}`;
+        for (let i = pts.length - 1; i >= 0; i--) d += `L${f1(cx - pts[i][0])} ${f1(pts[i][1])}`;
+        return `${d}Z`;
+      };
+      const box = (x, w, t) => `M${f1(x)} ${G}V${f1(t)}H${f1(x + w)}V${G}Z`;
+      let far = "";
+      let near = "";
+      let win = "";
+      const windows = (x0, x1, t, p) => {
+        for (let x = x0 + 7; x < x1 - 9; x += 15) {
+          for (let y = t + 16; y < 1640; y += 21) if (sr() < p) win += `M${x} ${y}h6v9h-6Z`;
+        }
+      };
+      for (let x = -30; x < W + 30; ) {
+        const w = sr.range(52, 118);
+        far += box(x, w - 3, sr.range(1080, 1420));
+        x += w;
+      }
+      // mid-rise towers, then the landmarks: Empire State to the south-west
+      // (left), the Secretariat at the left edge, Chrysler and One Vanderbilt
+      // to the north-west (right)
+      for (const [x, w, t] of [[-20, 80, 1180], [70, 74, 980], [218, 70, 1040], [790, 64, 1010], [990, 46, 1120], [1040, 70, 930]]) {
+        near += box(x, w, t);
+        windows(x, x + w, t, 0.2);
+      }
+      const t1 = 768;
+      near += outline(150, [[-62, G], [-62, t1 + 262], [-46, t1 + 262], [-46, t1 + 172], [-33, t1 + 172], [-33, t1 + 112], [-22, t1 + 112], [-22, t1 + 72], [-11, t1 + 72], [-11, t1 + 42], [-3, t1 + 42], [-3, t1]]);
+      windows(104, 196, t1 + 120, 0.24);
+      near += outline(10, [[-70, G], [-70, 1000]]);
+      windows(-60, 80, 1000, 0.22);
+      const t2 = 790;
+      near += outline(918, [[-48, G], [-48, t2 + 232], [-38, t2 + 232], [-38, t2 + 172], [-30, t2 + 172], [-30, t2 + 150], [-24, t2 + 122], [-24, t2 + 112], [-17, t2 + 90], [-17, t2 + 82], [-10, t2 + 58], [-10, t2 + 50], [-2, t2 + 20], [-2, t2]]);
+      windows(872, 966, t2 + 180, 0.24);
+      const t3 = 700;
+      near += outline(1050, [[-54, G], [-54, t3 + 330], [-40, t3 + 205], [-31, t3 + 195], [-23, t3 + 95], [-17, t3 + 86], [-4, t3 + 30], [-2, t3]]);
+      windows(1000, 1100, t3 + 340, 0.2);
+      skylineEl.innerHTML = `<svg width="${W}" height="${H}" style="position:absolute;left:0;top:0"><path class="sk1" d="${far}"/><g transform="translate(${f1(HK)} ${f1(-HY)})"><path class="sk3" d="${near}"/></g><path class="sk2" d="${near}"/><path class="skw" d="${win}"/></svg>`;
+    }
     const fogBack = el("div", { class: "sky" });
     const fogFront = el("div", { class: "sky" });
     const fogs = [];
@@ -500,7 +552,7 @@ export default {
     const contactEl = el("div", { class: "contact" });
     const tower = el("div", { class: "tower" });
     const hazeEl = el("div", { class: "haze" });
-    wrap.append(skyEl, starEl, hangLayer, swellEl, hazeEl, fogBack, floorEl, shadowEl, contactEl, tower);
+    wrap.append(skyEl, starEl, skylineEl, hangLayer, swellEl, hazeEl, fogBack, floorEl, shadowEl, contactEl, tower);
 
     // ----- the tower ----------------------------------------------------------
     const blocks = [];
@@ -917,6 +969,13 @@ export default {
       const wall = dim(s.sky.mean);
       skyEl.style.background = `linear-gradient(180deg,rgba(0,0,0,.2),rgba(0,0,0,0) 46%,rgba(255,255,255,${(0.07 * day).toFixed(3)})),linear-gradient(97deg,${cw},${cnw} 36%,${cne} 64%,${ce})`;
       starEl.style.opacity = (nightK * (1 - cloud) * (1 - E.fog)).toFixed(2);
+      // the skyline flat: the western sky, deepened; near black at night
+      const skFar = mix(mix(cw, "#2b3446", 0.3), "#080a10", 0.55 * nightK);
+      const skNear = mix(mix(cw, "#1a212e", 0.5), "#05060a", 0.7 * nightK);
+      setG("--sk1", skFar);
+      setG("--sk2", skNear);
+      setG("--sk3", mix(skNear, "#000000", 0.45));
+      setG("--skw", rgba(mix(mix(skNear, "#ffffff", 0.3), "#ffc978", nightK), 0.35 + 0.45 * nightK));
 
       const snowCol = mix(mix("#f6f8fb", wall, 0.12), "#141a26", nightK * 0.86);
       setG("--sn", snowCol);
@@ -929,6 +988,7 @@ export default {
       setG("--seam", rgba(mix(floor, "#000000", 0.6), 0.3 + 0.2 * nightK));
       setG("--floorline", rgba(mix(floor, "#ffffff", 0.5), 0.3 * (1 - nightK) + 0.05));
       E.pudCol = mix(mix(wall, "#05070c", 0.25), "#000000", nightK * 0.2);
+      E.pudHi = mix(mix(wall, "#ffffff", 0.55), "#9fb4d8", nightK);
 
       // the painted plywood sky
       const grey = clamp(0.55 * smoothstep(0.35, 1, cloud) + (wx.falling ? 0.22 : 0) + (wx.kind === "storm" ? 0.3 : 0));
@@ -1025,7 +1085,7 @@ export default {
     // What the wet floor mirrors, drawn upside down once per change of light:
     // the base plank's face, then the two minute cubes with a soft smear of
     // their numerals' paint. Drawn to the screen in rippled slices.
-    const REFH = 120;
+    const REFH = 100;
     const refl = document.createElement("canvas");
     refl.width = W;
     refl.height = REFH;
@@ -1038,16 +1098,17 @@ export default {
       rctx.fillRect(base.o.x, 0, base.o.w, 32);
       rctx.fillStyle = dk(base.vars["--s"], 0.5);
       rctx.fillRect(base.o.x + base.o.w, 0, base.dx, 32 - base.dy * 0.3);
-      const cubes = [mL, mR];
-      for (const b of cubes) {
-        rctx.fillStyle = dk(b.vars["--f"], 0.3);
-        rctx.fillRect(b.o.x, 35, b.o.w, REFH - 35);
-        const g = rctx.createRadialGradient(b.o.x + b.o.w / 2, 78, 4, b.o.x + b.o.w / 2, 78, 110);
-        g.addColorStop(0, rgba(b.ink, 0.75 + 0.25 * nightK));
-        g.addColorStop(1, rgba(b.ink, 0));
-        rctx.fillStyle = g;
-        rctx.fillRect(b.o.x, 35, b.o.w, REFH - 35);
-      }
+      // the plank's face continues, upside down, below the seam
+      rctx.fillStyle = dk(bf, 0.4);
+      rctx.fillRect(base.o.x, 32, base.o.w, REFH - 32);
+      rctx.fillStyle = dk(base.vars["--s"], 0.55);
+      rctx.fillRect(base.o.x + base.o.w, 32 - base.dy * 0.3, base.dx, REFH);
+      // and its fact, a soft warm smear of glow paint where the letters are
+      const g = rctx.createRadialGradient(base.o.x + base.o.w / 2, 92, 4, base.o.x + base.o.w / 2, 92, 300);
+      g.addColorStop(0, rgba(base.ink, 0.1 + 0.16 * nightK));
+      g.addColorStop(1, rgba(base.ink, 0));
+      rctx.fillStyle = g;
+      rctx.fillRect(base.o.x, 32, base.o.w, REFH - 32);
       // the wet seam where plank meets floor
       rctx.fillStyle = rgba("#ffffff", 0.12 * (1 - nightK) + 0.04);
       rctx.fillRect(base.o.x, 0, base.o.w, 2);
@@ -1146,8 +1207,37 @@ export default {
     const LY = new Float32Array(NO).fill(NaN);
     const WX = new Float32Array(NO);
     const WY = new Float32Array(NO);
+    const QA = 0.0003; // tilt step (rad): about a third of a pixel at the end of the plank
+    const LA = new Float32Array(NO).fill(NaN);
     function transforms() {
       for (let k = 0; k < NO; k++) {
+        if (k >= 2) {
+          // the plank and everything above it rock visibly: each course tilts
+          // on the edge of the one below (its pivot, in the parent's frame)
+          const o = OSC[k];
+          const qa = Math.round(phi[k] / QA) * QA;
+          const hop = Math.round(hopY[k] * 4) / 4;
+          const c = Math.cos(qa);
+          const sn = Math.sin(qa);
+          const px = qa > 0 ? o.cr : o.cl;
+          const py = o.iy;
+          const e = px - c * px + sn * py;
+          const f = py - sn * px - c * py + hop;
+          const pi = (o.par + 1) * 6;
+          const mi = (k + 1) * 6;
+          M[mi] = M[pi] * c + M[pi + 2] * sn;
+          M[mi + 1] = M[pi + 1] * c + M[pi + 3] * sn;
+          M[mi + 2] = -M[pi] * sn + M[pi + 2] * c;
+          M[mi + 3] = -M[pi + 1] * sn + M[pi + 3] * c;
+          M[mi + 4] = M[pi] * e + M[pi + 2] * f + M[pi + 4];
+          M[mi + 5] = M[pi + 1] * e + M[pi + 3] * f + M[pi + 5];
+          if (qa !== LA[k] || hop !== LY[k]) {
+            LA[k] = qa;
+            LY[k] = hop;
+            groups[k].style.transform = qa === 0 && hop === 0 ? "none" : `matrix(${c.toFixed(6)},${sn.toFixed(6)},${(-sn).toFixed(6)},${c.toFixed(6)},${e.toFixed(2)},${f.toFixed(2)})`;
+          }
+          continue;
+        }
         const ok = OSC[k];
         const qx = ok.cxk;
         const qy = ok.cyk;
@@ -1470,26 +1560,42 @@ export default {
 
       if (E.puddle > 0.02) {
         // a puddle at the foot: the plank and the minute cubes mirrored, rippling
+        // one oval pool on the floor in front of the plank, wholly in the frame:
+        // the plank mirrored in it, light sliding over its ripples, a bright lip
         const pk = E.puddle;
-        const rx = 300 + 190 * pk;
-        const ry = 40 + 30 * pk;
-        const cy = GROUND + 8 + ry * 0.9;
+        const rx = 330 + 150 * pk;
+        const ry = 22 + 18 * pk;
+        const cx = 500;
+        const cy = GROUND + 52;
         ctx.save();
         ctx.beginPath();
-        ctx.ellipse(497, cy, rx, ry, 0, 0, TAU);
-        ctx.ellipse(250, cy + 8, rx * 0.45, ry * 0.8, 0, 0, TAU);
-        ctx.ellipse(770, cy - 4, rx * 0.42, ry * 0.85, 0, 0, TAU);
+        ctx.ellipse(cx, cy, rx, ry, 0, 0, TAU);
         ctx.clip();
         ctx.globalAlpha = pk;
         ctx.fillStyle = E.pudCol;
-        ctx.fillRect(0, GROUND, W, H - GROUND);
-        const amp = 0.8 + 2.6 * rainAmt;
-        for (let y = 0; y < REFH; y += 5) {
-          const off = amp * (1 + y * 0.03) * Math.sin(y * 0.23 - s.t * 2.1) + amp * 0.6 * Math.sin(y * 0.071 + s.t * 1.3);
-          ctx.drawImage(refl, 0, y, W, 5, Math.round(off), GROUND + y, W, 5);
+        ctx.fillRect(cx - rx, cy - ry, rx * 2, ry * 2);
+        ctx.drawImage(refl, 0, 0, W, REFH, 0, GROUND, W, REFH);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = rgba(E.pudHi, 0.22 + 0.08 * rainAmt);
+        ctx.beginPath();
+        for (let k = 0; k < 4; k++) {
+          const y0 = cy - ry * 0.55 + k * ry * 0.36;
+          const ph = s.t * (0.35 + 0.08 * k) + k * 2.1;
+          for (let x = cx - rx; x <= cx + rx; x += 24) {
+            const y = y0 + (1 + 1.6 * rainAmt) * Math.sin(x * 0.03 + ph * 3);
+            const on = Math.sin(x * 0.011 - ph) > 0.55;
+            if (on) ctx.lineTo(x, y);
+            else ctx.moveTo(x, y);
+          }
         }
+        ctx.stroke();
         ctx.globalAlpha = 1;
         ctx.restore();
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = rgba(E.pudHi, 0.32 * pk);
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, rx, ry, 0, Math.PI * 1.04, Math.PI * 1.96);
+        ctx.stroke();
       }
 
       if (E.wet > 0.05 && rainAmt > 0) {
@@ -1558,8 +1664,8 @@ export default {
           if (due !== ringNext) {
             ringNext = due;
             const k = (due % NRING) * 3;
-            ring[k] = 220 + ((due * 7919) % 560);
-            ring[k + 1] = GROUND + 30 + ((due * 104729) % 56);
+            ring[k] = 260 + ((due * 7919) % 480);
+            ring[k + 1] = GROUND + 40 + ((due * 104729) % 24);
             ring[k + 2] = 0;
           }
           ctx.lineWidth = 2;
@@ -1570,7 +1676,7 @@ export default {
             const a = ring[k + 2];
             ctx.strokeStyle = `rgba(220,232,250,${(0.4 * (1 - a) * (1 - 0.4 * night)).toFixed(3)})`;
             ctx.beginPath();
-            ctx.ellipse(ring[k], ring[k + 1], 6 + 44 * a, (6 + 44 * a) * 0.28, 0, 0, TAU);
+            ctx.ellipse(ring[k], ring[k + 1], 5 + 34 * a, (5 + 34 * a) * 0.26, 0, 0, TAU);
             ctx.stroke();
           }
         }

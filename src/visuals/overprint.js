@@ -32,7 +32,7 @@
 
 import {
   W, H, clamp, lerp, remap, smoothstep, lerpAngle, ease, rng, createNoise,
-  mix, oklch, toOklch, toOklab, parse, toHex,
+  mix, oklch, toOklch, toOklab, parse, toHex, luminance,
   el, addStyle, shader, grain, fitText, wrapText,
 } from "../lib/kit.js";
 
@@ -455,10 +455,24 @@ export default {
     // that is where ink C changes from black to cream, legible on either side.
     // 0.56 is where near-white and near-black type read equally well (about 4:1 each)
     const LSTAR = 0.56;
+    // Each ground holds near its night colour until close to the switch and
+    // near its day colour soon after it, so the dim night type is never left on
+    // a ground that has already gone pale.
     const cross = (night, day, g) => {
       const ln = toOklab(night)[0], ld = toOklab(day)[0];
       const w = clamp((LSTAR - ln) / Math.max(0.01, ld - ln), 0.06, 0.94);
-      return mix(night, day, Math.pow(g, Math.log(w) / Math.log(0.5)));
+      const u = g < 0.5 ? w * (2 * g) * (2 * g) : w + (1 - w) * (1 - (2 - 2 * g) * (2 - 2 * g));
+      return mix(night, day, u);
+    };
+    // The night cream: as dim as it may be while it still reads (4.5:1 on the
+    // stock and both fields, 3:1 on the overprint under the numerals).
+    const nightInk = (p, a, b, ab) => {
+      const need = Math.max(4.5 * (Math.max(luminance(p), luminance(a), luminance(b)) + 0.05), 3 * (luminance(ab) + 0.05)) - 0.05;
+      for (let i = 0; i <= 10; i++) {
+        const c = mix(INK_NIGHT, INK_TWI, i / 10);
+        if (luminance(c) >= need) return c;
+      }
+      return INK_TWI;
     };
     let hueB = null;
     let pal = { p: PAPER_NIGHT, a: "#000", b: "#000", ab: "#000", g: 0, inkN: INK_NIGHT };
@@ -509,8 +523,9 @@ export default {
       const PAn = scr(PAPER_NIGHT, An), PBn = scr(PAPER_NIGHT, Bn), PABn = scr(PAn, Bn);
       const p = cross(PAPER_NIGHT, paperDay, g);
       if (p !== pal.p || g !== pal.g) dirty = true;
-      const inkN = mix(INK_NIGHT, INK_TWI, smoothstep(0.08, 0.5, g));
-      pal = { p, a: cross(PAn, PAd, g), b: cross(PBn, PBd, g), ab: cross(PABn, PABd, g), g, inkN };
+      const a = cross(PAn, PAd, g), b = cross(PBn, PBd, g), abx = cross(PABn, PABd, g);
+      const inkN = nightInk(p, a, b, abx);
+      pal = { p, a, b, ab: abx, g, inkN };
       fill(uP, pal.p); fill(uA, pal.a); fill(uB, pal.b); fill(uAB, pal.ab);
       fill(uC, inkN);
       uC[3] = 1 - smoothstep(0.35, 0.65, g);
@@ -718,7 +733,7 @@ export default {
         uFx[1] = smoothstep(84, 96, wx.temp) * 3.2;
         uFx[2] = smoothstep(90, 170, wx.aqi) * 0.42;
         uFx[3] += dt * 0.55;
-        uGale[0] = (vx >= 0 ? 1 : -1) * remap(wx.wind, 9, 30, 0, 44) * uFx[0];
+        uGale[0] = (vx >= 0 ? 1 : -1) * remap(wx.wind, 9, 30, 0, 70) * uFx[0];
         uGale[1] += dt * (0.15 + wx.wind * 0.012);
 
         // ---- draw the plates when something on them has changed ---------------------

@@ -40,7 +40,7 @@
 import { W, H, TAU, clamp, lerp, smoothstep, approach, rng, hash, el, svg, addStyle, canvas2d, shader, grain, fitText, vec3 } from "../lib/kit.js";
 
 // The pool's opening in the coping, in stage units, and the mosaic grid.
-const PX0 = 48, PY0 = 285, PX1 = 1032, PY1 = 1491;
+const PX0 = 48, PY0 = 291, PX1 = 1032, PY1 = 1491;
 const PCX = (PX0 + PX1) / 2, PCY = (PY0 + PY1) / 2, PHW = (PX1 - PX0) / 2, PHH = (PY1 - PY0) / 2;
 const GW = 45, GH = 55;
 
@@ -381,7 +381,7 @@ void main() {
   float beam = 1.0 - 0.45 * lv.x * lv.x / (dist2 + 0.02);
   float lit = (1.0 - u_light.z * shade) * mix(1.0, 0.56 + 0.8 * fall * beam, u_light.w);
   vec2 cuv = (p + disp * 5.0) / 620.0 + u_sun.zw * 0.13 * t * 0.2;
-  float c = caustic(cuv, t * 0.3 + 3.0);
+  float c = (u_light.x > 0.004 || u_glowC.a > 0.001) ? caustic(cuv, t * 0.3 + 3.0) : 0.0;
   float cs = u_light.x * mix(1.0, min(1.0, fall * 2.4), u_light.w) * floorK * (1.0 - 0.8 * shade) * (1.0 - 0.75 * ice);
   col *= vec3(lit) + u_sunCol * (cs * (c * 1.9 - 0.3));
   col += u_light.w * vec3(0.012, 0.085, 0.095) * fall * fall * (1.0 - 0.6 * ink);
@@ -478,7 +478,7 @@ const STYLE = `
 .de .date { position: absolute; left: 64px; top: 58px; font-weight: 600; font-size: 54px; line-height: 64px; letter-spacing: 0.13em; text-transform: uppercase; }
 .de .date div { white-space: nowrap; }
 .de .tb { position: absolute; right: 64px; top: 64px; display: flex; flex-direction: column; align-items: flex-end; }
-.de .cond { margin-top: 14px; font-weight: 500; font-size: 48px; line-height: 48px; letter-spacing: 0.01em; white-space: nowrap; }
+.de .cond { margin-top: 20px; font-weight: 500; font-size: 48px; line-height: 48px; letter-spacing: 0.01em; white-space: nowrap; }
 .de .temp { height: 104px; display: flex; gap: 8px; }
 .de .temp span { width: 100px; height: 104px; border-radius: 5px; background: var(--tile); color: var(--glyph);
   box-shadow: inset 0 3px 0 rgba(255,255,255,.14), inset 0 -4px 0 rgba(0,0,10,.25), 0 0 0 2px var(--jd);
@@ -740,7 +740,7 @@ export default {
     };
 
     // ----- snowflakes: each one falls away from the viewer toward the spot it lands on -----
-    const NF = 460;
+    const NF = 380;
     const fl = new Float32Array(NF * 6); // land x, land y, phase, fall seconds, size, sideways drift
     for (let i = 0; i < NF; i++) {
       fl[i * 6] = r.range(-20, W + 20);
@@ -776,7 +776,7 @@ export default {
 
     // ----- the rare visitor -----
     const visit = { kind: "", x: r.range(200, 780), y: r.range(260, 1080), vx: 0, vy: 0, rot: r.range(0, 360), spin: r.range(-4, 4), wake: r.range(1, 4) };
-    const visitor = rng(seed + 77)() < 0.3;
+    const visitor = rng(seed + 77)() < 0.25;
 
     function spawnRing(x, y, amp, life, age = 0) {
       let best = rings[0];
@@ -965,7 +965,7 @@ export default {
         if (shown.stamp !== stamp) {
           shown.stamp = stamp;
           layTime(mask, s.text.hh, s.text.mm, s.text.ampm);
-          blurGlow();
+          if (jump || flipping > 0) blurGlow(); // otherwise the halo follows once the wave has passed
           if (jump) {
             for (let i = 0; i < GW * GH; i++) {
               bytes[i * 4] = mask[i] * 255;
@@ -995,7 +995,7 @@ export default {
               bytes[i * 4] = mask[i] * 255;
               bytes[i * 4 + 3] = 255;
               flipAt[i] = -1;
-              flipping--;
+              if (--flipping === 0) blurGlow();
             } else {
               if (u >= 0.5) bytes[i * 4] = mask[i] * 255;
               bytes[i * 4 + 3] = Math.round(255 * Math.abs(Math.cos(Math.PI * u)));
@@ -1175,7 +1175,7 @@ export default {
               }
               const uf = (u * (fall + rest)) / fall; // 0..1 falling, above 1 lying where it landed
               const which = uf >= 1 ? 2 : uf > 0.55 ? 1 : 0;
-              if (pass < 0 ? uf >= 1 || uf < 0.3 : which !== pass) continue;
+              if (pass < 0 ? which !== 1 : which !== pass) continue;
               let x = fl[j], y = fl[j + 1], sz;
               if (uf < 1) {
                 const up = 1 - uf;
@@ -1189,6 +1189,10 @@ export default {
                 sz = 2.4 * fl[j + 4] * (onWater ? 1 - melt : 1 - melt * melt * melt);
               }
               if (sz < 0.3) continue;
+              if (sz < 2) {
+                ctx.rect(x - sz, y - sz, sz * 2, sz * 2); // too small to tell from a disc, and cheaper
+                continue;
+              }
               ctx.moveTo(x + sz, y);
               ctx.arc(x, y, sz, 0, TAU);
             }

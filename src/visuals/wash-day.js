@@ -171,7 +171,7 @@ void main() {
 
   // in shadow: dark cotton by moon and lamp, and the print glows
   vec3 lv = u_lamp.xyz - v_p; float ld = dot(lv, lv);
-  float la = u_lamp.w / (1.0 + ld / 160000.0);
+  float la = u_lamp.w * 2.4 / (1.0 + ld / 380000.0);
   float lamb = 0.35 + 0.65 * max(dot(n, lv * inversesqrt(ld)), 0.0);
   vec3 nightC = u_night * (0.7 + 0.6 * mix(u_moonL.z, max(dot(n, u_moonL), 0.0), u_shade)) + u_lampCol * la * lamb;
   nightC *= 1.0 - 0.3 * wet;
@@ -225,11 +225,6 @@ void main() {
   gl_FragColor = vec4(c, t.a);
 }`;
 
-const pow2 = (v, cap) => {
-  let p = 64;
-  while (p < v && p < cap) p *= 2;
-  return p;
-};
 const font = (weight, size, italic) => `${italic ? "italic " : ""}${weight} ${size}px ${FONT}`;
 const easeIO = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 const projX = (x, z) => 540 + (x - 540) * (1 + z / PERSP);
@@ -269,14 +264,14 @@ export default {
         ...sp, i, off: N, n: sp.cols * sp.rows, dx: sp.w / (sp.cols - 1), dy: sp.h / (sp.rows - 1),
         idx0: indexCount, idxN: (sp.cols - 1) * (sp.rows - 1) * 6,
         visible: true, sig: null, dirty: false, tex: null,
-        tw: pow2(sp.w * texScale, 2048), th: pow2(sp.h * texScale, 1024), canvas: document.createElement("canvas"), ctx: null,
+        tw: Math.ceil(sp.w * texScale), th: Math.ceil(sp.h * texScale), canvas: document.createElement("canvas"), ctx: null,
         wetA: 0, wetB: 0, wetAmt: 0, ax: 0, az: 0, rip: 0, damp: 1.5, mass: 1, cs: 1, slack: 0,
         th1: 0, th1v: 0, ph1: 0, ph1v: 0, frozenSet: false, seed: r.range(0, 10),
         scallop: new Float32Array(sp.cols),
       };
       c.canvas.width = c.tw;
       c.canvas.height = c.th;
-      c.ctx = c.canvas.getContext("2d");
+      c.ctx = c.canvas.getContext("2d", { willReadFrequently: true });
       for (let p = 0; p < sp.pegs.length - 1; p++) {
         const a = sp.pegs[p];
         const b = sp.pegs[p + 1];
@@ -347,6 +342,7 @@ export default {
       for (const col of c.pegs) pegs.push({ c, node: c.off + col, bottom: false, tilt: r.range(-0.12, 0.12) });
       if (c.tether) for (const col of [0, c.cols - 1]) pegs.push({ c, node: c.off + (c.rows - 1) * c.cols + col, bottom: true, tilt: r.range(-0.2, 0.2) });
     }
+    const spareFact = [{ x: 262, tilt: -0.1 }, { x: 290, tilt: 0.12 }, { x: 700, tilt: 0.06 }];
     const spare = [{ x: 118, tilt: 0.1 }, { x: 146, tilt: -0.14 }, { x: 912, tilt: 0.05 }, { x: 962, tilt: -0.08 }]; // waiting on the hours line when it is half empty
 
     // ------------------------------------------------------------------
@@ -558,7 +554,13 @@ export default {
         if (!force && sig === c.sig) continue;
         c.sig = sig;
         if (c.key === "h1") c.visible = sig !== "";
-        if (c.key !== "h1" || c.visible) {
+        if (c.key === "fact") {
+          // no fact today: the tea towel is not hung out at all
+          const show = tx.factValue !== "";
+          if (show && !c.visible) hangFlat(c);
+          c.visible = show;
+        }
+        if (c.visible || c.key !== "h1") {
           print(c);
           c.dirty = true;
         }
@@ -586,10 +588,10 @@ export default {
     // Textures drawn once: noise, bricks, rooftops, pegs and ironmongery
     // ------------------------------------------------------------------
     function noiseCanvas() {
-      const S = 256;
+      const S = 128;
       const cv = document.createElement("canvas");
       cv.width = cv.height = S;
-      const cx = cv.getContext("2d");
+      const cx = cv.getContext("2d", { willReadFrequently: true });
       const img = cx.createImageData(S, S);
       const rr = rng(seed + 11);
       const sm = (t) => t * t * (3 - 2 * t);
@@ -622,9 +624,9 @@ export default {
         for (let i = 0; i < out.length; i++) out[i] /= total;
         return out;
       };
-      const a = layer([4, 8, 16, 32]);
-      const b = layer([4, 8, 16, 32]);
-      const d = layer([8, 16, 32, 64]);
+      const a = layer([4, 8, 16]);
+      const b = layer([4, 8, 16]);
+      const d = layer([8, 16, 32]);
       // The canvas is uploaded as RGBA with alpha kept straight, so alpha can carry a fourth field (white noise).
       for (let i = 0; i < S * S; i++) {
         img.data[i * 4] = clamp((a[i] - 0.5) * 1.9 + 0.5) * 255;
@@ -639,7 +641,7 @@ export default {
       const cv = document.createElement("canvas");
       cv.width = 128;
       cv.height = 512;
-      const x = cv.getContext("2d");
+      const x = cv.getContext("2d", { willReadFrequently: true });
       x.scale(2, 2); // 64 x 256 stage units
       x.fillStyle = "#b3a290";
       x.fillRect(0, 0, 64, 256);
@@ -677,7 +679,7 @@ export default {
       const cv = document.createElement("canvas");
       cv.width = 1024;
       cv.height = 128;
-      const x = cv.getContext("2d");
+      const x = cv.getContext("2d", { willReadFrequently: true });
       x.fillStyle = "#000";
       x.fillRect(0, 0, 1024, 128);
       x.scale(1024 / 1080, 128 / 150);
@@ -714,7 +716,7 @@ export default {
     function atlasCanvas() {
       const cv = document.createElement("canvas");
       cv.width = cv.height = 256;
-      const x = cv.getContext("2d");
+      const x = cv.getContext("2d", { willReadFrequently: true });
       // a wooden peg: 11 x 30 stage units at 4x, in (2,2)-(46,122)
       x.save();
       x.translate(2, 2);
@@ -798,47 +800,62 @@ export default {
       }
       glRatio = w / W;
     }
+    // Shaders are compiled and linked in mount() but only checked on the first frame, so a driver that
+    // compiles in parallel does not hold mount() up.
     function program(vs, fs, attribs) {
-      const compile = (type, src) => {
+      const shader = (type, src) => {
         const sh = gl.createShader(type);
         gl.shaderSource(sh, src);
         gl.compileShader(sh);
-        if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh) || "shader failed to compile");
         return sh;
       };
       const p = gl.createProgram();
-      gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
-      gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+      const v = shader(gl.VERTEX_SHADER, vs);
+      const f = shader(gl.FRAGMENT_SHADER, fs);
+      gl.attachShader(p, v);
+      gl.attachShader(p, f);
       attribs.forEach((name, i) => gl.bindAttribLocation(p, i, name));
       gl.linkProgram(p);
-      if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p) || "shader failed to link");
+      return { p, v, f, u: null };
+    }
+    function finishProgram(pr) {
+      const p = pr.p;
+      if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+        throw new Error(gl.getShaderInfoLog(pr.v) || gl.getShaderInfoLog(pr.f) || gl.getProgramInfoLog(p) || "shader failed to link");
+      }
       const u = {};
       const count = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
       for (let i = 0; i < count; i++) {
         const info = gl.getActiveUniform(p, i);
         u[info.name] = gl.getUniformLocation(p, info.name);
       }
-      return { p, u };
+      pr.u = u;
     }
-    function texture(source, { repeat = false, premultiply = false, rgb = false } = {}) {
+    // Cloth prints are uploaded at their exact size, without mipmaps (they are seen at about 1:1, and a
+    // re-print on the minute must be cheap); the small tiling textures are powers of two and mipmapped.
+    function texture(source, { repeat = false, premultiply = false, rgb = false, mips = true } = {}) {
       const t = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, t);
       gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, premultiply);
       gl.texImage2D(gl.TEXTURE_2D, 0, rgb ? gl.RGB : gl.RGBA, rgb ? gl.RGB : gl.RGBA, gl.UNSIGNED_BYTE, source);
-      gl.generateMipmap(gl.TEXTURE_2D);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      if (mips) gl.generateMipmap(gl.TEXTURE_2D);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, mips ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE);
       if (res.aniso) gl.texParameterf(gl.TEXTURE_2D, res.aniso.TEXTURE_MAX_ANISOTROPY_EXT, 4);
       return t;
     }
-    function buildGL() {
-      res.aniso = gl.getExtension("EXT_texture_filter_anisotropic");
+    function startGL() {
+      gl.getExtension("KHR_parallel_shader_compile");
       res.sky = program(VS_SKY, FS_SKY, ["a_p"]);
       res.cloth = program(VS_CLOTH, FS_CLOTH, ["a_pos", "a_nrm", "a_uv"]);
       res.line = program(VS_LINE, FS_LINE, ["a_p"]);
       res.sprite = program(VS_SPRITE, FS_SPRITE, ["a_p", "a_uv", "a_e"]);
+    }
+    function finishGL() {
+      res.aniso = gl.getExtension("EXT_texture_filter_anisotropic");
+      for (const pr of [res.sky, res.cloth, res.line, res.sprite]) finishProgram(pr);
       const buffer = (target, data, usage) => {
         const b = gl.createBuffer();
         gl.bindBuffer(target, b);
@@ -869,7 +886,7 @@ export default {
       res.skyline = texture(staticTex.skyline, { rgb: true });
       res.atlas = texture(staticTex.atlas, { premultiply: true });
       for (const c of cloths) {
-        c.tex = texture(c.canvas, { rgb: true });
+        c.tex = texture(c.canvas, { rgb: true, mips: false });
         c.dirty = false;
       }
       gl.disable(gl.DEPTH_TEST);
@@ -885,35 +902,39 @@ export default {
     }
 
     refreshPrints(true);
+    let glPending = false;
     try {
       const opts = { alpha: false, antialias: false, depth: false, stencil: false, powerPreference: "low-power", preserveDrawingBuffer: false };
       gl = glCanvas.getContext("webgl", opts) || glCanvas.getContext("experimental-webgl", opts);
       if (gl) {
         sizeGL();
-        buildGL();
+        startGL();
+        glPending = true;
         glCanvas.addEventListener("webglcontextlost", (e) => {
           e.preventDefault();
           glOK = false;
         });
         glCanvas.addEventListener("webglcontextrestored", () => {
           try {
-            buildGL();
+            startGL();
+            finishGL();
           } catch {}
         });
       }
     } catch (err) {
-      glOK = false;
+      glPending = false;
       console.error(`[wash-day] ${err.message || err}`);
     }
     // Without WebGL: the same wash, hanging flat, drawn once per change on a 2D canvas.
     let flat = null;
-    if (!glOK) {
+    function useFlat() {
       glCanvas.remove();
       flat = canvas2d(wrap, { maxScale: 2 });
       flat.canvas.style.zIndex = "0";
       over.canvas.style.zIndex = "1";
       direct = { cloth: "#f4f0e6", ink: "#1b48cc", key: "" };
     }
+    if (!glPending) useFlat();
 
     // ------------------------------------------------------------------
     // The weather as the wash feels it
@@ -1444,6 +1465,10 @@ export default {
         const L = lines[0];
         for (const p of spare) quad(p.x + L.haul, lineY(L, p.x + L.haul) + 4, 5.5, 15, p.tilt, PEG[0], PEG[1], PEG[2], PEG[3], 0);
       }
+      if (!byKey.fact.visible) {
+        const L = lines[3];
+        for (const p of spareFact) quad(p.x, lineY(L, p.x) + 4, 5.5, 15, p.tilt, PEG[0], PEG[1], PEG[2], PEG[3], 0);
+      }
     }
     function buildFixtures() {
       // drawn over the walls: pulley wheels (they turn as the line is hauled) and the lamp
@@ -1478,7 +1503,6 @@ export default {
           gl.bindTexture(gl.TEXTURE_2D, c.tex);
           gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
           gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, c.canvas);
-          gl.generateMipmap(gl.TEXTURE_2D);
           c.dirty = false;
         }
       }
@@ -1711,8 +1735,8 @@ export default {
         const slant = clamp(windX / 45, -0.55, 0.55);
         const speed = 640 + 520 * env.rain;
         const len = 20 + 44 * env.rain;
-        ctx.strokeStyle = nt > 0.5 ? `rgba(150,170,205,${0.2 + 0.1 * env.rain})` : `rgba(236,242,252,${0.3 + 0.16 * env.rain})`;
-        ctx.lineWidth = 1.6;
+        ctx.strokeStyle = nt > 0.5 ? `rgba(160,180,215,${0.3 + 0.16 * env.rain})` : `rgba(238,244,253,${0.4 + 0.2 * env.rain})`;
+        ctx.lineWidth = 2;
         ctx.lineCap = "butt";
         ctx.beginPath();
         for (let i = 0; i < n; i++) {
@@ -1749,7 +1773,7 @@ export default {
     // Finished from the first frame: let the wash find its shape before it is seen
     // ------------------------------------------------------------------
     readWeather(state, 0, true);
-    for (let i = 0; i < 48; i++) simulate(1 / 30);
+    for (let i = 0; i < 14; i++) simulate(1 / 30);
     for (const c of cloths) captureFrozen(c);
     env.warm = false;
 
@@ -1773,6 +1797,16 @@ export default {
         else for (const c of cloths) if (!c.frozenSet && c.visible) captureFrozen(c);
         if (s.dt > 1e-4) simulate(s.dt);
         relight(s);
+        if (glPending) {
+          glPending = false;
+          try {
+            finishGL();
+          } catch (err) {
+            glOK = false;
+            console.error(`[wash-day] ${err.message || err}`);
+            useFlat();
+          }
+        }
         if (glOK) draw(s);
         else if (flat) drawFlat(s);
         drawWeather(s);

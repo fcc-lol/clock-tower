@@ -339,17 +339,19 @@ const PLAN = [];
   const split = (kind, n, parts) => {
     for (let k = 0; k < parts; k++) PLAN.push([kind, Math.floor((n * k) / parts), Math.floor((n * (k + 1)) / parts)]);
   };
+  // (balanced so that no step touches much more than about 14,000 cells)
   PLAN.push([0, 0, 0]); //       the figures, drawn into a coverage mask
-  split(1, FR, 2); //            mask -> the two grids (rows)
-  split(2, FC, 12); //           outside distance, down the columns
-  split(3, FR, 4); //            and along the rows
-  PLAN.push([4, 0, 0], [5, 0, 0]); // inside distance (within the figures' box)
+  split(1, FR, 3); //            mask -> the two grids (rows)
+  split(2, FC, 6); //            outside distance, down the columns
+  split(3, FR, 8); //            and along the rows
+  split(4, 2, 2); //             inside distance (within the figures' box): columns
+  split(5, 2, 2); //             and rows (from/to count halves of the box)
   split(6, NCELL, 2); //         signed distance
   for (let pass = 0; pass < 2; pass++) {
-    split(7, FR, 4); //          box blur, rows
-    split(8, FC, 4); //          and columns (twice: nearly a gaussian)
+    split(7, FR, 3); //          box blur, rows
+    split(8, FC, 3); //          and columns (twice: nearly a gaussian)
   }
-  split(9, NCELL, 2); //         blend and quantize into the target
+  split(9, NCELL, 3); //         blend and quantize into the target
 }
 function fieldJob(glyphs, target) {
   let stage = 0;
@@ -401,10 +403,14 @@ function fieldJob(glyphs, target) {
         for (let y = from; y < to; y++) edt1d(gridOut, y * FC, 1, FC);
       } else if (kind === 4) {
         const bh = by1 - by0 + 1;
-        for (let x = bx0; x <= bx1; x++) edt1d(gridIn, by0 * FC + x, FC, bh);
+        const xm = bx0 + ((bx1 - bx0 + 1) >> 1);
+        const xa = from === 0 ? bx0 : xm, xb = from === 0 ? xm : bx1 + 1;
+        for (let x = xa; x < xb; x++) edt1d(gridIn, by0 * FC + x, FC, bh);
       } else if (kind === 5) {
         const bw = bx1 - bx0 + 1;
-        for (let y = by0; y <= by1; y++) edt1d(gridIn, y * FC + bx0, 1, bw);
+        const ym = by0 + ((by1 - by0 + 1) >> 1);
+        const ya = from === 0 ? by0 : ym, yb = from === 0 ? ym : by1 + 1;
+        for (let y = ya; y < yb; y++) edt1d(gridIn, y * FC + bx0, 1, bw);
       } else if (kind === 6) {
         for (let i = from; i < to; i++) dist[i] = (Math.sqrt(gridOut[i]) - Math.sqrt(gridIn[i])) * CELL;
       } else if (kind === 7) {
@@ -501,11 +507,11 @@ export default {
       .sm .sun i { font-weight: 500; margin-right: 0.24em; }
       .sm .dot { flex: none; width: 11px; height: 11px; border-radius: 50%; background: var(--seal); margin: 4px 20px 0 2px; }
       .sm .ampm { position: absolute; }
-      .sm .foot { position: absolute; left: ${NUM_LEFT + 6}px; right: 64px; bottom: 60px; }
+      .sm .foot { position: absolute; left: ${NUM_LEFT + 6}px; right: 64px; bottom: 70px; }
       .sm .wx { display: flex; align-items: flex-end; }
       .sm .temp { font-family: ${NUM_FAMILY}, serif; font-weight: 800; font-size: 176px; line-height: 0.74; letter-spacing: -0.03em;
         margin-right: 46px; white-space: nowrap; }
-      .sm .temp.none .tn { display: inline-block; font-family: "Cormorant Garamond", serif; font-weight: 700; transform: translateY(-0.3em); margin-right: 0.04em; }
+      .sm .temp.none .tn { display: inline-block; font-family: "Cormorant Garamond", serif; font-weight: 700; transform: translateY(-0.12em); margin-right: 0.06em; }
       .sm .lines { padding-bottom: 1px; min-width: 0; }
       .sm .cond { font-style: italic; font-size: 62px; line-height: 1; white-space: nowrap; margin-bottom: 24px; }
       .sm .moon { font-weight: 500; font-size: 48px; line-height: 0.86; white-space: nowrap; letter-spacing: 0.01em; }
@@ -758,6 +764,11 @@ export default {
       fb[i] = -r() * fl[i];
     }
     let snowDrawn = false;
+    const makeSnow = () => {
+      snow = canvas2d(wrap, { maxScale: 1, adaptive: true });
+      wrap.insertBefore(snow.canvas, head);
+    };
+    if (state.weather.falling === "snow") makeSnow(); // made here when it is already snowing, not in a frame
 
     // ----- frost cracks, the water's swirl, the wind's comb -----
     const crA = [], crB = [];
@@ -842,14 +853,14 @@ export default {
       const water = mix(NIGHT_WATER, mean, 0.1);
       const ground = mix(water, mix(dusk, paperDay, smoothstep(0.35, 0.85, t)), t);
       const lum = luminance(ground);
-      const night = 1 - smoothstep(0.172, 0.19, lum); // the ink flips while the ground is mid-grey
+      const night = 1 - smoothstep(0.169, 0.185, lum); // the ink flips while the ground is mid-grey, where both inks read alike
       pal.night = night;
       const dark = night < 0.5;
       const groundL = toOklch(ground).l;
       const moonlight = s.moon.up ? s.moon.illumination : 0;
 
       css("--paper", ground);
-      css("--ink", dark ? SUMI : "#ddd6c5");
+      css("--ink", dark ? SUMI : "#f1ebde");
       css("--num", mix(SUMI, BONE, night));
       css("--seal", mix(mix("#7a2217", "#a82e1a", smoothstep(0.1, 0.5, t)), ground, dark ? 0 : 0.04));
       css("--sealtext", dark ? "#f6efdd" : "#e9e1cf");
@@ -906,6 +917,8 @@ export default {
     let gustClock = 0;
     let palAt = -1;
     let lastFact = null;
+    let lastFactLabel = null;
+    let lastHH = "", lastMM = "";
 
     return {
       frame(s) {
@@ -917,9 +930,13 @@ export default {
         lastMs = s.ms;
 
         // ----- the time -----
-        const key = `${c.hh}:${c.mm}`;
         if (initJob) initStep(s);
-        else if (key !== shownKey) showTime(c.hh, c.mm, fast, t);
+        else if (c.hh !== lastHH || c.mm !== lastMM) {
+          // (the string key is built only when the minute changes, not every frame)
+          lastHH = c.hh;
+          lastMM = c.mm;
+          if (`${c.hh}:${c.mm}` !== shownKey) showTime(c.hh, c.mm, fast, t);
+        }
         else if (texLost) {
           texLost = false;
           upload();
@@ -973,14 +990,16 @@ export default {
           shown.tempW = s.text.temp;
           fitText(condNode, SEAL_X - 44 - foot.offsetLeft - condNode.parentNode.offsetLeft, 62);
         }
-        const fact = s.text.factValue ? `${s.text.factLabel}|${s.text.factValue}` : "";
-        if (fact !== lastFact) {
+        if (s.text.factValue !== lastFact || s.text.factLabel !== lastFactLabel) {
+          const fact = s.text.factValue;
           lastFact = fact;
+          lastFactLabel = s.text.factLabel;
           factNode.style.display = fact ? "" : "none";
           fLabel.textContent = s.text.factLabel;
           fValue.textContent = s.text.factValue;
           fValue.style.fontSize = "";
-          if (fact && fValue.offsetHeight > 50 * 1.08 * 2 + 4) fValue.style.fontSize = "44px";
+          // two lines at 50 px; only a fact that would need a third steps down
+          if (fact && fValue.offsetHeight > 50 * 1.2 * 2 + 4) fValue.style.fontSize = "44px";
         }
 
         // ----- temperature: viscosity -----
@@ -1048,10 +1067,7 @@ export default {
           const count = Math.min(NS, Math.round(140 + 540 * snowing));
           const drift = 1.2 + wx.wind * 0.5;
           const vx = windU[0] * drift * dt, vy = windU[1] * drift * dt;
-          if (!snow) {
-            snow = canvas2d(wrap, { maxScale: 1, adaptive: true });
-            wrap.insertBefore(snow.canvas, head);
-          }
+          if (!snow) makeSnow();
           const { ctx } = snow;
           for (let i = 0; i < count; i++) {
             if (t - fb[i] > fl[i]) placeFleck(i, t);

@@ -137,7 +137,7 @@ const CSS = `
 .lb-fog { position: absolute; z-index: 3; left: 0; top: 0; width: ${W}px; height: ${WB + 60}px; overflow: hidden; opacity: 0; display: none;
   background: linear-gradient(to bottom, var(--fog) 0%, var(--fog) 30%, transparent 92%); }
 .lb-fog i { position: absolute; display: block; background: radial-gradient(closest-side, var(--fog) 0%, var(--fog) 35%, transparent 100%); will-change: transform; }
-.lb-floor { position: absolute; z-index: 6; left: 76px; top: ${FLOOR + 64}px; width: 928px; font-family: "Jersey 10", "Silkscreen", monospace; text-transform: none; }
+.lb-floor { position: absolute; z-index: 6; left: 76px; top: ${FLOOR + 56}px; width: 928px; font-family: "Jersey 10", "Silkscreen", monospace; text-transform: none; }
 .lb-a { display: flex; align-items: flex-end; height: 136px; }
 .lb-temp { font-size: 228px; line-height: 136px; height: 136px; white-space: nowrap; letter-spacing: 0.01em; }
 .lb-cw { margin-left: 44px; min-width: 0; height: 136px; }
@@ -145,10 +145,10 @@ const CSS = `
 .lb-cond { font-size: 84px; line-height: 70px; height: 70px; white-space: nowrap; }
 .lb-au { display: flex; align-items: baseline; margin-top: 24px; height: 42px; white-space: nowrap; }
 .lb-au .lb-v { margin: 0 44px 0 14px; line-height: 42px; font-size: 64px; }
-.lb-b { position: relative; height: 96px; margin-top: 50px; }
+.lb-b { position: relative; height: 100px; margin-top: 50px; }
 .lb-cell { position: absolute; top: 0; white-space: nowrap; }
 .lb-k { font-family: "Silkscreen", monospace; text-transform: uppercase; font-size: 28px; line-height: 22px; letter-spacing: 0.06em; color: var(--dim, #9a9484); }
-.lb-v { font-size: 78px; line-height: 60px; margin-top: 14px; }
+.lb-v { font-size: 84px; line-height: 64px; margin-top: 14px; }
 .lb-fact { margin-top: 48px; }
 .lb-fv { font-size: 50px; line-height: 62px; margin-top: 12px; }
 `;
@@ -610,8 +610,12 @@ export default {
     }
 
     // What would a ball sent from (x, y) in direction (dx, dy) hit first?
+    // (The hand allows for the wind, so it aims upwind and the ball arcs back.)
     function cast(x, y, dx, dy) {
+      const hs = 8 / env.speed;
+      const dax = env.ax * hs * hs;
       for (let n = 0; n < 320; n++) {
+        dx += dax / 8;
         x += dx * 8;
         y += dy * 8;
         if (x < WX + BR) {
@@ -748,7 +752,9 @@ export default {
       const lateral = (sx < 0 ? -1 : 1) * Math.max(Math.abs(sx), 0.45);
       env.wind = speed * lateral;
       env.gust = w.gust;
-      env.ax = env.wind * 14;
+      // the push on the ball grows with the wind but saturates, so a gale bends
+      // every path hard without pinning the ball against one wall
+      env.ax = Math.sign(env.wind) * 330 * (1 - Math.exp(-Math.abs(env.wind) / 22));
       env.rain = w.falling && w.falling !== "snow" ? w.intensity : 0;
       env.snow = w.falling === "snow" ? w.intensity : 0;
       env.slick = Math.min(1, env.rain * 1.6);

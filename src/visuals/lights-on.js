@@ -30,16 +30,17 @@
 //   Bitter cold frosts the panes and puts steam on the roof. A thunderstorm is
 //   a slow swell of light, never a flash.
 //
-// Layers, bottom to top: the measured sky (a div); the wall (one canvas
-// composed only when the light, the weather or the minute moves: brick, air,
-// wet, lamplight, shadows and every settled window); the moving layer (cloud,
-// roof and billboard, weather, street life, vignettes, and any window that is
-// switching on or off); the type (DOM); grain.
+// Layers, bottom to top: the wall (one opaque canvas composed only when the
+// light, the weather or the minute moves: the measured sky, brick, air, wet,
+// lamplight, shadows, every settled window, and the grain, baked in); the
+// moving layer (cloud, roof and billboard, weather, street life, vignettes,
+// and any window that is switching on or off); the type (DOM). Only two
+// full-stage layers are composited each frame, which is what holds 30 fps.
 
 import {
   W, H, TAU, clamp, lerp, smoothstep, approach, ease, rng, hash, createNoise,
   mix, adjust, rgba, luminance, contrast, parse, toHex, ramp,
-  el, addStyle, canvas2d, grain, fitText,
+  el, addStyle, canvas2d, fitText,
 } from "../lib/kit.js";
 
 // ---- geometry (stage units) -------------------------------------------------
@@ -202,8 +203,6 @@ export default {
     addStyle(root, `
       .lo { position: absolute; inset: 0; overflow: hidden; background: #06080e; font-family: "Oswald", sans-serif; }
       .lo .lay { position: absolute; left: 0; width: ${W}px; pointer-events: none; }
-      .lo .sky { top: 0; height: ${ROOF + 12}px; }
-      .lo .sky::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,10,0.16), rgba(255,255,255,0.05)); }
       .lo .tx { position: absolute; white-space: nowrap; text-align: center; line-height: 1; }
       .lo .date { left: 64px; width: 952px; top: 254px; height: 68px; font: 600 46px/68px "Cinzel", serif; letter-spacing: 0.13em; padding-left: 0.13em; box-sizing: border-box; text-transform: uppercase; color: var(--date); text-shadow: 0 2px 0 rgba(0,0,0,0.55); }
       .lo .fact { position: absolute; left: ${BOARD_X + 22}px; top: 62px; width: ${BOARD_W - 44}px; height: 136px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; }
@@ -229,13 +228,12 @@ export default {
     };
 
     // ---- layers ---------------------------------------------------------------
-    // Three surfaces: the measured sky behind the roofline (a div), the wall
-    // (one canvas that holds everything that only changes with the light, the
-    // weather or the minute: brick, air, wet, glow, shadows and every settled
-    // window), and the moving layer on top (cloud, roof, weather, street life,
-    // and any window that is switching). Then the type, then grain.
-    const skyDiv = lay("sky");
-    const wall = canvas2d(wrap, { maxScale: 2 });
+    // Two surfaces: the wall (one opaque canvas that holds everything that
+    // only changes with the light, the weather or the minute: the measured sky
+    // behind the roofline, brick, air, wet, glow, shadows, every settled window
+    // and the grain), and the moving layer on top (cloud, roof, weather, street
+    // life, and any window that is switching). Then the type.
+    const wall = canvas2d(wrap, { maxScale: 2, alpha: false });
     const flashDiv = lay("", { top: "0", height: `${ROOF}px`, background: "#c9d0ff", opacity: "0" });
     const fx = canvas2d(wrap, { adaptive: true });
     const fctx = fx.ctx, wctx = wall.ctx, gctx = wall.ctx;
@@ -270,7 +268,6 @@ export default {
     const sunV = tx("sunV");
     const tempEl = tx("temp");
     const condEl = tx("cond");
-    grain(wrap, { opacity: 0.05 });
 
     const shown = {};
     const put = (key, node, value) => {
@@ -554,6 +551,18 @@ export default {
     const patWg = wctx.createPattern(cloudW, "repeat"), patDg = wctx.createPattern(cloudD, "repeat");
     const patWf = fctx.createPattern(cloudW, "repeat"), patDf = fctx.createPattern(cloudD, "repeat");
     const matW = new DOMMatrix([2, 0, 0, 2, 0, 0]), matD = new DOMMatrix([2, 0, 0, 2, 0, 0]);
+    // film grain: black and white specks in equal measure, tiled
+    const grainC = offscreen(256, 256);
+    {
+      const x = grainC.getContext("2d"), img = x.createImageData(256, 256), gr = rng(7);
+      for (let i = 0; i < img.data.length; i += 4) {
+        const v = gr();
+        img.data[i] = img.data[i + 1] = img.data[i + 2] = v > 0.5 ? 255 : 0;
+        img.data[i + 3] = Math.abs(v - 0.5) * 2 * 255;
+      }
+      x.putImageData(img, 0, 0);
+    }
+    const grainPat = wctx.createPattern(grainC, "repeat");
     const warmGlow = glowSprite("#ffae5e", 0.6);
     const pinkGlow = glowSprite(NEON_GLOW, 0.5);
     const redGlow = glowSprite("#ff5a30", 0.45);
@@ -671,7 +680,7 @@ export default {
       const fogged = (c, k) => blend(c, fogCol, fogA * k);
       const brickNow = fogged(brickBase, 1);
 
-      css("sky", skyDiv, "background", `linear-gradient(90deg, ${sky.west}, ${sky.northWest} 34%, ${sky.northEast} 66%, ${sky.east})`);
+      PAL.sky4 = [sky.west, sky.northWest, sky.northEast, sky.east];
       // Stack the flat washes (sky tint, sun, night veil) and the fog band into
       // one premultiplied color per gradient stop.
       const A1 = parse(amb), A2 = parse(sunCol), A3 = parse(VEIL), A4 = parse(fogCol);
@@ -909,7 +918,13 @@ export default {
     // tint, low sun, night and fog as one gradient), stars, lamplight, sun
     // shadows, and every window that is not in the middle of switching.
     function buildWall(dl, cloudK, murk, sunS, light) {
-      wall.clear();
+      // the measured sky behind the roofline, west to east
+      let g = wctx.createLinearGradient(0, 0, W, 0);
+      g.addColorStop(0, PAL.sky4[0]); g.addColorStop(0.34, PAL.sky4[1]); g.addColorStop(0.66, PAL.sky4[2]); g.addColorStop(1, PAL.sky4[3]);
+      wctx.fillStyle = g; wctx.fillRect(0, 0, W, ROOF + 12);
+      g = wctx.createLinearGradient(0, 0, 0, ROOF + 12);
+      g.addColorStop(0, "rgba(0,0,10,0.16)"); g.addColorStop(1, "rgba(255,255,255,0.05)");
+      wctx.fillStyle = g; wctx.fillRect(0, 0, W, ROOF + 12);
       wctx.drawImage(rawC, 0, 0, W, H);
       if (wetness > 0.01) {
         const yb = ROOF + WET_H - Math.round((1 - clamp(wetness)) * WET_T);
@@ -920,7 +935,7 @@ export default {
         wctx.restore();
       }
       if (PAL.walkA > 0.01) { wctx.globalAlpha = PAL.walkA; wctx.fillStyle = PAL.walkC; wctx.fillRect(0, WALK, W, H - WALK); wctx.globalAlpha = 1; }
-      const g = wctx.createLinearGradient(0, 0, 0, H);
+      g = wctx.createLinearGradient(0, 0, 0, H);
       for (let k = 0; k < PAL.airStops.length; k++) g.addColorStop(PAL.airStops[k][0], PAL.airStops[k][1]);
       wctx.fillStyle = g; wctx.fillRect(0, 0, W, H);
       const starA = (1 - smoothstep(0.02, 0.3, dl)) * (1 - cloudK) * (1 - murk);
@@ -937,6 +952,8 @@ export default {
         if (lamp < 0.995) drawGlass(wctx, patWg, patDg, i, 1);
         drawWin(wctx, i, 1, lamp);
       }
+      // grain, baked into the wall so the dark gradients do not band
+      wctx.globalAlpha = 0.05; wctx.fillStyle = grainPat; wctx.fillRect(0, 0, W, H); wctx.globalAlpha = 1;
     }
 
     // Light that lit rooms and shop windows throw on the wall and the street.
