@@ -205,7 +205,7 @@ export default {
       .rh .t-temp .cond { font-size: 54px; text-wrap: balance;
         /* a wrapped condition gets 40 px of air between its lines; the margins take the
            extra leading back off a single line, so it sits 48 px clear of the temperature */
-        line-height: calc(1em + 42px); margin: calc(9px + 0.1em) -4px calc(0.1em - 21px); }
+        line-height: calc(1em + 42px); margin: calc(9px + 0.1em) -1px calc(0.1em - 21px); }
       .rh .t-sun .card { width: ${SUN_W}px; left: -${SUN_W / 2}px; }
       .rh .t-moon .card { width: ${MOON_W}px; left: -${MOON_W / 2}px; }
       .rh .t-sun .paper, .rh .t-moon .paper { display: flex; align-items: center; justify-content: space-between; gap: ${STK_GAP}px;
@@ -442,8 +442,8 @@ export default {
         if (Math.abs(fx - mid) < best) { best = Math.abs(fx - mid); mini.tieL = li; mini.tieJ = j; mini.tieX0 = fx; }
       }
       // the card fills the room between the hours and the frame, its hole off centre if need be
-      const w = Math.round(clamp(1012 - zoneL, 236, 360));
-      const centre = clamp(mini.tieX0, zoneL + w / 2, 1012 - w / 2);
+      const w = Math.round(clamp(1018 - zoneL, 236, 360));
+      const centre = clamp(mini.tieX0, zoneL + w / 2, 1018 - w / 2);
       tagTemp.shift = Math.round(clamp(centre - mini.tieX0, -w / 2 + 50, w / 2 - 50));
       tagTemp.ss = "";
       if (w !== tagTemp.w || shown.tw === undefined) {

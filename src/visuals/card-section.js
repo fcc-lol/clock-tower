@@ -50,13 +50,13 @@ const S = 30; // one seat, in stage units
 const N = COLS * ROWS;
 
 // Where things sit (64 rows of 30 px fill the 1920 px frame exactly). The
-// digits are 16 rows each; every block keeps at least 64 px of clear space
-// from its neighbours.
-const ROW_HOUR = 6; // rows 6-21: y 180-660
-const ROW_MIN = 30; // rows 30-45: y 900-1380
+// digits are 13 rows (390 px) each; the time keeps about 90 px of clear space
+// all round, and the scoreboard below it gets the room for its lines to breathe.
+const ROW_HOUR = 7; // rows 7-19: y 210-600
+const ROW_MIN = 30; // rows 30-42: y 900-1290
 const DATE_TOP = 0, DATE_H = 150; // the ribbon board along the roof: 0-150
-const MID_TOP = 726, MID_H = 110; // 726-836
-const TIFO_TOP = 1444; // the scoreboard; its height follows its content
+const MID_TOP = 696, MID_H = 110; // 696-806, centred between the figures
+const TIFO_TOP = 1372; // the scoreboard; its height follows its content
 
 // What a seat is showing.
 const F_SKY = 0, F_CLOUD = 1, F_CORE = 2, F_INK = 3, F_LIT = 4; // cards
@@ -65,12 +65,12 @@ const F_UMB = 5, F_SLEEP = 6, F_HOLD = 7, F_NONE = 8;
 const R_BG = 0, R_NUM = 1, R_MOAT = 2, R_HOLD = 3, R_COVER = 4;
 
 // ---------------------------------------------------------------------------
-// The seat font: digits 14 seats wide and 16 tall, every stroke 4 seats thick,
-// the outside of each bend rounded off by one seat. ("1" is 10 wide.)
+// The seat font: digits 11 seats wide and 13 tall, every stroke 3 seats thick,
+// the outside of each bend rounded off by one seat. ("1" is 8 wide.)
 // ---------------------------------------------------------------------------
-const GH = 16;
-const BARS = { T: [0, 0, 14, 4], M: [0, 6, 14, 4], B: [0, 12, 14, 4], LU: [0, 0, 4, 10], LL: [0, 6, 4, 10], RU: [10, 0, 4, 10], RL: [10, 6, 4, 10] };
-function glyph(parts, cuts, w = 14) {
+const GH = 13;
+const BARS = { T: [0, 0, 11, 3], M: [0, 5, 11, 3], B: [0, 10, 11, 3], LU: [0, 0, 3, 8], LL: [0, 5, 3, 8], RU: [8, 0, 3, 8], RL: [8, 5, 3, 8] };
+function glyph(parts, cuts, w = 11) {
   const g = new Uint8Array(w * GH);
   for (const p of parts) {
     const [x, y, pw, ph] = typeof p === "string" ? BARS[p] : p;
@@ -80,16 +80,16 @@ function glyph(parts, cuts, w = 14) {
   return { w, g };
 }
 const GLYPHS = [
-  glyph(["T", "B", "LU", "LL", "RU", "RL"], [[0, 0], [13, 0], [0, 15], [13, 15]]),
-  glyph([[3, 0, 4, 16], [0, 0, 7, 4], [0, 12, 10, 4]], [[0, 0]], 10),
-  glyph(["T", "RU", "M", "LL", "B"], [[13, 0], [13, 9], [0, 6], [0, 15]]),
-  glyph(["T", [3, 6, 11, 4], "B", "RU", "RL"], [[13, 0], [13, 15]]),
-  glyph(["LU", "M", "RU", "RL"], [[0, 9]]),
-  glyph(["T", "LU", "M", "RL", "B"], [[0, 0], [0, 9], [13, 6], [13, 15]]),
-  glyph(["T", "LU", "LL", "M", "RL", "B"], [[0, 0], [0, 15], [13, 15], [13, 6]]),
-  glyph(["T", "RU", "RL"], [[13, 0]]),
-  glyph(["T", "M", "B", "LU", "LL", "RU", "RL"], [[0, 0], [13, 0], [0, 15], [13, 15]]),
-  glyph(["T", "LU", "M", "RU", "RL", "B"], [[0, 0], [13, 0], [13, 15], [0, 9]]),
+  glyph(["T", "B", "LU", "LL", "RU", "RL"], [[0, 0], [10, 0], [0, 12], [10, 12]]),
+  glyph([[2, 0, 3, 13], [0, 0, 5, 3], [0, 10, 8, 3]], [[0, 0]], 8),
+  glyph(["T", "RU", "M", "LL", "B"], [[10, 0], [10, 7], [0, 5], [0, 12]]),
+  glyph(["T", [2, 5, 9, 3], "B", "RU", "RL"], [[10, 0], [10, 12]]),
+  glyph(["LU", "M", "RU", "RL"], [[0, 7]]),
+  glyph(["T", "LU", "M", "RL", "B"], [[0, 0], [0, 7], [10, 5], [10, 12]]),
+  glyph(["T", "LU", "LL", "M", "RL", "B"], [[0, 0], [0, 12], [10, 12], [10, 5]]),
+  glyph(["T", "RU", "RL"], [[10, 0]]),
+  glyph(["T", "M", "B", "LU", "LL", "RU", "RL"], [[0, 0], [10, 0], [0, 12], [10, 12]]),
+  glyph(["T", "LU", "M", "RU", "RL", "B"], [[0, 0], [10, 0], [10, 12], [0, 7]]),
 ];
 
 const SKIN = ["#f3cfad", "#e3b188", "#c98f62", "#a56c47", "#7b4c31", "#f6dcc4"];
@@ -123,9 +123,9 @@ const CSS = `
 .cs .ampm { flex: none; background: var(--accent); color: var(--on); font-size: 50px; line-height: 1; padding: 12px 16px 15px; border-radius: 10px; }
 .cs .col { position: absolute; left: 0; right: 0; top: 0; padding: 22px 34px 22px; display: flex; flex-direction: column; }
 .cs .row1 { display: flex; justify-content: space-between; align-items: baseline; gap: 56px; font-size: 40px; line-height: 1; white-space: nowrap; }
-.cs .row2 { display: flex; align-items: baseline; gap: 64px; margin-top: 44px; font-size: 40px; line-height: 1; white-space: nowrap; }
-.cs .rule { height: 3px; margin-top: 34px; border-radius: 2px; background: var(--soft); opacity: 0.5; }
-.cs .flabel { margin-top: 34px; font-size: 28px; line-height: 1; color: var(--soft); white-space: nowrap; }
+.cs .row2 { display: flex; align-items: baseline; gap: 64px; margin-top: 56px; font-size: 40px; line-height: 1; white-space: nowrap; }
+.cs .rule { height: 3px; margin-top: 48px; border-radius: 2px; background: var(--soft); opacity: 0.5; }
+.cs .flabel { margin-top: 48px; font-size: 28px; line-height: 1; color: var(--soft); white-space: nowrap; }
 .cs .fvalue { margin-top: 12px; font-size: 44px; line-height: 1.4; text-wrap: balance; }
 .cs .flash { position: absolute; inset: 0; z-index: 4; background: #c9d4ff; opacity: 0; pointer-events: none; }
 `;
@@ -574,16 +574,18 @@ export default {
       if (rw > inner) row1.style.fontSize = `${Math.max(36, Math.floor((40 * inner) / rw))}px`;
       if (hasFact) {
         // As large as fits in two lines and keeps the board's type 64 px off the
-        // bottom. The lines of a wrapped fact keep about 42 px of clear space
+        // bottom. The lines of a wrapped fact keep about 50 px of clear space
         // between them, ink to ink (the ink of a line is about 1.03 em tall);
-        // the margin takes back the extra leading above the first line.
+        // the margin keeps about 46 px of clear space under the label's ink,
+        // taking back the extra leading above the first line.
         for (const size of [54, 50, 46, 44, 42, 40, 38, 36]) {
-          const pitch = Math.round(size * 1.03 + 42);
+          const pitch = Math.round(size * 1.03 + 50);
           fValue.style.fontSize = `${size}px`;
           fValue.style.lineHeight = `${pitch}px`;
-          fValue.style.marginTop = `${Math.round(14 - (pitch - size * 1.4) / 2)}px`;
+          fValue.style.marginTop = `${Math.round(46 - (pitch - size * 1.03) / 2)}px`;
+          fValue.style.marginBottom = `${Math.round(8 - (pitch - size * 1.03) / 2)}px`; // and most of it below the last
           const fh = fValue.offsetHeight;
-          if (fh <= pitch * 2 + 2 && pitch * 2 <= 176) break;
+          if (fh <= pitch * 2 + 2 && pitch * 2 <= 192) break;
         }
       }
       moved = placeBanner(bTifo, 1, 34, TIFO_TOP, col.offsetHeight + 12) || moved;
@@ -697,7 +699,7 @@ export default {
     // Every card in the minute half of the stand turns over; on the hour, the
     // whole stand. Seats that change face do so as part of the wave.
     function minuteWave(whole) {
-      const r0 = whole ? 0 : ROW_MIN - 6;
+      const r0 = whole ? 0 : ROW_MIN - 7;
       const span = whole ? 5.5 : 3.8; // seconds from the first card to the last
       const k = span / (COLS + (ROWS - r0) * 1.4);
       for (let i = 0; i < N; i++) {

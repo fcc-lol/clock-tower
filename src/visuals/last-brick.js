@@ -154,8 +154,10 @@ export default {
     const wrap = el("div", { class: "lb" });
     root.append(wrap);
 
-    // Layers, back to front: weather seen through the wall, the glazed wall,
-    // fog, the steel numerals, then everything that moves.
+    // Layers, back to front: the glazed wall (with the stars in its gaps and
+    // the brick foundation below the horizon), fog, the steel numerals (on
+    // their own layer only in fog), then everything that moves, the falling
+    // weather included (drawn only where no brick stands).
     // stars, behind the wall: seen only through what the ball has carved away
     const STN = 240;
     const stX = new Float32Array(STN), stY = new Float32Array(STN), stZ = new Float32Array(STN);
@@ -168,14 +170,12 @@ export default {
       }
     }
     let starA = 0;
-    const air = canvas2d(wrap, { adaptive: true, maxScale: 0.5 }); // soft: it is the far side of the wall
     const wall = canvas2d(wrap, { maxScale: 2 });
     const fogBlobs = [0, 1, 2, 3].map(() => el("i"));
     const fog = el("div", { class: "lb-fog" }, fogBlobs);
     wrap.append(fog);
     const steelL = canvas2d(wrap, { maxScale: 2 });
     const fx = canvas2d(wrap, { adaptive: true });
-    air.canvas.style.zIndex = "1";
     wall.canvas.style.zIndex = "2";
     steelL.canvas.style.zIndex = "4";
     steelL.canvas.style.display = "none";
@@ -1141,6 +1141,12 @@ export default {
       sP[i] = vr.range(0, TAU);
     }
 
+    // Is (x, y) behind a standing brick? (Weather is drawn only through the gaps.)
+    function behind(x, y) {
+      if (x < WX || x >= WR || y < WY || y >= WB) return false;
+      return kind[(((y - WY) / BH) | 0) * COLS + (((x - WX) / BW) | 0)] !== 0;
+    }
+
     // ----- frame ---------------------------------------------------------------
     const shown = {};
     const put = (key, node, value) => {
@@ -1294,68 +1300,68 @@ export default {
       nCells = 0;
 
       // ----- weather, behind the wall -----
-      const ac = air.ctx;
-      const airBusy = env.rain > 0.01 || env.snow > 0.01;
-      if (airBusy || shown.airKey !== 0) {
-        // (in dry weather the layer is cleared once and hidden, not composited)
-        shown.airKey = airBusy ? -1 : 0;
-        const airOn = airBusy;
-        if (shown.airOn !== airOn) {
-          shown.airOn = airOn;
-          air.canvas.style.display = airOn ? "block" : "none";
-        }
-        air.clear();
-        if (env.rain > 0.01) {
-          const n = Math.min(RN, Math.round(70 + 300 * env.rain));
-          const slant = env.wind * 9;
-          ac.strokeStyle = rainCol;
-          ac.lineCap = "butt";
-          for (let pass = 0; pass < 2; pass++) {
-            ac.lineWidth = pass ? 3 : 2;
-            ac.beginPath();
-            for (let i = pass; i < n; i += 2) {
-              const v = rV[i];
-              if (!jumped) {
-                rX[i] += slant * dt;
-                rY[i] += v * dt;
-              }
-              if (rY[i] > FLOOR || (rY[i] > PAD_Y && rY[i] - v * dt <= PAD_Y && Math.abs(rX[i] - pad.x) < PAD_W / 2)) {
-                const onPad = rY[i] <= FLOOR;
-                spark(rX[i], onPad ? PAD_Y : FLOOR, vr.range(-70, 70) + slant * 0.2, vr.range(-170, -70), 0.28, 3, 2);
-                rX[i] = vr.range(-200, W + 200);
-                rY[i] = vr.range(-160, -20);
-                continue;
-              }
-              const k = rLen[i] / v;
-              ac.moveTo(rX[i], rY[i]);
-              ac.lineTo(rX[i] - slant * k, rY[i] - rLen[i]);
-            }
-            ac.stroke();
-          }
-        }
-        if (env.snow > 0.01) {
-          const n = Math.min(SN, Math.round(80 + 400 * env.snow));
-          const streak = Math.min(16, Math.abs(env.wind) * 0.45); // a driving wind draws the flakes out sideways
-          ac.fillStyle = snowCol;
-          ac.globalAlpha = 0.48 + 0.37 * ((unlit - U0) / (1 - U0)); // softer in the dark: snow must not light the room
-          ac.beginPath();
-          for (let i = 0; i < n; i++) {
+      // Drawn on the moving layer (one per-frame canvas, not two), and only
+      // where no brick stands: it falls through the gaps the ball has carved.
+      const fc = fx.ctx;
+      // a whole-canvas clear: the browser then drops last frame's drawing
+      // instead of keeping it queued (a partial clear lets thousands of
+      // queued lantern fills pile up and stall a frame for a second)
+      fc.clearRect(0, 0, W, H);
+      if (env.rain > 0.01) {
+        const n = Math.min(RN, Math.round(70 + 300 * env.rain));
+        const slant = env.wind * 9;
+        fc.strokeStyle = rainCol;
+        fc.lineCap = "butt";
+        for (let pass = 0; pass < 2; pass++) {
+          fc.lineWidth = pass ? 3 : 2;
+          fc.beginPath();
+          for (let i = pass; i < n; i += 2) {
+            const v = rV[i];
             if (!jumped) {
-              sX[i] += (env.wind * 7 + Math.sin(s.t * 1.3 + sP[i]) * 22) * dt;
-              sY[i] += sV[i] * dt;
+              rX[i] += slant * dt;
+              rY[i] += v * dt;
             }
-            if (sY[i] > FLOOR - 2) {
-              sY[i] = -10;
-              sX[i] = vr.range(-100, W + 100);
+            if (rY[i] > FLOOR || (rY[i] > PAD_Y && rY[i] - v * dt <= PAD_Y && Math.abs(rX[i] - pad.x) < PAD_W / 2)) {
+              const onPad = rY[i] <= FLOOR;
+              spark(rX[i], onPad ? PAD_Y : FLOOR, vr.range(-70, 70) + slant * 0.2, vr.range(-170, -70), 0.28, 3, 2);
+              rX[i] = vr.range(-200, W + 200);
+              rY[i] = vr.range(-160, -20);
+              continue;
             }
-            if (sX[i] < -120) sX[i] += W + 240;
-            else if (sX[i] > W + 120) sX[i] -= W + 240;
-            const z = sS[i];
-            ac.rect(sX[i], sY[i], z + streak * (z / 7), z);
+            const k = rLen[i] / v;
+            const tx = rX[i] - slant * k;
+            const ty = rY[i] - rLen[i];
+            if (behind(rX[i], rY[i]) || behind(tx, ty)) continue;
+            fc.moveTo(rX[i], rY[i]);
+            fc.lineTo(tx, ty);
           }
-          ac.fill();
-          ac.globalAlpha = 1;
+          fc.stroke();
         }
+      }
+      if (env.snow > 0.01) {
+        const n = Math.min(SN, Math.round(80 + 400 * env.snow));
+        const streak = Math.min(16, Math.abs(env.wind) * 0.45); // a driving wind draws the flakes out sideways
+        fc.fillStyle = snowCol;
+        fc.globalAlpha = 0.48 + 0.37 * ((unlit - U0) / (1 - U0)); // softer in the dark: snow must not light the room
+        fc.beginPath();
+        for (let i = 0; i < n; i++) {
+          if (!jumped) {
+            sX[i] += (env.wind * 7 + Math.sin(s.t * 1.3 + sP[i]) * 22) * dt;
+            sY[i] += sV[i] * dt;
+          }
+          if (sY[i] > FLOOR - 2) {
+            sY[i] = -10;
+            sX[i] = vr.range(-100, W + 100);
+          }
+          if (sX[i] < -120) sX[i] += W + 240;
+          else if (sX[i] > W + 120) sX[i] -= W + 240;
+          const z = sS[i];
+          const zw = z + streak * (z / 7);
+          if (behind(sX[i], sY[i]) || behind(sX[i] + zw, sY[i] + z)) continue;
+          fc.rect(sX[i], sY[i], zw, z);
+        }
+        fc.fill();
+        fc.globalAlpha = 1;
       }
 
       // ----- fog over the upper wall -----
@@ -1410,13 +1416,8 @@ export default {
       }
 
       // ----- everything that moves -----
-      const fc = fx.ctx;
-      // a whole-canvas clear: the browser then drops last frame's drawing
-      // instead of keeping it queued (a partial clear lets thousands of
-      // queued lantern fills pile up and stall a frame for a second)
-      fc.clearRect(0, 0, W, H);
       const dark = 1 - (unlit - U0) / (1 - U0); // 1 at night
-      if (dark > 0.03 && false) {
+      if (dark > 0.03) {
         // the ball is a lantern: the glaze near it shows its daylight colour,
         // fading with distance (the bevels are left in shadow)
         for (const b of balls) {

@@ -499,13 +499,13 @@ const STYLE = `
   font-weight: 600; font-size: 96px; line-height: 104px; text-align: center; }
 .de .temp span.deg { width: 72px; }
 .de .low { position: absolute; left: 64px; right: 64px; top: ${PY1 + 7}px; bottom: 64px; display: flex; flex-direction: column; }
-.de .mid { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+.de .mid { flex: 1; display: flex; flex-direction: column; justify-content: center; padding-bottom: 4px; } /* the row's ink sits 4 px low in its box */
 .de .rowA { display: grid; grid-template-columns: 240px 1fr 104px 72px; column-gap: 52px; align-items: start; }
 .de .it { display: flex; flex-direction: column; white-space: nowrap; min-width: 0; }
 .de .it.end { align-items: flex-end; }
 .de .lb { font-weight: 600; font-size: 28px; line-height: 32px; letter-spacing: 0.16em; text-transform: uppercase; }
 .de .vl { margin-top: 12px; font-weight: 500; font-size: 48px; line-height: 54px; letter-spacing: 0.01em; }
-.de .plaque { position: relative; flex: none; min-height: 168px; box-sizing: border-box; padding: 17px 44px 4px 44px;
+.de .plaque { position: relative; flex: none; min-height: 168px; box-sizing: border-box; padding: 15px 44px 2px 44px;
   border-radius: 7px; background: var(--tile); color: var(--glyph);
   box-shadow: inset 0 3px 0 rgba(255,255,255,.14), inset 0 -4px 0 rgba(0,0,10,.25), inset 0 0 0 2px rgba(255,255,255,.1), 0 0 0 2px var(--jd), 0 5px 0 var(--jd); }
 .de .plaque .lb { opacity: 0.85; }

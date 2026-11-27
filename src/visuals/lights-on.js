@@ -48,10 +48,16 @@ import {
 } from "../lib/kit.js";
 
 // ---- geometry (stage units) -------------------------------------------------
-const ROOF = 214; // top of the parapet
-const GX = 54, CW = 108, CH = 100; // window grid: 9 columns, 10 floors
-const WW = 90, WH = 80, FR = 5; // window opening and frame width
-const HOURS_Y = 336, MINS_Y = 872;
+// (the roofline was lowered 48 px, out of the ten floors, so the billboard can stand
+// tall enough for a two-line fact with its lines well apart; the frieze's date sign
+// was made 12 px taller so the date stands clear of its rules)
+const ROOF = 262; // top of the parapet
+const DR = ROOF - 214; // how far the roof furniture moved down with it
+const SIGN_Y = ROOF + 40, SIGN_H = 80; // the date's sign in the frieze
+const FRIEZE_B = SIGN_Y + SIGN_H + 10; // bottom of the frieze's stone band
+const GX = 54, CW = 108, CH = 94; // window grid: 9 columns, 10 floors
+const WW = 90, WH = 74, FR = 5; // window opening and frame width
+const HOURS_Y = FRIEZE_B + 4, STRING = HOURS_Y + 5 * CH + 10, MINS_Y = HOURS_Y + 5 * CH + 36;
 // (the fascia, awning and shopfronts were made taller, and the sidewalk narrower,
 // so the two-line bar name and the awning's temperature and condition have room)
 const SHOP = 1378, FASCIA = 1394, FRONT = 1544, WALK = 1830, CURB = 1886;
@@ -59,6 +65,8 @@ const NWIN = 90;
 const colX = (c) => GX + c * CW + (CW - WW) / 2;
 const rowY = (r) => (r < 5 ? HOURS_Y + r * CH : MINS_Y + (r - 5) * CH) + 12;
 const BOARD_X = 236, BOARD_Y = 44, BOARD_W = 780, BOARD_H = 168;
+// a fact that wraps gets a taller board, reaching down to the parapet
+const BOARD_Y2 = 34, BOARD_H2 = ROOF - 2 - BOARD_Y2;
 const AWN_X0 = 336, AWN_X1 = 744, AWN_T = FRONT + 2, AWN_B = 1754;
 const LED_Y = FRONT + 48, AQI_X = 778, UV_X = 910; // the two lotto panels
 
@@ -211,7 +219,7 @@ export default {
       .lo { position: absolute; inset: 0; overflow: hidden; background: #06080e; font-family: "Oswald", sans-serif; }
       .lo .lay { position: absolute; left: 0; width: ${W}px; pointer-events: none; }
       .lo .tx { position: absolute; white-space: nowrap; text-align: center; line-height: 1; }
-      .lo .date { left: 64px; width: 952px; top: 254px; height: 68px; font: 600 46px/68px "Cinzel", serif; letter-spacing: 0.13em; padding-left: 0.13em; box-sizing: border-box; text-transform: uppercase; color: var(--date); text-shadow: 0 2px 0 rgba(0,0,0,0.55); }
+      .lo .date { left: 64px; width: 952px; top: ${SIGN_Y}px; height: ${SIGN_H}px; font: 600 46px/${SIGN_H}px "Cinzel", serif; letter-spacing: 0.13em; padding-left: 0.13em; box-sizing: border-box; text-transform: uppercase; color: var(--date); text-shadow: 0 2px 0 rgba(0,0,0,0.55); }
       .lo .fact { position: absolute; left: ${BOARD_X + 22}px; top: 54px; width: ${BOARD_W - 44}px; height: 150px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; }
       .lo .factL { font-weight: 500; font-size: 24px; line-height: 28px; letter-spacing: 0.22em; padding-left: 0.22em; text-transform: uppercase; color: var(--gilt); white-space: nowrap; }
       .lo .factV { font-weight: 500; font-size: 38px; line-height: 43px; letter-spacing: 0.01em; color: var(--bill); margin-top: 8px; max-width: 100%; }
@@ -346,25 +354,25 @@ export default {
     // ---- the roof against the sky -------------------------------------------------
     const roofPath = new Path2D();
     {
-      const cx = 132;
+      const cx = 132, d = DR;
       // water tower: conical roof, tank, platform, legs
-      roofPath.moveTo(cx, 44); roofPath.lineTo(cx + 54, 82); roofPath.lineTo(cx - 54, 82); roofPath.closePath();
-      roofPath.rect(cx - 1.5, 32, 3, 14);
-      roofPath.moveTo(cx - 48, 82); roofPath.lineTo(cx + 48, 82); roofPath.lineTo(cx + 44, 158); roofPath.lineTo(cx - 44, 158); roofPath.closePath();
-      roofPath.rect(cx - 52, 158, 104, 6);
-      for (const lx of [-42, -14, 14, 42]) roofPath.rect(cx + lx - 2.5, 164, 5, ROOF - 164);
+      roofPath.moveTo(cx, 44 + d); roofPath.lineTo(cx + 54, 82 + d); roofPath.lineTo(cx - 54, 82 + d); roofPath.closePath();
+      roofPath.rect(cx - 1.5, 32 + d, 3, 14);
+      roofPath.moveTo(cx - 48, 82 + d); roofPath.lineTo(cx + 48, 82 + d); roofPath.lineTo(cx + 44, 158 + d); roofPath.lineTo(cx - 44, 158 + d); roofPath.closePath();
+      roofPath.rect(cx - 52, 158 + d, 104, 6);
+      for (const lx of [-42, -14, 14, 42]) roofPath.rect(cx + lx - 2.5, 164 + d, 5, ROOF - 164 - d);
       for (const [a, b] of [[-42, 14], [14, -42], [-14, 42], [42, -14]]) {
-        roofPath.moveTo(cx + a - 1.5, 168); roofPath.lineTo(cx + a + 1.5, 168); roofPath.lineTo(cx + b + 1.5, ROOF); roofPath.lineTo(cx + b - 1.5, ROOF); roofPath.closePath();
+        roofPath.moveTo(cx + a - 1.5, 168 + d); roofPath.lineTo(cx + a + 1.5, 168 + d); roofPath.lineTo(cx + b + 1.5, ROOF); roofPath.lineTo(cx + b - 1.5, ROOF); roofPath.closePath();
       }
       // vent stack at the far end of the roof
-      roofPath.rect(1041, 176, 14, ROOF - 176);
-      roofPath.rect(1037, 170, 22, 7);
+      roofPath.rect(1041, ROOF - 38, 14, 38);
+      roofPath.rect(1037, ROOF - 44, 22, 7);
       // billboard supports
       for (let x = BOARD_X + 40; x < BOARD_X + BOARD_W; x += 100) roofPath.rect(x - 3, BOARD_Y + BOARD_H - 2, 6, ROOF - BOARD_Y - BOARD_H + 2);
       roofPath.rect(BOARD_X + 20, ROOF - 9, BOARD_W - 40, 3);
     }
     const hoops = new Path2D();
-    for (const y of [94, 110, 126, 142]) hoops.rect(132 - 48 + (y - 82) * 0.052, y, 96 - (y - 82) * 0.104, 2);
+    for (const y of [94, 110, 126, 142]) hoops.rect(132 - 48 + (y - 82) * 0.052, y + DR, 96 - (y - 82) * 0.104, 2);
     // the billboard's frame with no panels in it (shown when there is no fact)
     const lattice = new Path2D();
     lattice.rect(BOARD_X, BOARD_Y, BOARD_W, 4); lattice.rect(BOARD_X, BOARD_Y + BOARD_H - 4, BOARD_W, 4);
@@ -390,12 +398,12 @@ export default {
       }
     };
     ledge(0, W, ROOF, 1.5);
-    ledge(0, W, 846, 1.1);
+    ledge(0, W, STRING, 1.1);
     ledge(0, W, SHOP, 1.3);
     for (let i = 0; i < NWIN; i++) ledge(colX(i % 9) - 6, colX(i % 9) + WW + 6, rowY((i / 9) | 0) + WH + 1, 1);
     for (const y of platformY) ledge(FE0, FE1, y, 0.8);
     for (const [c, rr] of acs) ledge(colX(c) + 13, colX(c) + 63, rowY(rr) + WH - 24, 0.7);
-    ledge(132 - 54, 132 + 54, 82, 0.9);
+    ledge(132 - 54, 132 + 54, 82 + DR, 0.9);
     const LEDGES = new Float32Array(ledges);
     const boardLedge = [];
     for (let x = BOARD_X; x < BOARD_X + BOARD_W - 1; ) { const len = Math.min(BOARD_X + BOARD_W - x, r.range(80, 170)); boardLedge.push(x, x + len, BOARD_Y, r.range(0.8, 1.3)); x += len; }
@@ -438,11 +446,12 @@ export default {
       R("#4a4034", 0, ROOF + 24, W, 11);
       for (let x = 5; x < W; x += 22) R(STONE, x, ROOF + 24, 12, 9);
       R(STONE_HI, 0, ROOF + 35, W, 5);
-      R(SIGN, 0, 254, W, 68);
-      R("#7b6230", 44, 261, W - 88, 1.5); R("#7b6230", 44, 313.5, W - 88, 1.5);
+      R(SIGN, 0, SIGN_Y, W, SIGN_H);
+      R("#7b6230", 44, SIGN_Y + 7, W - 88, 1.5); R("#7b6230", 44, SIGN_Y + SIGN_H - 8.5, W - 88, 1.5);
       ctx.fillStyle = "#a88a44";
-      for (const x of [34, W - 34]) { ctx.beginPath(); ctx.moveTo(x, 280); ctx.lineTo(x + 8, 288); ctx.lineTo(x, 296); ctx.lineTo(x - 8, 288); ctx.fill(); }
-      R(STONE, 0, 322, W, 7); R(STONE_DK, 0, 329, W, 3);
+      const dm = SIGN_Y + SIGN_H / 2;
+      for (const x of [34, W - 34]) { ctx.beginPath(); ctx.moveTo(x, dm - 8); ctx.lineTo(x + 8, dm); ctx.lineTo(x, dm + 8); ctx.lineTo(x - 8, dm); ctx.fill(); }
+      R(STONE, 0, SIGN_Y + SIGN_H, W, 7); R(STONE_DK, 0, SIGN_Y + SIGN_H + 7, W, 3);
 
       // every window asleep: a shade drawn in a tone close to the brick, so by
       // day the wall is one quiet field and the awake windows are the only figure
@@ -469,7 +478,7 @@ export default {
         for (let k = 0; k < 6; k++) ctx.fillRect(x + 5, y + 7 + k * 2.8, 40, 1.2);
       }
       // string course between the hours and the minutes
-      R(STONE, 0, 846, W, 15); R(STONE_HI, 0, 846, W, 3); R(STONE_DK, 0, 858, W, 3); R("rgba(20,6,6,0.3)", 0, 861, W, 4);
+      R(STONE, 0, STRING, W, 15); R(STONE_HI, 0, STRING, W, 3); R(STONE_DK, 0, STRING + 12, W, 3); R("rgba(20,6,6,0.3)", 0, STRING + 15, W, 4);
       // fire escape
       ctx.fillStyle = IRON; ctx.fill(ironThick); ctx.fill(ironThin);
 
@@ -627,7 +636,7 @@ export default {
     for (let i = 0; i < NS; i++) snow.set([r.range(0, W), r.range(0, H), r(), r.range(0, TAU)], i * 4);
     // leaves and scraps of paper the wind carries across the front: x, y, phase, size, depth
     // (kept to the brick, between the frieze and the shopfronts, so nothing moving passes behind type)
-    const LEAF_T = 350, LEAF_B = SHOP - 12;
+    const LEAF_T = FRIEZE_B + 18, LEAF_B = SHOP - 12;
     const NL = 56, leaves = new Float32Array(NL * 5);
     for (let i = 0; i < NL; i++) leaves.set([r.range(-40, W + 40), r.range(LEAF_T, LEAF_B), r.range(0, TAU), r.range(6, 13), r()], i * 5);
     const stars = new Float32Array(40 * 3);
@@ -642,6 +651,7 @@ export default {
     };
     let lastMs = null, lastH = -1, lastM = -1, first = true;
     let wetness = 0, snowDepth = 0, scrollX = 0, palKey1 = -1, palKey2 = -1, palKey3 = -1, skyKey = "", skyKeyW = "", shKey = -1e9;
+    let bY = BOARD_Y, bH = BOARD_H; // the billboard as it stands for today's fact
     let hasFact = false, frostK = 0, winDirty = true, shDx = 0, shDy = 1, wasMoving = false, palPending = false, sinceBuild = 99;
 
     function setDigits(h12, m) {
@@ -766,9 +776,9 @@ export default {
       x.globalAlpha = k;
       x.fillStyle = "rgba(26,6,12,0.44)";
       x.beginPath();
-      x.rect(0, 254, W, Math.min(68, 13 * dy));
-      x.rect(0, 332, W, Math.min(50, 7 * dy));
-      x.rect(0, 861, W, Math.min(30, 4 * dy));
+      x.rect(0, SIGN_Y, W, Math.min(SIGN_H, 13 * dy));
+      x.rect(0, FRIEZE_B, W, Math.min(50, 7 * dy));
+      x.rect(0, STRING + 15, W, Math.min(30, 4 * dy));
       x.rect(0, SHOP + 16, W, Math.min(40, 6 * dy));
       const ox = dx * 5, oy = dy * 5, rs = Math.min(WH * 0.45, 3.2 * dy), ss = Math.min(22, Math.abs(dx) * 3.2);
       for (let i = 0; i < NWIN; i++) {
@@ -781,7 +791,7 @@ export default {
       }
       x.fill();
       x.save();
-      x.beginPath(); x.rect(0, 332, W, SHOP - 332); x.clip();
+      x.beginPath(); x.rect(0, FRIEZE_B, W, SHOP - FRIEZE_B); x.clip();
       x.translate(dx * 18, dy * 13);
       x.fill(ironThick); x.fill(ironThin);
       x.restore();
@@ -910,13 +920,13 @@ export default {
       ctx.fillStyle = PAL.tower; ctx.fill(roofPath);
       ctx.fillStyle = PAL.towerHi; ctx.fill(hoops);
       if (hasFact) {
-        ctx.fillStyle = PAL.tower; ctx.fill(lampArms);
-        ctx.fillStyle = PAL.board; ctx.fillRect(BOARD_X, BOARD_Y, BOARD_W, BOARD_H);
-        ctx.strokeStyle = PAL.boardLine; ctx.lineWidth = 2; ctx.strokeRect(BOARD_X + 7, BOARD_Y + 7, BOARD_W - 14, BOARD_H - 14);
+        ctx.save(); ctx.translate(0, bY - BOARD_Y); ctx.fillStyle = PAL.tower; ctx.fill(lampArms); ctx.restore();
+        ctx.fillStyle = PAL.board; ctx.fillRect(BOARD_X, bY, BOARD_W, bH);
+        ctx.strokeStyle = PAL.boardLine; ctx.lineWidth = 2; ctx.strokeRect(BOARD_X + 7, bY + 7, BOARD_W - 14, bH - 14);
         if (PAL.night > 0.02) {
-          ctx.save(); ctx.beginPath(); ctx.rect(BOARD_X, BOARD_Y, BOARD_W, BOARD_H); ctx.clip();
+          ctx.save(); ctx.beginPath(); ctx.rect(BOARD_X, bY, BOARD_W, bH); ctx.clip();
           ctx.globalAlpha = PAL.night * 0.4;
-          for (let k = 0; k < 4; k++) ctx.drawImage(paleGlow, lampXs[k] - 150, BOARD_Y - 120, 300, 260);
+          for (let k = 0; k < 4; k++) ctx.drawImage(paleGlow, lampXs[k] - 150, bY - 120, 300, 260);
           ctx.restore(); ctx.globalAlpha = 1;
         }
       } else { ctx.fillStyle = PAL.lattice; ctx.fill(lattice); }
@@ -1161,7 +1171,7 @@ export default {
             const p = (t * 0.085 + k / 9) % 1;
             fctx.globalAlpha = steamK * 0.36 * (1 - p) * smoothstep(0, 0.12, p) * (0.5 + 0.5 * (1 - PAL.night * 0.5));
             fctx.beginPath();
-            fctx.arc(1048 + windX * Math.min(26, ws) * p * 9 + Math.sin(t * 0.7 + k * 2.1) * 5 * p, 168 - p * 120 * (1 - Math.min(0.75, ws / 40)), 7 + p * 28, 0, TAU);
+            fctx.arc(1048 + windX * Math.min(26, ws) * p * 9 + Math.sin(t * 0.7 + k * 2.1) * 5 * p, ROOF - 46 - p * 120 * (1 - Math.min(0.75, ws / 40)), 7 + p * 28, 0, TAU);
             fctx.fill();
           }
           fctx.globalAlpha = 1;
@@ -1240,7 +1250,7 @@ export default {
           const d = snowDepth * 9;
           fctx.fillStyle = PAL.snow; fctx.beginPath();
           for (let i = 0; i < LEDGES.length; i += 4) mound(LEDGES[i], LEDGES[i + 1], LEDGES[i + 2], d * LEDGES[i + 3]);
-          if (hasFact) for (let i = 0; i < BLEDGE.length; i += 4) mound(BLEDGE[i], BLEDGE[i + 1], BLEDGE[i + 2], d * BLEDGE[i + 3]);
+          if (hasFact) for (let i = 0; i < BLEDGE.length; i += 4) mound(BLEDGE[i], BLEDGE[i + 1], bY, d * BLEDGE[i + 3]);
           mound(AWN_X0 + 14, AWN_X1 - 14, AWN_T + 2, d * 1.2);
           fctx.fill();
         }
@@ -1414,16 +1424,27 @@ export default {
           hasFact = tx_.factValue !== "";
           winDirty = true;
           factEl.style.display = hasFact ? "flex" : "none";
+          let tall = false;
           if (hasFact) {
             // one line if it fits large, otherwise two lines
-            factV.style.whiteSpace = "nowrap"; factV.style.fontSize = "52px"; factV.style.lineHeight = "60px"; factV.style.marginTop = "";
+            factV.style.whiteSpace = "nowrap"; factV.style.fontSize = "52px"; factV.style.lineHeight = "60px"; factV.style.marginTop = ""; factV.style.marginBottom = "";
             if (factV.scrollWidth > BOARD_W - 60) {
-              // one line at 38 px if it fits; otherwise two lines at 36 px, opened up as far as the
-              // board allows (line height 1.56), the label kept 16 px clear above them
+              // one line at 38 (or 36) px if it fits, on the board as it is; otherwise two lines at
+              // 36 px on the tall board, a full 80 px apart (line height 2.2, about 44 px of clear
+              // space between the lines even past a descender), the label about 26 px above them
+              // (the negative margins only trim the half-leading, so the ink sits centred)
               factV.style.whiteSpace = "normal"; factV.style.fontSize = "38px"; factV.style.lineHeight = "55px";
-              if (factV.offsetHeight > 57) { factV.style.fontSize = "36px"; factV.style.lineHeight = "56px"; factV.style.marginTop = "1px"; }
+              if (factV.offsetHeight > 57) {
+                factV.style.fontSize = "36px";
+                if (factV.offsetHeight > 57) {
+                  tall = true;
+                  factV.style.lineHeight = "80px"; factV.style.marginTop = "-4px"; factV.style.marginBottom = "-11px";
+                }
+              }
             }
           }
+          bY = tall ? BOARD_Y2 : BOARD_Y; bH = tall ? BOARD_H2 : BOARD_H;
+          factEl.style.top = `${bY + 10}px`; factEl.style.height = `${bH - (tall ? 20 : 18)}px`;
         }
         first = false;
       },
