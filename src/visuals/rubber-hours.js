@@ -45,12 +45,12 @@ const NP = (NN - 1) * SUB + 1;
 const MINI = 32; // AM/PM tube thickness
 const MINI_H = 96;
 // The paper tags under the minutes: the sticker, and the room between the words and it.
-const STK = 116;
-const STK_GAP = 50;
-const SUN_W = 416;
-const MOON_W = 496;
+const STK = 112;
+const STK_GAP = 48;
+const SUN_W = 384;
+const MOON_W = 490;
 const SUN_COL = SUN_W - 44 - STK_GAP - STK; // room for the sun countdown beside its sticker
-const LAW_AIR = 76; // clear ground kept between those tags (swinging) and the label at the foot
+const LAW_AIR = 72; // clear ground kept between those tags and the label at the foot
 
 // Light comes from the upper left: each tone of the tube is the same path,
 // thinner and shifted further toward the light.
@@ -1286,13 +1286,15 @@ export default {
     // of ground always separates them from it.
     let stringKey = "";
     function fitStrings() {
-      const key = `${lawTop}|${Math.round(P.sag / 3)}|${slots[2].tieY}|${slots[3].tieY}|${tags[1].h}|${tags[2].h}`;
+      const key = `${lawTop}|${Math.round(P.sag / 3)}|${Math.round(P.wind / 3)}|${slots[2].tieY}|${slots[3].tieY}|${tags[1].h}|${tags[2].h}`;
       if (key === stringKey) return;
       stringKey = key;
+      // a card leaning in a steady wind lets one lower corner down by about this much
+      const lean = Math.sin(clamp(P.wind * 0.011, 0, 0.6));
       for (let k = 1; k < 3; k++) {
         const tg = tags[k];
         const sl = slots[1 + k];
-        const len = Math.round(clamp(lawTop - LAW_AIR - tg.h - (sl.tieY + P.sag), 14, tg.len0));
+        const len = Math.round(clamp(lawTop - LAW_AIR - tg.h - lean * tg.w * 0.5 - (sl.tieY + P.sag), 14, tg.len0));
         if (len === tg.len) continue;
         tg.len = len;
         tg.str.style.height = `${len + 26}px`;
