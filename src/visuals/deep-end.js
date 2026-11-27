@@ -695,7 +695,7 @@ export default {
     wrap.append(txt);
 
     // ----- what falls: snowflakes and the splashes of rain on the stone -----
-    const over = canvas2d(wrap, { adaptive: true });
+    const over = canvas2d(wrap, { adaptive: true, maxScale: 0.75 }); // soft things only: rain, snow, splashes
     let overDirty = false;
     grain(wrap, { opacity: 0.05 });
 

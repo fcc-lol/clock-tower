@@ -31,9 +31,10 @@
 // How it is drawn: every paper layer is baked into its own bitmap when its
 // colors change (one bitmap per frame at most, unless the clock jumps), and
 // each frame only composites those bitmaps with small parallax offsets and
-// draws the few things that really move (threads, rain, snow, train, ferry).
+// draws the few things that really move (threads, rain, snow, train, ferry),
+// clipped to the numerals' own ink boxes, since nothing else can be seen.
 // The front sheet is its own canvas, repainted only when the time or the
-// light changes.
+// light changes (on an ordinary minute, only the band of the changed digit).
 
 import {
   W, H, TAU, clamp, lerp, smoothstep, norm, lerpAngle, ease, rng, hash, createNoise,
