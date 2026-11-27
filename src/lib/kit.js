@@ -337,6 +337,65 @@ export function canvas2d(root, { maxScale = 1, adaptive = false, alpha = true } 
   return layer;
 }
 
+// A low-resolution canvas shown with hard pixels, for pixel art and anything
+// built on a coarse grid (LED and flip-dot boards, tiles, cellular automata).
+// `size` is how many stage units one pixel covers: 4 gives a 270 x 480 grid.
+// Draw in grid cells (the context is not scaled): ctx.fillRect(col, row, 1, 1).
+// It stays sharp on any screen and costs almost nothing to fill.
+// Returns { canvas, ctx, cols, rows, size, clear() }.
+export function pixelCanvas(root, { size = 4, alpha = true } = {}) {
+  const cols = Math.round(W / size);
+  const rows = Math.round(H / size);
+  const canvas = document.createElement("canvas");
+  canvas.width = cols;
+  canvas.height = rows;
+  Object.assign(canvas.style, { position: "absolute", left: "0", top: "0", width: `${W}px`, height: `${H}px`, imageRendering: "pixelated" });
+  root.append(canvas);
+  const ctx = canvas.getContext("2d", { alpha });
+  ctx.imageSmoothingEnabled = false;
+  const layer = { canvas, ctx, cols, rows, size, ratio: 1 / size, adaptive: false, kind: "px" };
+  layer.clear = () => ctx.clearRect(0, 0, cols, rows);
+  layer.resize = () => {};
+  layer.destroy = () => {
+    surfaces.delete(layer);
+    canvas.remove();
+  };
+  surfaces.add(layer);
+  return layer;
+}
+
+// Text (or anything else) as a grid of coverage values, for building things
+// out of letterforms: dots that are on or off, tiles, places for particles to
+// settle, obstacles in a flow. Calls draw(ctx, cols, rows) on a hidden canvas
+// of cols x rows cells (draw in white, in cell units) and returns
+// { cols, rows, data } where data[row * cols + col] is 0..255.
+// Not for every frame: call it when the text changes. Fonts listed in the
+// piece's `fonts` are already loaded when mount() runs.
+//   const m = mask(270, 120, (ctx) => { ctx.font = '700 110px "Archivo"'; ctx.textBaseline = "top"; ctx.fillText("12:45", 0, 6); });
+const maskCanvases = new Map();
+export function mask(cols, rows, draw) {
+  const key = `${cols}x${rows}`;
+  let c = maskCanvases.get(key);
+  if (!c) {
+    c = document.createElement("canvas");
+    c.width = cols;
+    c.height = rows;
+    maskCanvases.set(key, c);
+  }
+  const ctx = c.getContext("2d", { willReadFrequently: true });
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, cols, rows);
+  ctx.fillStyle = "#fff";
+  ctx.strokeStyle = "#fff";
+  ctx.save();
+  draw(ctx, cols, rows);
+  ctx.restore();
+  const px = ctx.getImageData(0, 0, cols, rows).data;
+  const data = new Uint8Array(cols * rows);
+  for (let i = 0; i < data.length; i++) data[i] = px[i * 4 + 3];
+  return { cols, rows, data };
+}
+
 const VERT = `attribute vec2 a_pos; varying vec2 v_uv; varying vec2 v_pos;
 void main() { v_uv = a_pos * 0.5 + 0.5; v_pos = vec2(v_uv.x * ${W}.0, (1.0 - v_uv.y) * ${H}.0); gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 const FRAG_HEAD = `#ifdef GL_FRAGMENT_PRECISION_HIGH

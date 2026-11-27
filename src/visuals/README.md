@@ -133,7 +133,8 @@ text    the readout strings (table above), plus: high, low, feels ("46°"), wind
 - Noise: `createNoise(seed)` gives `n2`, `n3`, `fbm2`, `fbm3`, `curl`.
 - Color (OKLab based, hex in and out): `mix(a, b, t)`, `ramp([...])`, `adjust(c, { l, c, h })`, `oklch(l, c, h)`, `toOklch`, `rgba(c, alpha)`, `luminance`, `contrast(a, b)`, `readableOn(bg)`, `vec3(c)` for shader uniforms.
 - DOM: `el(tag, attrs, ...children)`, `svg(tag, attrs, ...children)`, `svgLayer(root)`, `addStyle(root, css)`, `fitText(node, maxWidth)`, `wrapText(ctx, text, maxWidth)`.
-- Surfaces: `canvas2d(root, { maxScale, adaptive, alpha })` returns `{ canvas, ctx, clear() }` with the context already scaled so you draw in stage units; `shader(root, { frag })` returns `{ ok, set(name, value), draw(time) }` for one full-stage fragment shader. Read the comments above each in `kit.js` before using them.
+- Surfaces: `canvas2d(root, { maxScale, adaptive, alpha })` returns `{ canvas, ctx, clear() }` with the context already scaled so you draw in stage units; `pixelCanvas(root, { size })` is a coarse hard-pixel grid for pixel art and dot boards; `shader(root, { frag })` returns `{ ok, set(name, value), draw(time) }` for one full-stage fragment shader. Read the comments above each in `kit.js` before using them.
+- Letterforms as data: `mask(cols, rows, draw)` rasterizes text (or any drawing) to a grid of coverage values, for dots, tiles, obstacles or places for particles to settle. Call it when the text changes, not every frame.
 - Finish: `grain(root, { opacity })`.
 
 ## A minimal piece

@@ -25,7 +25,8 @@
 // not already available on this machine.
 
 import { createRequire } from "module";
-import { mkdir, writeFile, readFile, readdir } from "fs/promises";
+import { mkdir, rmdir, stat, writeFile, readFile, readdir } from "fs/promises";
+import { tmpdir } from "os";
 import { fileURLToPath, pathToFileURL } from "url";
 import { dirname, join, resolve } from "path";
 
@@ -84,6 +85,34 @@ if (opt("wx") || opt("at")) {
   shots = names.map((name) => ({ name, query: `scenario=${name}`, note: SCENARIOS[name].note }));
 }
 
+// When several of these run at once on one machine (pieces being worked on in
+// parallel) they take turns, a few at a time, so the frame costs they measure
+// are not just each other's noise. SHOOT_SLOTS sets how many may run together.
+const SLOTS = Math.max(1, Number(process.env.SHOOT_SLOTS) || 3);
+let slotDir = null;
+async function takeSlot() {
+  const started = Date.now();
+  for (;;) {
+    for (let i = 0; i < SLOTS; i++) {
+      const dir = join(tmpdir(), `clock-tower-shoot-slot-${i}`);
+      try {
+        await mkdir(dir);
+        slotDir = dir;
+        return;
+      } catch {
+        // Taken. A slot left behind by a run that was killed is reclaimed after ten minutes.
+        const age = await stat(dir).then((st) => Date.now() - st.mtimeMs, () => 0);
+        if (age > 10 * 60 * 1000) await rmdir(dir).catch(() => {});
+      }
+    }
+    if (Date.now() - started > 15 * 60 * 1000) return; // waited long enough: go anyway
+    await new Promise((r) => setTimeout(r, 400 + Math.random() * 400));
+  }
+}
+const releaseSlot = () => (slotDir ? rmdir(slotDir).catch(() => {}) : Promise.resolve());
+for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => releaseSlot().finally(() => process.exit(130)));
+await takeSlot();
+
 // A dev server: the one already running, or our own.
 let base = `http://localhost:${port}`;
 let server = null;
@@ -101,6 +130,7 @@ try {
   ({ chromium } = require("playwright"));
 } catch {
   console.error("Playwright is not installed. Run: npm i -D playwright && npx playwright install chromium");
+  await releaseSlot();
   process.exit(1);
 }
 
@@ -256,5 +286,6 @@ if (perf > 0) {
 
 await browser.close();
 await server?.close();
+await releaseSlot();
 console.log(JSON.stringify(report, null, 2));
 process.exit(report.ok ? 0 : 2);
