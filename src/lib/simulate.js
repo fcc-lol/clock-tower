@@ -81,19 +81,21 @@ export const PRESETS = {
 };
 
 // Named moments worth looking at. `at` is New York local time.
+// (`fact` pins which of the sample facts a scenario shows, so that short, long
+// and two-line facts are all on show: see FACTS below.)
 export const SCENARIOS = {
-  "clear-noon-summer": { at: "2026-07-14T12:40", wx: "clear", temp: 84, note: "cloudless July midday, high sun, UV 9" },
-  "overcast-afternoon-fall": { at: "2026-11-27T14:45", wx: "overcast", temp: 51, note: "flat grey late-November afternoon" },
-  "golden-partly-spring": { at: "2026-04-22T19:12", wx: "partly", temp: 63, note: "golden hour, half cloud, half an hour before sunset" },
-  "rain-dusk-fall": { at: "2026-10-08T18:44", wx: "rain", temp: 55, note: "steady rain at dusk, just after sunset" },
-  "overcast-sunset-fall": { at: "2026-11-27T16:27", wx: "overcast", temp: 49, note: "the sun on the horizon, half light: where a light ground is turning dark" },
-  "clear-night-fullmoon-winter": { at: "2027-01-22T21:30", wx: "cold", temp: 18, wind: 7, gust: 12, note: "clear, bitter January night under a full moon" },
-  "snow-morning-winter": { at: "2027-01-08T08:10", wx: "snow", temp: 27, note: "snow falling on a January morning" },
-  "storm-night-summer": { at: "2026-08-03T23:20", wx: "storm", temp: 74, note: "thunderstorm on a summer night, strong gusty wind" },
-  "fog-dawn-spring": { at: "2026-03-15T06:52", wx: "fog", temp: 41, note: "thick fog at dawn, still air" },
-  "heat-afternoon-summer": { at: "2026-07-21T15:30", wx: "heat", temp: 97, note: "hazy heat wave afternoon, AQI 152" },
-  "windy-midnight-newmoon": { at: "2026-12-09T00:00", wx: "windy", temp: 9, cloud: 5, code: 0, note: "12:00 AM exactly (the widest time), new moon, gale, 9 degrees" },
-  "blizzard-evening-winter": { at: "2027-02-02T17:40", wx: "blizzard", temp: 19, note: "blizzard at nightfall" },
+  "clear-noon-summer": { at: "2026-07-14T12:40", wx: "clear", temp: 84, fact: 0, note: "cloudless July midday, high sun, UV 9" },
+  "overcast-afternoon-fall": { at: "2026-11-27T14:45", wx: "overcast", temp: 51, fact: 2, note: "flat grey late-November afternoon" },
+  "golden-partly-spring": { at: "2026-04-22T19:12", wx: "partly", temp: 63, fact: 4, note: "golden hour, half cloud, half an hour before sunset" },
+  "rain-dusk-fall": { at: "2026-10-08T18:44", wx: "rain", temp: 55, fact: 0, note: "steady rain at dusk, just after sunset" },
+  "overcast-sunset-fall": { at: "2026-11-27T16:27", wx: "overcast", temp: 49, fact: 2, note: "the sun on the horizon, half light: where a light ground is turning dark" },
+  "clear-night-fullmoon-winter": { at: "2027-01-22T21:30", wx: "cold", temp: 18, wind: 7, gust: 12, fact: 5, note: "clear, bitter January night under a full moon" },
+  "snow-morning-winter": { at: "2027-01-08T08:10", wx: "snow", temp: 27, fact: 3, note: "snow falling on a January morning" },
+  "storm-night-summer": { at: "2026-08-03T23:20", wx: "storm", temp: 74, fact: 1, note: "thunderstorm on a summer night, strong gusty wind, a two-line fact" },
+  "fog-dawn-spring": { at: "2026-03-15T06:52", wx: "fog", temp: 41, fact: 2, note: "thick fog at dawn, still air" },
+  "heat-afternoon-summer": { at: "2026-07-21T15:30", wx: "heat", temp: 97, fact: 6, note: "hazy heat wave afternoon, AQI 152, the longest fact" },
+  "windy-midnight-newmoon": { at: "2026-12-09T00:00", wx: "windy", temp: 9, cloud: 5, code: 0, fact: 1, note: "12:00 AM exactly (the widest time), new moon, gale, 9 degrees, a two-line fact" },
+  "blizzard-evening-winter": { at: "2027-02-02T17:40", wx: "blizzard", temp: 19, fact: 4, note: "blizzard at nightfall" },
   "offline-morning": { at: "2026-05-05T10:08", wx: null, note: "no data at all: only the clock and what can be computed" },
 };
 
@@ -107,6 +109,7 @@ const FACTS = [
   { label: "Today is", value: "Pins and Needles Day" },
   { label: "On this day in 1924", value: "The First Macy's Thanksgiving Day Parade" },
   { label: "In bloom now", value: "Thanksgiving Cactus" },
+  { label: "On this day in 1783", value: "British Troops Leave New York City, Ending Seven Years of Wartime Occupation" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -170,7 +173,7 @@ export function resolveSim(params, now = Date.now()) {
   let wx = scenario ? scenario.wx : "live";
   let ms = scenario ? parseLocal(scenario.at) : null;
   const overrides = {};
-  if (scenario) for (const k of ["temp", "wind", "gust", "cloud", "code", "humidity", "aqi", "precip"]) if (scenario[k] != null) overrides[k] = scenario[k];
+  if (scenario) for (const k of ["temp", "wind", "gust", "cloud", "code", "humidity", "aqi", "precip", "fact"]) if (scenario[k] != null) overrides[k] = scenario[k];
   if (wxParam) wx = wxParam === "none" || wxParam === "offline" ? null : PRESETS[wxParam] ? wxParam : wxParam === "live" ? "live" : wx;
   // A scenario's own figures (84 degrees at noon in July) belong to its weather, not to another preset.
   if (scenario && wx !== scenario.wx) for (const k of Object.keys(overrides)) delete overrides[k];
@@ -296,14 +299,16 @@ export function simulate({ wx = "overcast", ms = Date.now(), overrides = {} } = 
     tides.push({ ms: ref + (k + 0.5) * M2, ft: even ? -0.5 : -0.2, kind: "low" });
   }
 
-  const offset = Math.floor(ms / quarter) % FACTS.length;
+  // One fact per slot, in order (the display steps through the list by slot).
+  // A scenario can pin one (`fact`: its index), to put a long one on show.
+  const facts = FACTS[p.fact] ? [FACTS[p.fact]] : FACTS;
   return {
     weather: { at: ms - 4 * 60000, current, hourly, daily },
     air: { at: ms - 20 * 60000, aqi: p.aqi, pm25: p.aqi * 0.24, pm10: p.aqi * 0.3, ozone: 40 + p.aqi * 0.3, no2: 14 },
     sky: { at: lastSample, colors: skyAt(lastSample) },
     skyDay,
     tides,
-    facts: FACTS.map((_, i) => FACTS[(i + offset) % FACTS.length]),
+    facts,
     fetched: { weather: ms, air: ms, sky: ms, skyDay: ms, tides: ms, facts: ms },
     simulated: true,
   };
