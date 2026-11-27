@@ -114,6 +114,7 @@ export default {
         font-family: ${SERIF}; font-style: italic; font-size: 46px; line-height: 56px; max-height: 112px; overflow: hidden;
         text-wrap: balance; letter-spacing: 0.003em; }
     `);
+    const __t0=performance.now(); let __tp=__t0; const __L=[]; const __m=(n)=>{const t=performance.now(); __L.push(n+":"+(t-__tp).toFixed(1)); __tp=t;};
     const wrap = el("div", { class: "mu" });
     root.append(wrap);
 
@@ -246,6 +247,7 @@ export default {
       return `#${h(skyImg.data[o])}${h(skyImg.data[o + 1])}${h(skyImg.data[o + 2])}`;
     };
 
+    __m("sky");
     // ------------------------------------------------------------- clouds
     // One soft band texture, built once, twice as wide as its period so it can
     // drift for ever; its tint and opacity follow the cloud cover and the light.
@@ -289,6 +291,7 @@ export default {
     const glow = el("div", { class: "glow" });
     wrap.append(glow);
 
+    __m("clouds");
     // --------------------------------------------- the numerals as a field
     // For each digit: a distance-to-edge field inside the strokes. Birds'
     // home points ride its contour lines, so they stream round and round the
@@ -408,6 +411,7 @@ export default {
       return { c, ctx: c.getContext("2d"), key: "", on: false, sh: 0, x: 0, op: -1, dark: true, lumGap: 0 };
     });
 
+    __m("fieldsetup");
     // ------------------------------------------------------------- birds
     const px = new Float32Array(N), py = new Float32Array(N), vx = new Float32Array(N), vy = new Float32Array(N);
     const alx = new Float32Array(N), aly = new Float32Array(N), psi0 = new Float32Array(N);
@@ -477,7 +481,7 @@ export default {
     const cum = [0, 0, 0, 0];
     function setTime(hh, mm, first) {
       const want = [+hh[0], hh.length > 1 ? +hh[1] : -1, +mm[0], +mm[1]];
-      for (let k = 0; k < 4; k++) if (want[k] >= 0) field(want[k]);
+      for (let k = 0; k < 4; k++) if (want[k] >= 0) field(want[k]); if (typeof __m!=="undefined") __m("fields");
       let x = LEFT;
       for (let k = 0; k < 4; k++) {
         const s = slots[k];
@@ -531,6 +535,7 @@ export default {
       }
     }
 
+    __m("birds");
     // ----------------------------------------------- wires and captions
     // Each wire is its own small SVG band, so its sway is a cheap transform.
     const bands = [];
@@ -695,6 +700,7 @@ export default {
       seatBirds();
     }
 
+    __m("wires");
     // -------------------------------------------------------------- inks
     const INK_DAY = "#0b0d12";
     const INK_NIGHT = "#d2c8b2"; // birds lit from below by the city
@@ -784,6 +790,7 @@ export default {
       g.dark = dark;
     }
 
+    __m("inks");
     // ------------------------------------------------------ the simulation
     const birds = canvas2d(wrap, { maxScale: 2, adaptive: true });
     birds.canvas.style.zIndex = "4";
@@ -1267,8 +1274,8 @@ export default {
       if (tk !== timeKey) {
         const first = timeKey === "" || jumped;
         timeKey = tk;
-        setTime(tx.hh, tx.mm, first);
-        for (let k = 0; k < 4; k++) drawGhost(k);
+        if (typeof __m!=="undefined") __m("pre"); setTime(tx.hh, tx.mm, first); if (typeof __m!=="undefined") __m("setTime");
+        for (let k = 0; k < 4; k++) drawGhost(k); if (typeof __m!=="undefined") __m("ghost");
       }
       put("ampm", ampm, tx.ampm);
       if (put("date", tDate.tp, tx.date)) relayout = true;
@@ -1282,7 +1289,7 @@ export default {
       const hasFact = tx.factValue !== "";
       if (put("factL", tFactLab.tp, hasFact ? tx.factLabel : "")) relayout = true;
       if (put("factV", fact, tx.factValue)) relayout = true;
-      if (relayout) layoutCaptions(hasFact);
+      if (typeof __m!=="undefined") __m("puts"); if (relayout) layoutCaptions(hasFact); if (typeof __m!=="undefined") __m("layout");
     }
 
     function paintGround() {
@@ -1381,9 +1388,12 @@ export default {
     // Start in full flight: the first frame places every bird at its home
     // (`snap`), and the runner then gives the piece plenty of unseen frames for
     // the streamers to develop. Leaving that to the first frame keeps mount short.
+    __m("preSync");
     syncText(state, false);
+    __m("syncText");
     syncLook(state);
 
+    __m("syncLook"); console.warn("MOUNT "+(performance.now()-__t0).toFixed(1)+" "+__L.join(" "));
     return {
       frame(s) {
         // the clock jumped (a time-lapse, a laptop waking): go straight to the new state
