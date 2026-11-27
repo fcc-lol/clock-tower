@@ -10,8 +10,11 @@
 // the edges; heat makes them shimmer; cold draws them to hairlines. A new
 // minute blows in as a front that crosses the field, shearing the lines half a
 // pitch as it passes. The lines take their colors from the measured sky, west
-// at the left of the frame to east at the right, on paper by day and on black
-// at night. Everything else is set on the solid block the field stands on:
+// at the left of the frame to east at the right (in narrow vertical bands of
+// flat color, which the Pi fills far faster than a gradient), on paper by day
+// and on black at night, where the near-colourless night sky is tinted by the
+// air's warmth: steel when bitter, parchment when mild, amber when hot. A heat
+// wave yellows the paper. Everything else is set on the solid block the field stands on:
 // the sky's own hue made deep (navy under a blue sky, slate under cloud, an
 // inky blue at night), with AM/PM on a tab standing up out of it.
 
@@ -44,7 +47,7 @@ export default {
   title: "Prevailing",
   description: "Lines laid along the real wind, heaving with its gusts; the time is where they swell.",
   fonts: ["Archivo Black", "Space Grotesk:wght@400;500;700"],
-  fps: 24, // the waves are slow; 24 is smooth for them and leaves the Pi room to fill a 4K field
+  fps: 20, // the waves are slow (the fastest thing, a rain streak, moves under 9 px a frame); 20 leaves the Pi room to fill a 4K field
 
   mount(root, { seed }) {
     addStyle(root, `

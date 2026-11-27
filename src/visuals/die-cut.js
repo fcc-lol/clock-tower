@@ -934,7 +934,7 @@ export default {
       P.riverFog = 0.62 * fogK;
       for (let i = 0; i < 3; i++) P.river[i] = mix(riv[i], P.fog, P.riverFog * (1 - i * 0.12));
       P.vellumA = Math.round(smoothstep(0.55, 0.88, fogK) * 50) / 50;
-      P.ghost = oklch(cap + 0.02, 0.022, 85);
+      P.ghost = oklch(cap + 0.11, 0.065, 72); // the sun through fog: a pale apricot glow (as light as the clear-day sun may be)
       P.vellum = mix(oklch(cap + 0.005, Math.min(0.03, km.c), hm), oklch(FLOOR + 0.2, 0.04, 262), n);
 
       // clouds: pale on a fair day, slate when it is closing in
@@ -1196,11 +1196,19 @@ export default {
           x.fillStyle = g;
           x.fillRect(0, v.hb, VW, XF);
           x.globalCompositeOperation = "source-over";
-          // the cut edge catches a little light
+          // the sheet in front shades the one behind it just under its edge, and the cut edge catches the light
           x.save();
           x.clip(v.p);
-          x.strokeStyle = "rgba(255,255,255,0.5)";
-          x.lineWidth = 3;
+          x.strokeStyle = "rgba(12,16,46,0.07)";
+          x.translate(0, 7);
+          x.lineWidth = 12;
+          x.stroke(v.edge);
+          x.translate(0, -3);
+          x.lineWidth = 5;
+          x.stroke(v.edge);
+          x.translate(0, -4);
+          x.strokeStyle = "rgba(255,255,255,0.78)";
+          x.lineWidth = 3.5;
           x.stroke(v.edge);
           x.restore();
           if (v === vellums[0]) radial(192, [[0, rgba(P.ghost, 0.9)], [0.35, rgba(P.ghost, 0.45)], [1, rgba(P.ghost, 0)]], haloC);
@@ -1217,10 +1225,10 @@ export default {
     const JOBS = Object.values(job);
     // Rebakes are spread out: at most one bitmap a frame, and each at most every few seconds
     // (colors drift slowly through twilight), unless the clock has jumped.
-    const runJobs = (all, t) => {
+    const runJobs = (all, t, gap) => {
       for (const j of JOBS) {
         if (j.have === j.want) continue;
-        if (!all && t - (j.at ?? -99) < 4) continue;
+        if (!all && t - (j.at ?? -99) < gap) continue;
         j.have = j.want;
         j.at = t;
         j.bake();
@@ -1452,12 +1460,12 @@ export default {
         }
         ctx.translate(dx, dy);
         if (ghostA > 0.02) {
+          ctx.globalAlpha = ghostA;
+          ctx.drawImage(haloC, -400, -400, 800, 800);
           ctx.globalAlpha = ghostA * 0.85;
-          ctx.drawImage(haloC, -330, -330, 660, 660);
-          ctx.globalAlpha = ghostA * 0.55;
           ctx.fillStyle = P.ghost;
           ctx.beginPath();
-          ctx.arc(0, 0, 64, 0, TAU);
+          ctx.arc(0, 0, 70, 0, TAU);
           ctx.fill();
         }
         if (sunA > 0.02) {
@@ -1704,7 +1712,7 @@ export default {
     };
 
     // ---------------------------------------------------------------- frame
-    let ledgeStale = true, lastMs = null, quietUntil = 0, lastPalT = -9, lastPaintT = -9, paintedKey = "", lastTime = "";
+    let ledgeStale = true, lastMs = null, lastJump = false, quietUntil = 0, lastPalT = -9, lastPaintT = -9, paintedKey = "", lastTime = "";
     const setFlap = (i, cover) => {
       const f = flaps[i];
       const q = Math.round(cover * 200);
@@ -1722,6 +1730,10 @@ export default {
     return {
       frame(s) {
         const jump = lastMs == null || Math.abs(s.ms - lastMs) > 3000;
+        // A clock that jumps on every frame (a time-lapse): the cuts and the sheet follow at once,
+        // the colors behind catch up one bitmap a frame instead of all of them every frame.
+        const streaming = jump && lastJump;
+        lastJump = jump;
         lastMs = s.ms;
         if (jump) quietUntil = s.ms + 1500;
         const tx = s.text, w = s.weather;
@@ -1730,7 +1742,7 @@ export default {
           lastPalT = s.t;
           computePalette(s);
         }
-        const baked = runJobs(jump, s.t);
+        const baked = runJobs(jump && !streaming, s.t, streaming ? 0 : 4);
 
         // what is cut into the sheet
         const stamp = tx.time + tx.ampm;
@@ -1747,8 +1759,11 @@ export default {
           setClip();
           rebuildCuts();
           cutMask = null; // read back only if something needs it (the disc, snow banks, icicles)
-          discSnap = jump;
-          discPlaced = false;
+          // the disc hangs in the hours: find it a new place only when they change
+          if (other[0] !== cur[0] || other[1] !== cur[1] || other[2] !== cur[2]) {
+            discSnap = jump;
+            discPlaced = false;
+          }
           ledgeStale = true;
           repaint = true;
         }
