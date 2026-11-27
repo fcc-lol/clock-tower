@@ -606,7 +606,7 @@ export default {
     ampmSeal.style.left = `${SEAL_X}px`;
     ampmSeal.style.top = `${Math.round(baseM - SEAL_H + 4)}px`;
     sealsNode.style.left = `${SEAL_COL - RS / 2}px`;
-    sealsNode.style.top = `${Math.round(baseM + 4 + 44)}px`;
+    sealsNode.style.top = `${Math.round(baseM + 4 + 52)}px`;
 
     // ----- the field, three buffers taking turns: this minute, the last, the next -----
     let bufCur = new Uint16Array(NCELL);
