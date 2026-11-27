@@ -75,12 +75,15 @@ Rules for the readouts:
 
 It runs for hours on a Raspberry Pi driving a 4K panel. The rule of thumb: `frame()` should average under about 4 ms, with the 95th percentile under 8 ms, in the numbers `scripts/shoot.js` reports (the Pi is several times slower than that machine). That figure is only the JavaScript inside `frame()`; what the browser does afterwards (layout, paint, filling canvases, running a shader) shows up in the frame rate the tool reports from a few seconds of real time, which should hold at the piece's `fps`.
 
-- `mount()` must be quick: well under 100 ms on the test machine (`scripts/shoot.js` reports it). On the display the next piece is mounted while the current one is still on screen, on the same thread, so a slow mount freezes the picture people are looking at. If something needs time to build up, seed it analytically or step it coarsely, and remember it also gets about 45 seconds of unseen frames before it is cut to.
+- `mount()` must be quick: well under 100 ms on the test machine (`scripts/shoot.js` reports it). On the display the next piece is mounted while the current one is still on screen. Everywhere but the kiosk that is on the same thread, so a slow mount freezes the picture people are looking at; on the kiosk it is another process on the same small machine, and still steals from it. If something needs time to build up, seed it analytically or step it coarsely, and remember it also gets about 45 seconds of unseen frames before it is cut to.
 - Canvas: at most a few thousand simple moving primitives. Batch them (one `beginPath`, many segments, one `stroke`). Keep state in typed arrays and allocate nothing inside `frame` (no arrays, objects, closures or strings in hot loops).
 - Never per frame: `shadowBlur`, `ctx.filter`, `getImageData`/`putImageData` on large areas, creating gradients or canvases, measuring text. All of those are fine once, in `mount()`: draw anything static into its own layer there.
 - DOM/SVG: animate with `transform` and `opacity` on at most a few hundred nodes; do not rewrite big paths or restyle large areas every frame. No CSS `filter`, `backdrop-filter` or `mix-blend-mode` on large or moving layers, and no animated SVG filters.
 - Shaders: one pass, a few octaves of noise, no long loops. They run at half resolution by default, which suits soft imagery. Call `draw()` every frame (or create the layer with `adaptive: false` if it is drawn once). Uniforms are floats and vectors of 2 to 4 floats. Put something acceptable behind the layer: it is hidden if the shader cannot run on this machine.
 - Surfaces size themselves (see the kit). Mark a canvas `adaptive: true` only if you redraw all of it every frame.
+- Every full-screen layer is blended on every frame, moving or not. Keep them few: paint grain and texture into a ground you already have rather than laying another layer over everything, and take a layer out (`display: none`) while it is fully transparent.
+- Clear a canvas whole. Clearing only part of an adaptive canvas each frame has cost seconds per frame in testing.
+- For thousands of small shapes, filling is several times cheaper than stroking.
 
 ## `state`
 
@@ -236,8 +239,11 @@ node scripts/shoot.js <id> --frames 3 --every 4      # three shots 4 s apart: is
 node scripts/shoot.js <id> --wx clear --at dawn --frames 6 --every 2 --rate 7200   # time-lapse through a day
 node scripts/shoot.js <id> --crop 0,0,1080,700       # also save a region at full resolution
 node scripts/shoot.js <id> --perf 12                 # 12 s in real time: fps, frame cost, memory growth
+node scripts/shoot.js <id> --at 2026-11-27T12:59:57 --frames 4 --every 1   # start at an exact second: watch a minute change
 node scripts/shoot.js --list                         # ids, scenarios, presets
 ```
+
+The report's `logs` hold what the page wrote with `console.warn` and `console.error` only (use those when debugging; `console.log` is not kept). `--warm` runs the animation before the first shot without moving the clock. The frame rate and mount time it reports depend on what else the machine is doing: on a busy machine, measure twice and compare with `_example`.
 
 In a browser (`npm run dev`): `/visual.html?id=<id>` runs one piece on live data; add `&scenario=rain-dusk-fall`, or `&wx=snow&at=night`, `&rate=600` (a day in about two minutes), `&seed=7`, `&hud=1` (frame rate and cost). `/gallery.html` shows them all side by side under any conditions.
 
