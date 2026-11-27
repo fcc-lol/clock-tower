@@ -121,7 +121,7 @@ export default {
         const tx = s.text;
 
         // ---- the axes: temperature -> weight, humidity -> width ----
-        const wantWght = Math.round(remap(w.temp, 10, 100, 250, 1000) / 4) * 4;
+        const wantWght = Math.round(remap(w.temp, 10, 100, 320, 1000) / 4) * 4;
         const wantWdth = Math.round(remap(w.humidity, 20, 100, 40, 151));
         if (shown.minute !== tx.mm) {
           // The new minute swells in from a hairline (not when the clock is being run fast).
