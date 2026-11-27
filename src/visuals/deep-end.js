@@ -35,9 +35,9 @@
 import { W, H, TAU, clamp, lerp, smoothstep, approach, rng, hash, el, svg, addStyle, canvas2d, shader, grain, fitText, vec3 } from "../lib/kit.js";
 
 // The pool's opening in the coping, in stage units, and the mosaic grid.
-const PX0 = 48, PY0 = 264, PX1 = 1032, PY1 = 1608;
+const PX0 = 48, PY0 = 264, PX1 = 1032, PY1 = 1592;
 const PCX = (PX0 + PX1) / 2, PCY = (PY0 + PY1) / 2, PHW = (PX1 - PX0) / 2, PHH = (PY1 - PY0) / 2;
-const GW = 41, GH = 56;
+const GW = 41, GH = 55;
 
 // ---------------------------------------------------------------------------
 // Tile numerals: block figures 13 tiles wide and 22 tall with 4-tile strokes,
@@ -47,10 +47,11 @@ const GW = 41, GH = 56;
 const DH = 22;
 const SEG = { A: [0, 0, 13, 4], G: [0, 9, 13, 13], D: [0, 18, 13, 22], F: [0, 0, 4, 13], B: [9, 0, 13, 13], E: [0, 9, 4, 22], C: [9, 9, 13, 22] };
 const DIGITS = ["ABCDEF", "", "ABGED", "ABGCD", "FGBC", "AFGCD", "AFGECD", "ABC", "ABCDEFG", "ABCDFG"];
+// AM/PM: 7 x 10 tiles with 2-tile strokes, half the weight of the figures.
 const LETTERS = {
-  A: [".###.", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"],
-  P: ["####.", "#...#", "#...#", "####.", "#....", "#....", "#...."],
-  M: ["#...#", "##.##", "#.#.#", "#.#.#", "#...#", "#...#", "#...#"],
+  A: [".#####.", "#######", "##...##", "##...##", "##...##", "#######", "#######", "##...##", "##...##", "##...##"],
+  P: ["######.", "#######", "##...##", "##...##", "#######", "######.", "##.....", "##.....", "##.....", "##....."],
+  M: ["##...##", "###.###", "#######", "##.#.##", "##...##", "##...##", "##...##", "##...##", "##...##", "##...##"],
 };
 
 function buildDigit(ch) {
@@ -87,20 +88,33 @@ function buildDigit(ch) {
 const GLYPH = {};
 for (let i = 0; i < 10; i++) GLYPH[i] = buildDigit(String(i));
 for (const [k, rows] of Object.entries(LETTERS)) {
-  const data = new Uint8Array(35);
-  rows.forEach((row, y) => [...row].forEach((c, x) => (data[y * 5 + x] = c === "#" ? 1 : 0)));
-  GLYPH[k] = { w: 5, h: 7, data };
+  const w = rows[0].length;
+  const data = new Uint8Array(w * rows.length);
+  rows.forEach((row, y) => [...row].forEach((c, x) => (data[y * w + x] = c === "#" ? 1 : 0)));
+  GLYPH[k] = { w, h: rows.length, data };
 }
 
 // Lays the time out on the floor grid: hours over minutes, AM/PM stacked at
-// the top right. `out` is GW x GH, 1 where a digit tile goes.
+// the top right. The hours stand flush right against AM/PM; the minutes are
+// centred under the whole block. `out` is GW x GH, 1 where a digit tile goes.
 function layTime(out, hh, mm, ampm) {
   out.fill(0);
   const stamp = (g, x0, y0) => {
-    for (let y = 0; y < g.h; y++) for (let x = 0; x < g.w; x++) if (g.data[y * g.w + x]) out[(y0 + y) * GW + x0 + x] = 1;
+    for (let y = 0; y < g.h; y++)
+      for (let x = 0; x < g.w; x++) {
+        const gx = x0 + x, gy = y0 + y;
+        if (g.data[y * g.w + x] && gx >= 0 && gx < GW && gy >= 0 && gy < GH) out[gy * GW + gx] = 1;
+      }
   };
-  const row = (str, y0) => {
-    let x = 6;
+  const width = (str) => {
+    let w = 0;
+    for (let i = 0; i < str.length; i++) {
+      const g = GLYPH[str[i]];
+      if (g) w += g.w + (i < str.length - 1 ? (str[i] === "1" ? 2 : 3) : 0);
+    }
+    return w;
+  };
+  const row = (str, x, y0) => {
     for (const ch of str) {
       const g = GLYPH[ch];
       if (!g) continue;
@@ -108,10 +122,10 @@ function layTime(out, hh, mm, ampm) {
       x += g.w + (ch === "1" ? 2 : 3);
     }
   };
-  row(hh, 4);
-  row(mm, 30);
-  stamp(GLYPH[ampm[0]] || GLYPH.A, 30, 4);
-  stamp(GLYPH.M, 30, 13);
+  row(hh, 27 - width(hh), 3);
+  row(mm, 6 + Math.floor((30 - width(mm)) / 2), 29);
+  stamp(GLYPH[ampm[0]] || GLYPH.A, 29, 3);
+  stamp(GLYPH.M, 29, 15);
 }
 
 // ---------------------------------------------------------------------------
@@ -189,6 +203,10 @@ uniform vec4 u_cold;         // ice extent, slush, snow dust, fog
 uniform vec3 u_veil;         // the colour of ice, slush and steam in this light
 uniform vec4 u_float;        // shadow of whatever is floating: x, y, radius, strength
 uniform float u_flash;
+uniform sampler2D u_glow;    // the figures blurred (linear filtering): the halo of the lit tiles
+uniform vec4 u_glowC;        // rgb: colour of the pool lights, a: how much they are on
+uniform float u_cap;         // most the floor may be displaced, px: digits wobble but never smear
+uniform vec4 u_hl;           // rgb: what the crest of a ring catches, a: how much
 
 const vec2 GRID = vec2(${GW}.0, ${GH}.0);
 
@@ -285,6 +303,8 @@ void main() {
   if (u_rain.y > 0.0) rg += rainCells(p, 62.0, u_rain.w * 1.25, u_rain.y, 17.0) * (u_rain.z * 0.55);
 
   vec2 disp = (s * u_wave.x + rs * 1.3 + rg) * open;
+  float dl = length(disp);
+  disp *= inversesqrt(1.0 + dl * dl / (u_cap * u_cap)); // soft limit
   vec2 sl = (s * (u_wave.x * 0.12) + rs * 0.6 + rg * 0.22) * open;
   disp *= 1.0 - 0.6 * smoothstep(u_kd - 0.01, 1.0, m0); // the walls are nearer the surface
   vec2 qr = q + disp / u_pool.zw;

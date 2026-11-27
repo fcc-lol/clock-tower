@@ -13,7 +13,7 @@
 // at the left of the frame to east at the right, on paper by day and on black
 // at night. Everything else is set on the solid block the field stands on.
 
-import { W, clamp, lerp, smoothstep, mix, adjust, toOklch, rng, hash, el, addStyle, canvas2d, mask, grain, fitText } from "../lib/kit.js";
+import { W, clamp, lerp, smoothstep, mix, adjust, oklch, toOklch, rng, hash, el, addStyle, canvas2d, mask, grain, fitText } from "../lib/kit.js";
 
 const FIELD_H = 1340; // the lines cover the frame down to here; the block of type is below
 const TAB_H = 126; // the AM/PM tab stands this far up out of the block
@@ -30,6 +30,7 @@ const CAP = 0.72; // height of an Archivo Black figure, in ems
 const TAU = Math.PI * 2;
 const CHIRP = 0.00011; // waves shorten toward the downwind edge
 const FRONT_W = 190; // half-width of the front that carries a new minute in
+const WIPE = 0.14; // the old figures give way to the new over this share of it
 const INK = "#f2eee4"; // type on the block
 const TAUT = 0.82; // how much the waves ease off inside the figures (thick line is stiff line)
 const BEAD_Q = 0.3; // bead radii are rounded to this, px
@@ -252,7 +253,7 @@ export default {
     };
     const covAt = (x, y, sd) => {
       if (!frontOn) return coverage(cur, x, y);
-      const f = 1 - smoothstep(-1, 1, (sd - frontS) / FRONT_W);
+      const f = 1 - smoothstep(-WIPE, WIPE, (sd - frontS) / FRONT_W);
       if (f >= 1) return coverage(cur, x, y);
       if (f <= 0) return coverage(old, x, y);
       return lerp(coverage(old, x, y), coverage(cur, x, y), f);
@@ -311,7 +312,8 @@ export default {
           ink = g;
           // The block: the sky's own color, deep. By day a strong ink (navy under a blue sky,
           // slate under cloud); at night the same hue sunk almost to black, never plain black.
-          const night = adjust(sk.mean, { l: 0.17, c: (v) => clamp(v * 1.1, 0.018, 0.05) });
+          const sm = toOklch(sk.mean);
+          const night = oklch(0.17, clamp(sm.c * 1.1, 0.02, 0.05), sm.c < 0.012 ? 262 : sm.h); // a grey sky has no hue worth keeping: ink blue
           const block = mix(night, adjust(sk.mean, { l: 0.26, c: (v) => Math.min(0.13, v * 1.4 + 0.012) }), day);
           wrap.style.background = ground;
           band.style.background = block;
@@ -382,7 +384,7 @@ export default {
           }
           if (frontOn) {
             const f = (sd - frontS) / FRONT_W;
-            FRONT[j] = 1 - smoothstep(-1, 1, f);
+            FRONT[j] = 1 - smoothstep(-WIPE, WIPE, f); // a crisp wipe: the figures are never a blend of two minutes
             HUMP[j] = PITCH * 0.5 * Math.exp(-f * f * 1.6);
           }
         }

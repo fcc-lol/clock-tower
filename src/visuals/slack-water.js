@@ -33,7 +33,7 @@
 // The reflection is made from an offscreen copy of the structure, repainted
 // when the minute or the light changes.
 
-import { W, H, TAU, clamp, lerp, smoothstep, approach, rng, hash, createNoise, mix, adjust, rgba, luminance, el, svg, svgLayer, addStyle, canvas2d, grain } from "../lib/kit.js";
+import { W, H, TAU, clamp, lerp, smoothstep, approach, rng, hash, createNoise, mix, adjust, rgba, luminance, contrast, el, svg, svgLayer, addStyle, canvas2d, grain, fitText } from "../lib/kit.js";
 
 // ----- geometry (stage units) ---------------------------------------------
 const CX = 540;
@@ -61,14 +61,38 @@ const PILES = [];
 for (let i = 0; i < 12; i++) PILES.push(Math.round(DECK_X0 + 36 + (i * (DECK_X1 - DECK_X0 - 72 - 14)) / 11));
 const PILE_W = 14;
 
+// readouts: the top band carries the date and the fact; the flanks of the upper
+// storey carry the weather (left) and the sky (right), sharing the hours' cap
+// line and baseline.
+const HOUR_TOP = HOUR_BASE - DIG_H;
+const FLANK_BASE = HOUR_BASE - 34; // the flanks' lowest baseline, clear of the slab
+const LB_PX = 26; // small labels (DM Mono caps)
+const DATE_PX = 70;
+const FACT_PX = 44, FACT_LH = 50, FACT_GAP = 10;
+const TEMP_PX = 158;
+const COND_PX = 44, COND_LH = 48;
+const VAL_PX = 48, VAL_LH = 52;
+const SUN_PX = 74;
+const INK_L = "#f4ecdc"; // the two inks: warm paper white, and the structure's blue-black
+const INK_D = "#0a1018";
+
 const NUM_FONT = `900 ${NUM_PX}px "Big Shoulders Display"`;
 const AMPM_FONT = `900 ${AMPM_PX}px "Big Shoulders Display"`;
+
+// Push a colour out of the mid-grey band (OKLab lightness 0.45..0.645, where
+// neither a light nor a dark ink reaches 4.5:1) toward whichever side is nearer,
+// keeping its hue. Outside the band colours are left exactly as measured.
+const unGrey = (c) => adjust(c, { l: (L) => {
+  if (L <= 0.45 || L >= 0.645) return L;
+  const u = (L - 0.45) / 0.195;
+  return 0.45 + 0.195 * (0.12 * u + 0.88 * smoothstep(0.4, 0.6, u));
+} });
 
 const cosd = (a) => Math.cos((a * Math.PI) / 180);
 const sind = (a) => Math.sin((a * Math.PI) / 180);
 
 const CSS = `
-.sw { position: absolute; inset: 0; overflow: hidden; background: #05070b; color: var(--txt, #e8e0cf);
+.sw { position: absolute; inset: 0; overflow: hidden; background: #05070b; color: #f4ecdc;
   font-family: "Big Shoulders Text", "Big Shoulders Display", "Arial Narrow", sans-serif; }
 .sw-sky, .sw-swell, .sw-halo, .sw-veil { position: absolute; left: 0; top: 0; width: ${W}px; height: ${H}px; }
 .sw-swell { opacity: 0; background: radial-gradient(ellipse 900px 520px at 660px 300px, rgba(214,222,240,0.9), rgba(214,222,240,0) 70%); }
@@ -83,17 +107,24 @@ const CSS = `
 .sw .c-shore { fill: var(--shore); }
 .sw .c-snow { fill: var(--snow); }
 .sw .c-out { fill: none; stroke: var(--out); stroke-width: 2.5px; stroke-linejoin: round; }
-.sw-date { position: absolute; left: 64px; top: 47px; font-weight: 800; font-size: 68px; line-height: 66px; text-transform: uppercase; letter-spacing: 0.012em; white-space: nowrap; }
-.sw-date .md { font-weight: 500; }
-.sw-temp { position: absolute; right: 60px; top: 38px; font: 900 142px/1 "Big Shoulders Display", sans-serif; white-space: nowrap; text-align: right; }
-.sw-cond { position: absolute; right: 64px; top: 184px; font-weight: 700; font-size: 46px; line-height: 50px; text-transform: uppercase; letter-spacing: 0.035em; text-align: right; white-space: nowrap; }
-.sw-line { position: absolute; left: 64px; right: 64px; top: 246px; display: flex; justify-content: space-between; align-items: baseline; font-size: 37px; line-height: 44px; text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
-.sw-line .lb { font-weight: 500; margin-right: 0.32em; }
-.sw-line .vl { font-weight: 800; }
-.sw-fact { position: absolute; left: 64px; right: 64px; top: 300px; }
-.sw-fact .fl { font: 500 24px/28px "DM Mono", ui-monospace, monospace; text-transform: uppercase; letter-spacing: 0.14em; }
-.sw-fact .fv { font-weight: 700; font-size: 38px; line-height: 42px; margin-top: 5px; letter-spacing: 0.01em;
+.sw-r { position: absolute; margin: 0; }
+.sw-top { color: var(--ink-a); text-shadow: 0 0 26px var(--halo-a); }
+.sw-flank { color: var(--ink-b); text-shadow: 0 0 26px var(--halo-b); }
+.sw-lb { font: 500 ${LB_PX}px/${LB_PX + 6}px "DM Mono", ui-monospace, monospace; text-transform: uppercase; letter-spacing: 0.16em; white-space: nowrap; }
+.sw-date { left: 64px; font-weight: 800; font-size: ${DATE_PX}px; line-height: ${DATE_PX}px; text-transform: uppercase; letter-spacing: 0.015em; white-space: nowrap; }
+.sw-date .md { font-weight: 500; margin-left: 0.28em; }
+.sw-fact { left: 64px; right: 64px; }
+.sw-fact .fv { font-weight: 700; font-size: ${FACT_PX}px; line-height: ${FACT_LH}px; margin-top: ${FACT_GAP}px; letter-spacing: 0.01em;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.sw-temp { left: 60px; font: 900 ${TEMP_PX}px/${TEMP_PX}px "Big Shoulders Display", sans-serif; white-space: nowrap; }
+.sw-cond { left: 64px; font-weight: 700; font-size: ${COND_PX}px; line-height: ${COND_LH}px; text-transform: uppercase; letter-spacing: 0.03em; }
+.sw-air { left: 64px; font-weight: 800; font-size: ${VAL_PX}px; line-height: ${VAL_PX}px; white-space: nowrap; }
+.sw-air .sw-lb { display: inline; margin-right: 0.5em; }
+.sw-air .gap { display: inline-block; width: 34px; }
+.sw-sun { right: 64px; text-align: right; }
+.sw-sun .vl { font-weight: 800; font-size: ${SUN_PX}px; line-height: ${SUN_PX}px; text-transform: uppercase; white-space: nowrap; letter-spacing: 0.01em; }
+.sw-moon { right: 64px; text-align: right; }
+.sw-moon .vl { font-weight: 800; font-size: ${VAL_PX}px; line-height: ${VAL_LH}px; text-transform: uppercase; letter-spacing: 0.02em; }
 `;
 
 export default {
@@ -267,7 +298,7 @@ export default {
     art.append(lampDots);
 
     // The widths of the numerals set the slab, the lamps and where AM/PM stands.
-    let slabX0 = CX - 250, slabX1 = CX + 250, ampmX = 800;
+    let slabX0 = CX - 250, slabX1 = CX + 250, ampmX = 800, flankL = 260, flankR = 260;
     const meter = document.createElement("canvas").getContext("2d");
     function layout(s) {
       meter.font = NUM_FONT;
@@ -276,6 +307,12 @@ export default {
       slabX0 = Math.round(CX - half); slabX1 = Math.round(CX + half);
       setSlab(slabX0, slabX1);
       ampmX = Math.round(CX + wm / 2 + 26);
+      // the flanks of the upper storey hold the readouts: as wide as the hours allow
+      flankL = Math.floor(CX - wh / 2 - EX - 40 - 64);
+      flankR = Math.floor(W - 64 - (CX + wh / 2 + 40));
+      for (const n of [nTemp, nCond, nAir]) n.style.width = `${flankL}px`;
+      for (const n of [nSun, nMoon]) n.style.width = `${flankR}px`;
+      shown.temp = shown.sunV = null; // refit on the next write
       aT.setAttribute("x", ampmX);
       meter.font = AMPM_FONT;
       const wa = meter.measureText(s.text.ampm).width;
@@ -288,31 +325,62 @@ export default {
     }
 
     // ----- readouts (DOM, in the sky) ------------------------------------------
-    const nWk = el("div", { class: "wk" });
-    const nMd = el("div", { class: "md" });
-    const nTemp = el("div", { class: "sw-temp" });
-    const nCond = el("div", { class: "sw-cond" });
-    const nSunL = el("span", { class: "lb" });
-    const nSunV = el("span", { class: "vl" });
-    const nMoon = el("span", { class: "vl" });
+    // Top band: the date, then today's fact. Left flank of the upper storey:
+    // temperature on the hours' cap line, the condition under it, AQI and UV on
+    // the hours' baseline. Right flank: the sunrise/sunset countdown on the cap
+    // line, the moon on the baseline.
+    const nWk = el("span", { class: "wk" });
+    const nMd = el("span", { class: "md" });
+    const nDate = el("div", { class: "sw-r sw-top sw-date" }, nWk, nMd);
+    const nFl = el("div", { class: "sw-lb" });
+    const nFv = el("div", { class: "fv" });
+    const nFact = el("div", { class: "sw-r sw-top sw-fact" }, nFl, nFv);
+    const nTemp = el("div", { class: "sw-r sw-flank sw-temp" });
+    const nCond = el("div", { class: "sw-r sw-flank sw-cond" });
     const nAqi = el("span", { class: "vl" });
     const nUv = el("span", { class: "vl" });
-    const nFact = el("div", { class: "sw-fact" });
-    const nFl = el("div", { class: "fl" });
-    const nFv = el("div", { class: "fv" });
-    nFact.append(nFl, nFv);
-    wrap.append(
-      el("div", { class: "sw-date" }, nWk, nMd),
-      nTemp,
-      nCond,
-      el("div", { class: "sw-line" },
-        el("span", {}, nSunL, nSunV),
-        el("span", {}, nMoon),
-        el("span", {}, el("span", { class: "lb", text: "AQI" }), nAqi),
-        el("span", {}, el("span", { class: "lb", text: "UV" }), nUv)),
-      nFact,
-    );
+    const nAir = el("div", { class: "sw-r sw-flank sw-air" },
+      el("span", { class: "sw-lb", text: "AQI" }), nAqi, el("span", { class: "gap" }),
+      el("span", { class: "sw-lb", text: "UV" }), nUv);
+    const nSunL = el("div", { class: "sw-lb" });
+    const nSunV = el("div", { class: "vl" });
+    const nSun = el("div", { class: "sw-r sw-flank sw-sun" }, nSunL, nSunV);
+    const nMoonV = el("div", { class: "vl" });
+    const nMoon = el("div", { class: "sw-r sw-flank sw-moon" }, el("div", { class: "sw-lb", text: "Moon" }), nMoonV);
+    wrap.append(nDate, nFact, nTemp, nCond, nAir, nSun, nMoon);
     grain(wrap, { opacity: 0.05 });
+
+    // Place every line by its baseline, from the fonts' own metrics (once).
+    {
+      const m = document.createElement("canvas").getContext("2d");
+      const metric = (font, lh) => { // offset from the top of a line box to its baseline, and the cap height
+        m.font = font;
+        const q = m.measureText("H08");
+        return { base: (lh - (q.fontBoundingBoxAscent + q.fontBoundingBoxDescent)) / 2 + q.fontBoundingBoxAscent, cap: q.actualBoundingBoxAscent };
+      };
+      const TXT = '"Big Shoulders Text"';
+      const lb = metric(`500 ${LB_PX}px "DM Mono"`, LB_PX + 6);
+      const dt = metric(`800 ${DATE_PX}px ${TXT}`, DATE_PX);
+      const tp = metric(`900 ${TEMP_PX}px "Big Shoulders Display"`, TEMP_PX);
+      const cd = metric(`700 ${COND_PX}px ${TXT}`, COND_LH);
+      const vl = metric(`800 ${VAL_PX}px ${TXT}`, VAL_PX);
+      const vw = metric(`800 ${VAL_PX}px ${TXT}`, VAL_LH);
+      const px = (v) => `${Math.round(v)}px`;
+      // top band
+      const dateBase = 64 + dt.cap;
+      nDate.style.top = px(dateBase - dt.base);
+      const factLbBase = dateBase + 64;
+      nFact.style.top = px(factLbBase - lb.base);
+      // left flank
+      const tempBase = HOUR_TOP + tp.cap;
+      nTemp.style.top = px(tempBase - tp.base);
+      nCond.style.top = px(tempBase + 30 + cd.cap - cd.base);
+      nAir.style.top = px(FLANK_BASE - vl.base);
+      // right flank
+      const sunLbBase = HOUR_TOP + lb.cap;
+      nSun.style.top = px(sunLbBase - lb.base);
+      nMoon.style.bottom = px(H - (FLANK_BASE + (VAL_LH - vw.base)));
+    }
 
     const shown = {};
     const put = (key, node, value) => {
@@ -423,9 +491,9 @@ export default {
     let WL = (WL_HIGH + WL_LOW) / 2;
     let haze = 0, direct = 0, night = 0;
     let driftX = 0;
-    let sceneKey = "", sceneDue = -1, snowDepth = 0, snowKey = "";
+    let sceneKey = "", sceneDue = -1, snowDepth = 0, snowKey = "", capsKey = "";
     let glitX = -999, glitK = 0, glitDp = 0;
-    let cold = 0;
+    let cold = 0, hot = 0;
     const caps = []; // snow caps on the numerals: flat arrays [x, yTop, thickness, ...] per run
 
     // ----- snow caps: where the numerals' upward-facing edges are -----------------
@@ -577,6 +645,10 @@ export default {
       const cloud = clamp(wx.cloud / 100);
       haze = Math.pow(clamp((4 - wx.visibility) / 3.8), 1.2) * (wx.falling === "snow" ? 0.55 : 1);
       if (wx.fog) haze = Math.max(haze, 0.92);
+      // heat bleaches the horizon and makes it swim; bad air shows as a brown haze
+      hot = smoothstep(85, 97, wx.temp) * (wx.falling ? 0 : 1);
+      const smog = smoothstep(90, 190, Number(wx.aqi) || 0);
+      haze = Math.max(haze, 0.22 * smog);
       night = 1 - smoothstep(0.05, 0.45, dl);
       const sunUp = smoothstep(-1.5, 7, s.sun.alt);
       direct = sunUp * (1 - Math.pow(cloud, 1.6)) * (1 - 0.8 * haze) * (wx.falling ? 0.3 : 1);
@@ -587,17 +659,50 @@ export default {
       const moonLight = s.moon.up ? s.moon.illumination * smoothstep(0, 12, s.moon.alt) * (1 - cloud) * night : 0;
       cold = smoothstep(24, 16, wx.temp);
 
-      // sky
-      const skyMid = mix(sk.west, sk.northWest, 0.5);
+      // sky: the measured west and north-west colours, nudged out of the mid-grey
+      // band so that dusk and dawn pass through it quickly (there, no ink reads)
+      const skW = unGrey(sk.west), skN = unGrey(sk.northWest);
+      const skyMid = mix(skW, skN, 0.5);
       const zen = mix("#01030a", adjust(skyMid, { l: (l) => l * 0.74, c: (c) => c * 1.3 }), smoothstep(0, 0.6, dl));
       const zenA = lerp(0.5, 0.62, dl) * (1 - 0.6 * haze);
-      const hzCol = mix("#6a5238", mix(skyMid, "#ffffff", 0.5), smoothstep(0.05, 0.5, dl));
-      const hzA = lerp(0.2, 0.46 - 0.22 * cloud, smoothstep(0.05, 0.5, dl)) * (1 - 0.7 * haze);
+      let hzCol = mix("#6a5238", mix(skyMid, "#ffffff", 0.5), smoothstep(0.05, 0.5, dl));
+      const hzA = clamp(lerp(0.2, 0.46 - 0.22 * cloud, smoothstep(0.05, 0.5, dl)) * (1 - 0.7 * haze) + (0.3 * hot + 0.25 * smog) * dl);
+      hzCol = mix(mix(hzCol, "#f3ead6", 0.55 * hot * dl), "#b89c74", 0.45 * smog * dl);
+      P.mirage = rgba(mix(hzCol, "#ffffff", 0.35), 0.5 * hot * dl);
       const skyHz = mix(skyMid, hzCol, hzA);
-      const skyTop = mix(mix(sk.west, sk.northWest, 0.4), zen, zenA * 0.75);
+      const skyTop = mix(mix(skW, skN, 0.4), zen, zenA * 0.75);
       const lumTop = luminance(skyTop);
       const lumBehind = luminance(mix(skyMid, skyHz, 0.35));
-      lampT = 1 - smoothstep(0.125, 0.2, lumBehind);
+      lampT = 1 - smoothstep(0.085, 0.14, lumBehind);
+      // what is actually behind a point of the sky (the CSS layers below, in colour)
+      const zenEnd = WL * 0.66, hzStart = WL * 0.6;
+      const skyAt = (x, y) => {
+        let c = mix(skW, skN, clamp((x / W - 0.28) / 0.72));
+        c = mix(c, zen, zenA * clamp(1 - y / zenEnd));
+        c = mix(c, hzCol, hzA * clamp((y - hzStart) / (WL - hzStart)));
+        if (haze > 0.03) c = mix(c, skyMid, haze * (y < 380 ? 0 : y < 470 ? 0.24 * (y - 380) / 90 : 0.24 - 0.09 * clamp((y - 470) / (MIN_BASE - 670))));
+        return c;
+      };
+      // the ink of a zone: whichever of the two reads better against the worst of
+      // what is behind it, switched in one step; a soft halo of the ground's own
+      // colour pushed away from the ink keeps it clear in the half-light
+      const zoneInk = (key, y0, y1) => {
+        let cl = 99, cd = 99, avg = null;
+        for (let k = 0; k < 6; k++) {
+          const c = skyAt(k & 1 ? W - 64 : 64, k < 2 ? y0 : k < 4 ? (y0 + y1) / 2 : y1);
+          cl = Math.min(cl, contrast(c, INK_L)); cd = Math.min(cd, contrast(c, INK_D));
+          avg = avg ? mix(avg, c, 1 / (k + 1)) : c;
+        }
+        const prev = shown[key];
+        const light = prev === INK_D ? cl > cd + 0.4 : prev === INK_L ? cl + 0.4 > cd : cl >= cd;
+        const ink = light ? INK_L : INK_D;
+        setVar(`--ink-${key}`, light ? mix(INK_L, "#ffcf94", 0.3 * lamp) : INK_D);
+        shown[key] = ink;
+        const need = clamp((7 - (light ? cl : cd)) / 3.5); // only as much halo as the contrast needs
+        setVar(`--halo-${key}`, light ? rgba(mix(avg, "#000000", 0.6), (0.75 * need).toFixed(2)) : rgba(mix(avg, "#ffffff", 0.55), (0.65 * need).toFixed(2)));
+      };
+      zoneInk("a", 60, 300);
+      zoneInk("b", HOUR_TOP, HOUR_BASE);
 
       // waterline, current
       WL = Math.round(lerp(WL_LOW, WL_HIGH, clamp(s.tide.norm)) * 2) / 2;
@@ -614,11 +719,8 @@ export default {
       const sky =
         (sunGlow > 0.02 ? `radial-gradient(ellipse 620px 360px at ${glitX.toFixed(0)}px ${WL}px, ${rgba(sunCol, 0.62 * sunGlow)}, ${rgba(sunCol, 0)} 72%), ` : "") +
         `linear-gradient(180deg, ${rgba(zen, zenA)} 0px, ${rgba(zen, 0)} ${Math.round(WL * 0.66)}px, ${rgba(hzCol, 0)} ${Math.round(WL * 0.6)}px, ${rgba(hzCol, hzA)} ${WL}px), ` +
-        `linear-gradient(90deg, ${sk.west} 0%, ${sk.west} 28%, ${sk.northWest} 100%)`;
+        `linear-gradient(90deg, ${skW} 0%, ${skW} 28%, ${skN} 100%)`;
       setStyle("sky", skyDiv, "background", sky);
-
-      // the readouts: one ink, flipping where the sky is mid-grey
-      setVar("--txt", mix("#efe6d2", "#0a1018", smoothstep(0.155, 0.205, lumTop)));
 
       // the structure
       const inkD = mix("#0a1017", skyMid, 0.07);
@@ -680,19 +782,27 @@ export default {
       if (wx.falling === "snow") lying = 5 + 8 * wx.intensity;
       else if (wx.temp < 34) for (let i = 18; i < 24; i++) if (s.pastHours[i] && s.pastHours[i].kind === "snow") lying = 5;
       snowDepth = Math.round(lying);
-      const sk2 = `${snowDepth}|${s.text.hh}|${s.text.mm}|${s.text.ampm}`;
+      const sk2 = `${snowDepth}|${s.text.time}|${s.text.ampm}`;
       if (sk2 !== snowKey) {
         snowKey = sk2;
-        findCaps(s);
+        const ck = snowDepth >= 1 ? `${s.text.time}|${s.text.ampm}` : "";
+        if (ck !== capsKey) { capsKey = ck; findCaps(s); } // the caps' shape depends on the numerals only
         capSnow.setAttribute("d", capPath());
         deckSnow.setAttribute("d", lipPath(DECK_X0, DECK_X1, MIN_BASE, snowDepth));
         slabSnow.setAttribute("d", lipPath(slabX0, slabX1, HOUR_BASE, snowDepth * 0.8));
       }
 
-      // push to the DOM
-      setVar("--f0", P.f0); setVar("--f1", P.f1); setVar("--f2", P.f2);
-      setVar("--side", P.side); setVar("--top", P.top); setVar("--fasc", P.fasc); setVar("--out", P.out);
-      setVar("--pile", P.pile); setVar("--wet", P.wet); setVar("--snow", P.snow); setVar("--shore", P.shore);
+      // push to the DOM. The structure's colours (and the offscreen copy the
+      // reflection is cut from) follow the light only when it has changed
+      // perceptibly, not every second: restyling the SVG costs paint time.
+      const palKey = `${Math.round(dl * 60)}|${Math.round(s.sun.alt * 1.5)}|${Math.round(s.sun.az / 4)}|${Math.round(cloud * 25)}|${Math.round(haze * 25)}|${wx.falling}|${Math.round(moonLight * 20)}|${sk.west}${sk.northWest}|${lampQ}`;
+      const palChanged = palKey !== shown.palKey;
+      if (palChanged) {
+        shown.palKey = palKey;
+        setVar("--f0", P.f0); setVar("--f1", P.f1); setVar("--f2", P.f2);
+        setVar("--side", P.side); setVar("--top", P.top); setVar("--fasc", P.fasc); setVar("--out", P.out);
+        setVar("--pile", P.pile); setVar("--wet", P.wet); setVar("--snow", P.snow); setVar("--shore", P.shore);
+      }
       const lampS = lamp.toFixed(3);
       setAttr("fanM", minFans, "opacity", lampS); setAttr("fanH", hourFans, "opacity", lampS);
       setAttr("dots", lampDots, "opacity", lampS); setAttr("dlit", deckLit, "opacity", lampS);
@@ -705,13 +815,15 @@ export default {
 
       // readouts
       put("wk", nWk, s.text.weekday); put("md", nMd, s.text.monthDay);
-      put("temp", nTemp, s.text.temp); put("cond", nCond, s.text.condition);
-      put("sunL", nSunL, s.text.sunLabel); put("sunV", nSunV, s.text.sunValue);
-      put("moon", nMoon, s.text.moon); put("aqi", nAqi, s.text.aqi); put("uv", nUv, s.text.uv);
+      if (put("temp", nTemp, s.text.temp)) fitText(nTemp, flankL + 8, TEMP_PX);
+      put("cond", nCond, s.text.condition);
+      put("sunL", nSunL, s.text.sunLabel);
+      if (put("sunV", nSunV, s.text.sunValue)) fitText(nSunV, flankR, SUN_PX);
+      put("moon", nMoonV, s.text.moon); put("aqi", nAqi, s.text.aqi); put("uv", nUv, s.text.uv);
       put("fl", nFl, s.text.factLabel); put("fv", nFv, s.text.factValue);
       setStyle("factShow", nFact, "display", s.text.factValue ? "block" : "none");
 
-      const key = `${P.f0}${P.f1}${P.f2}${P.side}${P.top}${P.fasc}${P.pile}${P.snow}${lampQ}${snowKey}`;
+      const key = `${palKey}|${snowKey}`;
       if (key !== sceneKey) {
         sceneKey = key;
         // on the minute the reflection catches up a moment later; otherwise at once
@@ -737,11 +849,11 @@ export default {
       if (sceneDue >= 0 && t >= sceneDue) { sceneDue = -1; paintScene(s); }
 
       const { ctx } = fx;
-      const r = fx.ratio;
-      ctx.setTransform(r, 0, 0, r, 0, 0);
+
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, W, H);
 
-      const rough = clamp(0.03 + Math.pow(wx.wind / 26, 1.15) + 0.12 * wx.intensity);
+      const rough = clamp(0.03 + Math.pow(wx.wind / 26, 1.15) + 0.12 * wx.intensity) * (1 - 0.55 * hot);
       const gustK = clamp((wx.gust - wx.wind) / (wx.wind + 6), 0.2, 1.2);
       const windX = -cosd(wx.windDir) * wx.wind;
       const slantX = (windX < 0 ? -1 : 1) * Math.max(Math.abs(windX), 0.4 * wx.wind);
@@ -765,10 +877,23 @@ export default {
         RGH[i] = rI;
         const wv = Math.sin(u * 13 - t * w1) * 0.55 + Math.sin(u * 31 - t * w2 + 1.7) * 0.28 + noise.n2(u * 7 + 3.1, t * 0.45) * 0.42;
         OFF[i] = (2.2 + d * 0.052) * rI * wv;
-        JY[i] = rI * (0.6 + d * 0.016) * Math.sin(u * 21 - t * 1.25 + 0.6);
+        JY[i] = rI * (0.6 + d * 0.016) * Math.sin(u * 21 - t * 1.25 + 0.6) + hot * 3.2 * Math.exp(-d / 70) * Math.sin(u * 47 - t * 1.7 + 2 * noise.n2(u * 9, t * 0.3));
         const n = noise.n2(u * 11 + 40, t * 0.5);
         const drop = clamp((rI - 0.28) * 1.5) * clamp(n * 1.7 + 0.35);
         AL[i] = reflA * Math.exp(-d * fadeInv) * (1 - drop);
+      }
+
+      // ---- heat: the air over the far shore swims in thin bright layers
+      if (hot > 0.05) {
+        ctx.fillStyle = P.mirage;
+        ctx.beginPath();
+        for (let k = 0; k < 14; k++) {
+          const y = WL - 3 - k * 2.4;
+          const ox = 90 * noise.n2(k * 0.37, t * 0.22) + 40 * Math.sin(t * 0.6 + k);
+          const len = 260 + 200 * (0.5 + 0.5 * noise.n2(k * 0.71 + 9, t * 0.15));
+          for (let x = -300 + ox + ((k * 173) % 400); x < W; x += len + 140 + k * 9) ctx.rect(x, y, len * (1 - k / 18), 1.6);
+        }
+        ctx.fill();
       }
 
       // ---- the far shore's reflection
@@ -778,7 +903,7 @@ export default {
       ctx.fill();
 
       // ---- the structure's reflection: strips of the offscreen scene, flipped
-      ctx.setTransform(r, 0, 0, -r, 0, 2 * WL * r);
+      ctx.setTransform(1, 0, 0, -1, 0, 2 * WL);
       for (let i = 0; i < nVis; i++) {
         const a = AL[i];
         if (a < 0.02) continue;
@@ -790,7 +915,7 @@ export default {
         ctx.drawImage(scene, SX0, sy, SW, sh, SX0 + OFF[i], WL - d - h, SW, h * (1 - 0.32 * clamp(RGH[i] * 1.2)) + 0.4);
       }
       ctx.globalAlpha = 1;
-      ctx.setTransform(r, 0, 0, r, 0, 0);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
 
       // ---- sodium light smeared down the water
       if (lamp > 0.02) {

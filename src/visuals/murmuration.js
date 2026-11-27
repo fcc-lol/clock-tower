@@ -43,8 +43,8 @@ const NDF = 1100; // far birds that fly with the ribbon by day and come down at 
 const ND = NDG + NDF;
 
 const FONT_PX = 720; // the numerals' size
-const CELL = 4; // glyph field resolution, stage px
-const PAD = 40; // empty margin around a glyph in its field
+const CELL = 6; // glyph field resolution, stage px
+const PAD = 42; // empty margin around a glyph in its field
 const LEFT = 104; // left edge of both lines of numerals
 const TRACK = 12;
 const HOUR_BASE = 728;
@@ -280,7 +280,7 @@ export default {
         c.textBaseline = "alphabetic";
         c.fillText(String(d), PAD, PAD + capH);
       });
-      const n = GC * GR;
+      __m("mask"+d);const n = GC * GR;
       const dist = new Float32Array(n);
       let area = 0;
       for (let i = 0; i < n; i++) {
@@ -318,7 +318,11 @@ export default {
         gx[i] = (psi[i + 1] - psi[i - 1]) / (2 * CELL);
         gy[i] = (psi[i + GC] - psi[i - GC]) / (2 * CELL);
       }
-      fields[d] = { psi, gx, gy, area, cover: m.data };
+      __m("dt"+d);// the cells a bird may call home: well inside the stroke
+      let nv = 0;
+      const validTmp = new Int32Array(n);
+      for (let i = 0; i < n; i++) if (m.data[i] >= 128 && psi[i] >= 2.5) validTmp[nv++] = i;
+      fields[d] = { psi, gx, gy, area, cover: m.data, valid: validTmp.subarray(0, nv) };
 
       // a soft silhouette at field resolution (shown upscaled): the far mass of
       // the flock. Two separable box blurs of the coverage, about 10 px.
@@ -326,13 +330,13 @@ export default {
       for (let i = 0; i < n; i++) a[i] = m.data[i];
       const b = new Float32Array(n);
       for (let pass = 0; pass < 2; pass++) {
-        for (let y = 0; y < GR; y++) for (let x = 2; x < GC - 2; x++) {
+        for (let y = 0; y < GR; y++) for (let x = 1; x < GC - 1; x++) {
           const i = y * GC + x;
-          b[i] = (a[i - 2] + a[i - 1] + a[i] + a[i + 1] + a[i + 2]) * 0.2;
+          b[i] = (a[i - 1] + a[i] + a[i + 1]) / 3;
         }
-        for (let y = 2; y < GR - 2; y++) for (let x = 0; x < GC; x++) {
+        for (let y = 1; y < GR - 1; y++) for (let x = 0; x < GC; x++) {
           const i = y * GC + x;
-          a[i] = (b[i - 2 * GC] + b[i - GC] + b[i] + b[i + GC] + b[i + 2 * GC]) * 0.2;
+          a[i] = (b[i - GC] + b[i] + b[i + GC]) / 3;
         }
       }
       const g = document.createElement("canvas");
@@ -434,16 +438,16 @@ export default {
     const G2 = G1 * G1;
     // the next evenly spread point inside a slot's digit: result in aX, aY, fPsi
     let aX = 0, aY = 0;
+    // (a low-discrepancy walk through the digit's home cells, in raster order,
+    // so the birds spread evenly through the strokes)
     function newAnchor(slot) {
       const F = fields[slot.ch];
-      for (let tries = 0; tries < 400; tries++) {
-        const k = slot.k++;
-        aX = ((0.5 + G1 * k) % 1) * GWpx;
-        aY = ((0.5 + G2 * k) % 1) * GHpx;
-        if (F.cover[Math.floor(aY / CELL) * GC + Math.floor(aX / CELL)] < 128) continue;
-        sample(F, aX, aY);
-        if (fPsi >= 2.5) return;
-      }
+      const V = F.valid;
+      const k = slot.k++;
+      const c = V[Math.floor(((0.5 + G1 * k) % 1) * V.length)];
+      aX = ((c % GC) + ((0.5 + G2 * k) % 1)) * CELL;
+      aY = (Math.floor(c / GC) + ((0.5 + 0.41421356 * k) % 1)) * CELL;
+      sample(F, aX, aY);
     }
 
     let timeKey = "";
@@ -1276,7 +1280,7 @@ export default {
     syncLook(state);
     __m("synclook");
     step(state, 1 / 30, -3);
-    for (let f = 0; f < 30; f++) step(state, 1 / 10, -3 + (f + 1) / 10);
+    for (let f = 0; f < 8; f++) step(state, 1 / 10, -3 + (f + 1) / 10);
 
     __m("warm");
     {let o=[];for(let i=1;i<__T.length;i+=2)o.push(__T[i]+":"+(__T[i+1]-(i>1?__T[i-1]:__T[0])).toFixed(1));console.warn("MOUNT "+o.join(" "));}

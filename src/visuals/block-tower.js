@@ -119,12 +119,12 @@ const CSS = `
 .bt .date{font-size:58px;line-height:1;letter-spacing:.035em}
 .bt .temp{font-size:138px;line-height:1;letter-spacing:-.01em;padding-left:.12em}
 .bt .cond{font-size:58px;line-height:1.06}
-.bt .lab{font-size:27px;line-height:1;letter-spacing:.1em;font-weight:600;margin-bottom:7px}
+.bt .lab{font-size:30px;line-height:1;letter-spacing:.1em;font-weight:600;margin-bottom:7px}
 .bt .val{font-size:58px;line-height:1}
-.bt .valb{font-size:68px;line-height:.98}
-.bt .moon{font-size:48px;line-height:1;letter-spacing:.03em}
+.bt .valb{font-size:76px;line-height:.98}
+.bt .moon{font-size:56px;line-height:1;letter-spacing:.03em}
 .bt .fact{padding:0 40px 4px;text-shadow:0 1px 0 var(--hi),0 0 5px var(--scorch)}
-.bt .flab{font-size:27px;line-height:1;letter-spacing:.14em;font-weight:600;margin-bottom:12px;opacity:.86}
+.bt .flab{font-size:28px;line-height:1;letter-spacing:.14em;font-weight:700;margin-bottom:12px}
 .bt .fval{font-size:46px;line-height:1.1;font-weight:600;white-space:normal;text-transform:none;letter-spacing:.005em;max-width:826px;text-wrap:balance}
 .bt .stamp{font-size:30px;letter-spacing:.3em;font-weight:600;opacity:.5}
 .bt .marble{position:absolute;left:0;top:0;width:44px;height:44px;margin:-22px 0 0 -22px;will-change:transform}
@@ -409,12 +409,12 @@ export default {
     }
     // the clouds, in the order they appear as the cover thickens
     const CLOUD = [
-      { x: 330, L: 46, w: 380, th: 4 },
-      { x: 1000, L: 128, w: 300, th: 16 },
-      { x: 84, L: 196, w: 300, th: 28 },
-      { x: 640, L: 4, w: 330, th: 42 },
-      { x: 170, L: 4, w: 290, th: 56 },
-      { x: 900, L: 2, w: 280, th: 70 },
+      { x: 330, L: 46, w: 380, th: 12 },
+      { x: 1000, L: 128, w: 300, th: 24 },
+      { x: 84, L: 196, w: 300, th: 36 },
+      { x: 640, L: 4, w: 330, th: 48 },
+      { x: 170, L: 4, w: 290, th: 60 },
+      { x: 900, L: 2, w: 280, th: 72 },
       { x: 470, L: 140, w: 300, th: 84 },
     ];
     let clipN = 0;
@@ -460,7 +460,7 @@ export default {
         const x = ((k + 0.5) / nd - 0.5) * cw * 0.7 - ox + r.range(-10, 10);
         const top = ch - oy;
         const len = r.range(26, 90);
-        drops += `<path class="thr" d="M${f1(x)} ${f1(top)}V${f1(top + len)}"/>${slab(tear(x, top + len + 26, 0.9), "dpf", "dps")}`;
+        drops += `<path class="thr" d="M${f1(x)} ${f1(top)}V${f1(top + len)}"/>${slab(tear(x, top + len + 30, 1.25), "dpf", "dps")}`;
         flakes += `<path class="thr" d="M${f1(x)} ${f1(top)}V${f1(top + len)}"/><g transform="translate(${f1(HK * 0.6)} ${f1(-HY * 0.6)})"><path class="flks" d="${flakeD(x, top + len + 22, 22)}"/></g><path class="flk" d="${flakeD(x, top + len + 22, 22)}"/>`;
       }
       const inner = `<defs><clipPath id="${id}">${shape}</clipPath></defs><g class="drop">${drops}</g><g class="flake">${flakes}</g>${slab(shape, "cf", "cs")}<g clip-path="url(#${id})"><rect class="cb" x="${f1(-cw / 2 - ox)}" y="${f1(ch * 0.78 - oy)}" width="${f1(cw)}" height="${f1(ch)}"/><path class="cg" d="${gr}"/></g><path class="chi" d="${hl}"/>`;
@@ -653,12 +653,12 @@ export default {
     // Each rocking joint: natural period, damping, how far a unit of wind
     // pressure tips it, the joint it rides on, and where it touches (cl..cr at iy).
     const OSC = [
-      { T: 5.4, z: 0.2, A: 0.0026, par: -1, cl: 64, cr: 930, iy: 1600, gain: 1 }, // minutes on the base
-      { T: 4.7, z: 0.2, A: 0.0038, par: 0, cl: 64, cr: 930, iy: 1170, gain: 1 }, // hours on minutes
-      { T: 4.1, z: 0.19, A: 0.0056, par: 1, cl: 64, cr: 930, iy: 740, gain: 1 }, // plank on hours
-      { T: 3.6, z: 0.18, A: 0.008, par: 2, cl: tempB.o.x, cr: sunB.o.x + sunB.o.w, iy: 622, gain: 1 },
-      { T: 3.2, z: 0.17, A: 0.011, par: 3, cl: moonB.o.x, cr: moonB.o.x + moonB.o.w, iy: 402, gain: 1 },
-      { T: 2.9, z: 0.17, A: 0.012, par: 3, cl: aqiB.o.x, cr: uvB.o.x + uvB.o.w, iy: 402, gain: 1 },
+      { T: 5.4, z: 0.2, A: 0.0052, par: -1, cl: 64, cr: 930, iy: 1600, gain: 1 }, // minutes on the base
+      { T: 4.7, z: 0.2, A: 0.0076, par: 0, cl: 64, cr: 930, iy: 1170, gain: 1 }, // hours on minutes
+      { T: 4.1, z: 0.19, A: 0.011, par: 1, cl: 64, cr: 930, iy: 740, gain: 1 }, // plank on hours
+      { T: 3.6, z: 0.18, A: 0.015, par: 2, cl: tempB.o.x, cr: sunB.o.x + sunB.o.w, iy: 622, gain: 1 },
+      { T: 3.2, z: 0.17, A: 0.02, par: 3, cl: moonB.o.x, cr: moonB.o.x + moonB.o.w, iy: 402, gain: 1 },
+      { T: 2.9, z: 0.17, A: 0.022, par: 3, cl: aqiB.o.x, cr: uvB.o.x + uvB.o.w, iy: 402, gain: 1 },
     ];
     for (const o of OSC) {
       o.w2 = (TAU / o.T) ** 2;
@@ -846,11 +846,11 @@ export default {
           T.cond1.style.fontSize = T.cond2.style.fontSize = `${fs}px`;
         }
       }
-      if (put("sunLabel", T.sunLabel, tx.sunLabel)) fit(T.sunLabel, 236 - 30, 27, 24);
+      if (put("sunLabel", T.sunLabel, tx.sunLabel)) fit(T.sunLabel, 236 - 28, 30, 24);
       if (put("sunValue", T.sunValue, tx.sunValue)) fit(T.sunValue, 236 - 30, 58, 36);
-      if (put("moon", T.moon, tx.moon)) fit(T.moon, 470 - 44, 48, 36);
-      if (put("aqi", T.aqi, tx.aqi)) fit(T.aqi, 160 - 26, 68, 40);
-      if (put("uv", T.uv, tx.uv)) fit(T.uv, 160 - 26, 68, 40);
+      if (put("moon", T.moon, tx.moon)) fit(T.moon, 470 - 44, 56, 40);
+      if (put("aqi", T.aqi, tx.aqi)) fit(T.aqi, 160 - 24, 76, 44);
+      if (put("uv", T.uv, tx.uv)) fit(T.uv, 160 - 24, 76, 44);
       const fl = put("factLabel", T.factLabel, tx.factLabel);
       const fv = put("factValue", T.factValue, tx.factValue);
       if (fl || fv || !shown.factInit) {
@@ -899,14 +899,40 @@ export default {
       const snowCol = mix(mix("#f6f8fb", wall, 0.12), "#141a26", nightK * 0.86);
       setG("--sn", snowCol);
       setG("--sn2", mix(snowCol, nightK > 0.5 ? "#0a0e18" : "#8ea0bd", 0.3));
-      let floor = mix(adjust(wall, { l: (l) => l * 0.62, c: (c) => c * 0.7 }), "#2a211c", 0.3);
-      floor = mix(floor, "#0c0a0a", 0.3 * E.wet);
+      // the table the tower stands on: dark oak by day, nearly black at night
+      let floor = mix(mix("#9a6a3c", wall, 0.1), "#0a0807", nightK * 0.9);
+      floor = mix(floor, "#120c08", 0.55 * E.wet);
       floor = mix(floor, snowCol, 0.93 * E.snow);
       setG("--floor", floor);
-      setG("--floorline", rgba(mix(floor, "#ffffff", 0.5), 0.25 * (1 - nightK) + 0.05));
-      setG("--pud", mix(wall, "#05070c", 0.5));
-      const cl = mix(wall, nightK > 0.5 ? "#9aa3bd" : "#ffffff", lerp(0.5, 0.2, cloud) * (1 - 0.6 * nightK));
-      setG("--cloud", cl);
+      setG("--seam", rgba(mix(floor, "#000000", 0.6), 0.3 + 0.2 * nightK));
+      setG("--floorline", rgba(mix(floor, "#ffffff", 0.5), 0.3 * (1 - nightK) + 0.05));
+      E.pudCol = mix(mix(wall, "#05070c", 0.25), "#000000", nightK * 0.2);
+
+      // the painted plywood sky
+      const grey = clamp(0.55 * smoothstep(0.35, 1, cloud) + (wx.falling ? 0.22 : 0) + (wx.kind === "storm" ? 0.3 : 0));
+      const cDay = mix(mix("#fbf8f0", "#8a939e", grey), wall, 0.1);
+      const cf = mix(cDay, mix(wall, "#8d95aa", 0.2 + 0.1 * grey), nightK * 0.94);
+      setG("--cf", cf);
+      setG("--cs", mix(cf, mix("#3a2a1e", "#000000", nightK), 0.32));
+      setG("--cb", rgba(mix(cf, "#1e2a40", 0.6), 0.28 * (1 - 0.6 * nightK)));
+      setG("--cg", rgba(mix(cf, "#000000", 0.6), 0.13));
+      setG("--chi", rgba("#ffffff", 0.55 * (1 - nightK) * (1 - 0.5 * grey)));
+      setG("--thr", nightK > 0.5 ? rgba("#c8d0e0", 0.14) : rgba(mix(wall, "#000000", 0.6), 0.5));
+      const golden = 1 - smoothstep(0.5, 0.92, day);
+      const sunF = mix("#ffc21a", "#ff7a2a", golden);
+      setG("--sf", sunF);
+      setG("--ss", mix(sunF, "#7a3a08", 0.4));
+      E.sunVis = smoothstep(0.2, 0.55, day) * (1 - smoothstep(0.5, 0.88, cloud)) * (1 - E.fog);
+      const starF = mix("#ffe7a0", wall, 0.12);
+      setG("--stf", starF);
+      setG("--sts", mix(starF, "#2a1e08", 0.65));
+      E.starVis = nightK * (1 - smoothstep(0.3, 0.8, cloud)) * (1 - E.fog);
+      E.cloudFade = 1 - 0.6 * E.fog;
+      const dropF = mix("#2a63d4", mix(wall, "#6f9be8", 0.45), nightK);
+      setG("--dpf", dropF);
+      setG("--dps", mix(dropF, "#000000", 0.4));
+      setG("--flk", mix(snowCol, "#ffffff", 0.3 * (1 - nightK)));
+      setG("--flks", mix(snowCol, "#6d7c96", 0.5));
       const fogCol = mix(wall, day > 0.3 ? "#eef0f1" : "#3b3e47", 0.45);
       setG("--fogc", rgba(fogCol, 0.9));
 
@@ -930,7 +956,7 @@ export default {
       setG("--sheenp", (0.36 * wetK * (0.35 + 0.65 * day) + 0.3 * sunK + 0.04).toFixed(3));
       setG("--streak", (0.22 * wetK * (1 - nightK)).toFixed(3));
       const rimCol = mix(mix("#ffffff", wall, 0.3), "#cfe4ff", E.frost);
-      setG("--rim", rgba(rimCol, clamp(0.1 * nightK + 0.5 * moonK + 0.75 * E.frost)));
+      setG("--rim", rgba(rimCol, clamp(0.24 * nightK + 0.45 * moonK + 0.75 * E.frost)));
       setG("--rimw", `${(1.6 + 2.2 * E.frost).toFixed(1)}px`);
       setG("--chip", faceCol.red);
       setG("--chipink", inkFor(faceCol.red, INK.ink, 4.6));
@@ -965,6 +991,45 @@ export default {
         shown.flag = faceCol.yellow;
         flagEl.style.fill = mix(faceCol.yellow, "#ffd65c", nightK * 0.25);
       }
+      if (E.wet > 0.02) paintReflection(nightK);
+    }
+
+    // What the wet floor mirrors, drawn upside down once per change of light:
+    // the base plank's face, then the two minute cubes with a soft smear of
+    // their numerals' paint. Drawn to the screen in rippled slices.
+    const REFH = 120;
+    const refl = document.createElement("canvas");
+    refl.width = W;
+    refl.height = REFH;
+    const rctx = refl.getContext("2d");
+    function paintReflection(nightK) {
+      rctx.clearRect(0, 0, W, REFH);
+      const dk = (c, k) => mix(c, "#000000", k);
+      const bf = base.vars["--f"];
+      rctx.fillStyle = dk(bf, 0.25);
+      rctx.fillRect(base.o.x, 0, base.o.w, 50);
+      rctx.fillStyle = dk(base.vars["--s"], 0.5);
+      rctx.fillRect(base.o.x + base.o.w, 0, base.dx, 50 - base.dy * 0.5);
+      const cubes = [mL, mR];
+      for (const b of cubes) {
+        rctx.fillStyle = dk(b.vars["--f"], 0.3);
+        rctx.fillRect(b.o.x, 54, b.o.w, REFH - 54);
+        const g = rctx.createRadialGradient(b.o.x + b.o.w / 2, 104, 4, b.o.x + b.o.w / 2, 104, 120);
+        g.addColorStop(0, rgba(b.ink, 0.75 + 0.25 * nightK));
+        g.addColorStop(1, rgba(b.ink, 0));
+        rctx.fillStyle = g;
+        rctx.fillRect(b.o.x, 54, b.o.w, REFH - 54);
+      }
+      // the wet seam where plank meets floor
+      rctx.fillStyle = rgba("#ffffff", 0.12 * (1 - nightK) + 0.04);
+      rctx.fillRect(base.o.x, 0, base.o.w, 2);
+      const fade = rctx.createLinearGradient(0, 0, 0, REFH);
+      fade.addColorStop(0, "rgba(0,0,0,0)");
+      fade.addColorStop(1, "rgba(0,0,0,1)");
+      rctx.globalCompositeOperation = "destination-out";
+      rctx.fillStyle = fade;
+      rctx.fillRect(0, 0, W, REFH);
+      rctx.globalCompositeOperation = "source-over";
     }
 
     // ----- wind -----------------------------------------------------------------
@@ -983,8 +1048,8 @@ export default {
       const p = E.dirS * Math.min(2.5, Math.pow(vNow / 26, 1.35));
       E.pa = approach(E.pa, p, dt, 3.5);
       pNow = p;
-      const idle = 0.17 * Math.sin((TAU * t) / 6.6 + seed) + 0.09 * Math.sin((TAU * t) / 10.3 + seed * 1.7);
-      const pe = p - 0.55 * E.pa + idle;
+      const idle = 0.22 * Math.sin((TAU * t) / 6.6 + seed) + 0.1 * Math.sin((TAU * t) / 10.3 + seed * 1.7);
+      const pe = p - 0.3 * E.pa + idle;
       if (!quiet) {
         for (let k = 0; k < NK; k++) {
           if (kickT[k] >= 0 && t >= kickT[k]) {
@@ -1243,17 +1308,34 @@ export default {
       const wx = s.weather;
       const cloud = wx.cloud;
       const drift = pNow * 16 + E.dirS * 3;
-      for (const c of clouds) {
-        c.x += drift * c.sp * dt;
-        if (c.x > W + 60) c.x = -c.w - 40;
-        else if (c.x < -c.w - 60) c.x = W + 40;
-        const op = Math.round(smoothstep(c.th - 7, c.th + 9, cloud) * (1 - 0.7 * E.fog) * 50) / 50;
-        if (op !== c.op) {
-          c.op = op;
-          c.node.style.opacity = op;
-          c.node.style.display = op > 0 ? "" : "none";
+      // the hanging cut-outs: pendulums pushed by the same wind as the tower
+      const n = Math.max(1, Math.round(dt * 60));
+      const h = dt / n;
+      for (let i = 0; i < hangs.length; i++) {
+        const hg = hangs[i];
+        let op = hg.kind === "cloud" ? smoothstep(hg.th - 3, hg.th + 3, cloud) * E.cloudFade : hg.kind === "sun" ? E.sunVis : E.starVis;
+        op = Math.round(op * 50) / 50;
+        if (op !== hg.op) {
+          hg.op = op;
+          hg.node.style.opacity = op;
+          hg.node.style.display = op > 0 ? "" : "none";
         }
-        if (op > 0) c.node.style.transform = `translate(${c.x.toFixed(1)}px,${c.y.toFixed(0)}px)`;
+        const turb = noise.n2(s.t * 0.55, i * 5.3);
+        const target = -hg.gain * (0.03 * pNow + (0.012 + 0.02 * Math.abs(pNow)) * turb);
+        for (let k = 0; k < n; k++) {
+          hg.v += (-hg.k * (hg.a - target) - hg.c * hg.v) * h;
+          hg.a += hg.v * h;
+        }
+        if (jump) {
+          hg.a = target;
+          hg.v = 0;
+        }
+        if (op <= 0) continue;
+        const tf = `rotate(${hg.a.toFixed(4)}rad)`;
+        if (tf !== hg.tf) {
+          hg.tf = tf;
+          hg.node.style.transform = tf;
+        }
       }
       const fq = Math.round(E.fog * (wx.fog ? 1 : 0.45) * 40) / 40;
       if (fq !== shown.fogq) {
@@ -1291,13 +1373,6 @@ export default {
         styleIf("shTf", shadowEl, "transform", `skewX(${(Math.atan(lean) * 57.2958).toFixed(1)}deg)`);
       }
       styleIf("ctOp", contactEl, "opacity", (0.55 + 0.45 * s.daylight).toFixed(2));
-      const pq = Math.round(E.puddle * 40) / 40;
-      if (pq !== shown.pud) {
-        shown.pud = pq;
-        puddleEl.style.display = pq > 0.01 ? "" : "none";
-        puddleEl.style.opacity = pq.toFixed(3);
-        puddleEl.style.transform = `scale(${(0.55 + 0.45 * pq).toFixed(3)},${(0.4 + 0.6 * pq).toFixed(3)})`;
-      }
       const mq = Math.round(E.snow * 50) / 50;
       if (mq !== shown.mound) {
         shown.mound = mq;
@@ -1305,7 +1380,6 @@ export default {
         moundEl.style.transform = `scaleY(${mq})`;
       }
     }
-    puddleEl.style.transformOrigin = "50% 0";
 
     function drawFx(s, dt) {
       const wx = s.weather;
@@ -1336,6 +1410,30 @@ export default {
           }
         }
         ctx.stroke();
+      }
+
+      if (E.puddle > 0.02) {
+        // a puddle at the foot: the plank and the minute cubes mirrored, rippling
+        const pk = E.puddle;
+        const rx = 300 + 190 * pk;
+        const ry = 40 + 30 * pk;
+        const cy = GROUND + 8 + ry * 0.9;
+        ctx.save();
+        ctx.beginPath();
+        ctx.ellipse(497, cy, rx, ry, 0, 0, TAU);
+        ctx.ellipse(250, cy + 8, rx * 0.45, ry * 0.8, 0, 0, TAU);
+        ctx.ellipse(770, cy - 4, rx * 0.42, ry * 0.85, 0, 0, TAU);
+        ctx.clip();
+        ctx.globalAlpha = pk;
+        ctx.fillStyle = E.pudCol;
+        ctx.fillRect(0, GROUND, W, H - GROUND);
+        const amp = 0.8 + 2.6 * rainAmt;
+        for (let y = 0; y < REFH; y += 3) {
+          const off = amp * (1 + y * 0.03) * Math.sin(y * 0.23 - s.t * 2.1) + amp * 0.6 * Math.sin(y * 0.071 + s.t * 1.3);
+          ctx.drawImage(refl, 0, y, W, 3, off, GROUND + y, W, 3);
+        }
+        ctx.globalAlpha = 1;
+        ctx.restore();
       }
 
       if (E.wet > 0.05 && rainAmt > 0) {
@@ -1404,8 +1502,8 @@ export default {
           if (due !== ringNext) {
             ringNext = due;
             const k = (due % NRING) * 3;
-            ring[k] = 150 + ((due * 7919) % 760);
-            ring[k + 1] = GROUND + 22 + ((due * 104729) % 70);
+            ring[k] = 220 + ((due * 7919) % 560);
+            ring[k + 1] = GROUND + 30 + ((due * 104729) % 56);
             ring[k + 2] = 0;
           }
           ctx.lineWidth = 2;
@@ -1481,6 +1579,11 @@ export default {
         E.heat = smoothstep(84, 97, wx.temp) * s.daylight;
         E.frost = smoothstep(34, 24, wx.temp) * (1 - E.wet) * (1 - E.snow * 0.5);
 
+        const fallK = fall === "snow" ? "snow" : fall ? "rain" : "";
+        if (shown.fallK !== fallK) {
+          shown.fallK = fallK;
+          wrap.dataset.fall = fallK;
+        }
         texts(s, jump);
         palette(s);
 

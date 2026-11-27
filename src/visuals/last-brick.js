@@ -44,24 +44,26 @@ const COLS = 18;
 const ROWS = 40;
 const NB = COLS * ROWS;
 const BW = 58; // brick pitch
-const BH = 26;
+const BH = 23;
 const WX = 18; // wall and playfield, left edge
 const WR = WX + COLS * BW; // right edge
-const WY = 172; // wall top
-const WB = WY + ROWS * BH; // wall bottom
-const CEIL = 120;
-const FLOOR = 1524;
-const PAD_Y = 1480;
-const PAD_W = 148;
-const PAD_H = 14;
+const WY = 156; // wall top
+const WB = WY + ROWS * BH; // wall bottom (1076)
+const CEIL = 116;
+const FLOOR = 1352; // the horizon: sky and play above, the ground and its readouts below
+const PAD_Y = 1310;
+const PAD_W = 150;
+const PAD_H = 16;
 const BR = 9; // ball radius
 const QUARTER = 15 * 60 * 1000;
+const U0 = 0.5; // how much of its colour an unlit brick keeps at night
 const ROW_MS = 36 * 60 * 1000; // 24 hours over 40 courses
 const TRAIL = 48;
 
-const STEEL_DAY = "#f3ebd9";
-const STEEL_NIGHT = "#9c9583";
+const STEEL_DAY = "#f5eedd";
+const STEEL_NIGHT = "#b9bcc2"; // moonlit steel
 const NIGHT_GROUND = "#05060a";
+const NIGHT_SKY = "#0a0d1a";
 
 // ----- the numerals: 7 x 15 bricks, strokes two bricks wide, bars three tall ---
 const SEG = { a: [0, 0, 7, 3], g: [0, 6, 7, 3], d: [0, 12, 7, 3], f: [0, 0, 2, 9], b: [5, 0, 2, 9], e: [0, 6, 2, 9], c: [5, 6, 2, 9] };
@@ -113,29 +115,36 @@ function modelSky(ms, cloud, bearing) {
   return mix(mix(M_CLEAR(a), M_GLOW(a), near * low * 0.8), M_CLOUD(a), Math.pow(clamp(cloud), 1.2));
 }
 
+// How much of the reachable sky brick should still stand, p of the way through the quarter hour.
+const keepAt = (p) => 1 - 0.8 * Math.pow(clamp(p), 0.72);
+
 const TRAIL_RAMP = ramp([[0, "#9fd4ff"], [0.42, "#f3ebd9"], [0.72, "#ffc56e"], [1, "#ff5f2e"]]);
 
 const CSS = `
 .lb { position: absolute; inset: 0; overflow: hidden; background: ${NIGHT_GROUND}; color: var(--ink, ${STEEL_DAY}); font-family: "Silkscreen", "Courier New", monospace; text-transform: uppercase; }
 .lb canvas { z-index: 1; }
-.lb-date { position: absolute; z-index: 6; left: 76px; top: 50px; font-size: 56px; line-height: 1; white-space: nowrap; }
-.lb-rule { position: absolute; z-index: 6; left: ${WX}px; width: ${WR - WX}px; height: 2px; background: currentColor; opacity: 0.3; }
-.lb-bed { position: absolute; z-index: 0; left: ${WX}px; top: ${WY}px; width: ${COLS * BW}px; height: ${ROWS * BH}px; opacity: 0.075;
-  background-image: linear-gradient(to bottom, currentColor 2px, transparent 2px), linear-gradient(to right, currentColor 2px, transparent 2px);
+.lb-sky { position: absolute; z-index: 0; left: 0; top: 0; width: ${W}px; height: ${FLOOR}px; }
+.lb-ground { position: absolute; z-index: 0; left: 0; top: ${FLOOR}px; width: ${W}px; height: ${H - FLOOR}px; }
+.lb-date { position: absolute; z-index: 6; left: 76px; top: 46px; font-size: 50px; line-height: 1; white-space: nowrap; letter-spacing: 0.04em; }
+.lb-rule { position: absolute; z-index: 6; left: ${WX}px; width: ${WR - WX}px; height: 2px; background: currentColor; opacity: 0.22; }
+.lb-horizon { position: absolute; z-index: 6; left: 0; width: ${W}px; top: ${FLOOR}px; height: 4px; background: currentColor; opacity: 0.5; }
+.lb-bed { position: absolute; z-index: 0; left: ${WX}px; top: ${WY}px; width: ${COLS * BW}px; height: ${ROWS * BH}px; opacity: 0.16;
+  background-image: linear-gradient(to bottom, rgba(0,0,0,0.9) 3px, transparent 3px), linear-gradient(to right, rgba(0,0,0,0.9) 2px, transparent 2px);
   background-size: ${BW}px ${BH}px; background-position: -1px -1px; }
 .lb-fog { position: absolute; z-index: 3; left: 0; top: 0; width: ${W}px; height: ${WB + 60}px; overflow: hidden; opacity: 0; display: none;
-  background: linear-gradient(to bottom, transparent 0%, var(--fog) 16%, var(--fog) 34%, transparent 82%); }
-.lb-fog i { position: absolute; display: block; background: radial-gradient(closest-side, var(--fog) 0%, var(--fog) 30%, transparent 100%); will-change: transform; }
-.lb-floor { position: absolute; z-index: 6; left: 76px; top: ${FLOOR + 26}px; width: 928px; font-family: "Jersey 10", "Silkscreen", monospace; text-transform: none; }
-.lb-a { position: relative; height: 90px; }
-.lb-temp { position: absolute; left: 0; bottom: 0; font-size: 140px; line-height: 0.64; white-space: nowrap; }
-.lb-cond { position: absolute; left: ${4 * BW}px; bottom: 0; font-size: 62px; line-height: 0.64; white-space: nowrap; }
-.lb-b { position: relative; height: 56px; margin-top: 30px; }
+  background: linear-gradient(to bottom, var(--fog) 0%, var(--fog) 30%, transparent 92%); }
+.lb-fog i { position: absolute; display: block; background: radial-gradient(closest-side, var(--fog) 0%, var(--fog) 35%, transparent 100%); will-change: transform; }
+.lb-floor { position: absolute; z-index: 6; left: 76px; top: ${FLOOR + 40}px; width: 928px; font-family: "Jersey 10", "Silkscreen", monospace; text-transform: none; }
+.lb-a { display: flex; align-items: flex-end; height: 136px; }
+.lb-temp { font-size: 236px; line-height: 136px; height: 136px; white-space: nowrap; letter-spacing: 0.01em; }
+.lb-cw { margin-left: 44px; padding-bottom: 6px; min-width: 0; }
+.lb-cond { font-size: 88px; line-height: 64px; white-space: nowrap; }
+.lb-b { position: relative; height: 104px; margin-top: 44px; }
 .lb-cell { position: absolute; top: 0; white-space: nowrap; }
-.lb-k { font-family: "Silkscreen", monospace; text-transform: uppercase; font-size: 24px; line-height: 16px; color: var(--dim, #9a9484); }
-.lb-v { font-size: 46px; line-height: 30px; margin-top: 10px; }
-.lb-fact { margin-top: 28px; }
-.lb-fv { font-size: 46px; line-height: 40px; margin-top: 6px; }
+.lb-k { font-family: "Silkscreen", monospace; text-transform: uppercase; font-size: 28px; line-height: 22px; letter-spacing: 0.06em; color: var(--dim, #9a9484); }
+.lb-v { font-size: 80px; line-height: 64px; margin-top: 14px; }
+.lb-fact { margin-top: 30px; }
+.lb-fv { font-size: 60px; line-height: 50px; margin-top: 12px; }
 `;
 
 export default {
@@ -150,6 +159,21 @@ export default {
 
     // Layers, back to front: weather seen through the wall, the glazed wall,
     // fog, the steel numerals, then everything that moves.
+    const skyEl = el("div", { class: "lb-sky" });
+    const groundEl = el("div", { class: "lb-ground" });
+    wrap.append(skyEl, groundEl);
+    // stars, behind the wall: seen only through what the ball has carved away
+    const STN = 240;
+    const stX = new Float32Array(STN), stY = new Float32Array(STN), stZ = new Float32Array(STN);
+    {
+      const sr = rng(seed + 5);
+      for (let i = 0; i < STN; i++) {
+        stX[i] = sr.range(0, W);
+        stY[i] = sr.range(CEIL, FLOOR - 40);
+        stZ[i] = sr() < 0.15 ? 3 : 2;
+      }
+    }
+    let starA = 0;
     wrap.append(el("div", { class: "lb-bed" }));
     const air = canvas2d(wrap, { adaptive: true });
     const wall = canvas2d(wrap, { maxScale: 2 });
@@ -171,26 +195,27 @@ export default {
     const dateEl = el("div", { class: "lb-date" });
     const tempEl = el("div", { class: "lb-temp" });
     const condEl = el("div", { class: "lb-cond" });
-    const cell = (left, label) => {
+    const cell = (col, label) => {
       const k = el("div", { class: "lb-k", text: label });
       const v = el("div", { class: "lb-v" });
-      return { k, v, node: el("div", { class: "lb-cell", style: { left: `${left}px` } }, k, v) };
+      // cells sit on the brick columns of the wall above
+      return { k, v, node: el("div", { class: "lb-cell", style: { left: `${(col - 1) * BW}px` } }, k, v) };
     };
-    const sunC = cell(0, "");
-    const moonC = cell(4 * BW, "Moon");
-    const airC = cell(9 * BW, "Air");
-    const uvC = cell(13 * BW, "UV");
+    const sunC = cell(1, "");
+    const moonC = cell(6, "Moon");
+    const airC = cell(14, "Air");
+    const uvC = cell(16, "UV");
     const factK = el("div", { class: "lb-k" });
     const factV = el("div", { class: "lb-fv" });
     const factEl = el("div", { class: "lb-fact" }, factK, factV);
     const floorEl = el("div", { class: "lb-floor" },
-      el("div", { class: "lb-a" }, tempEl, condEl),
+      el("div", { class: "lb-a" }, tempEl, el("div", { class: "lb-cw" }, condEl)),
       el("div", { class: "lb-b" }, sunC.node, moonC.node, airC.node, uvC.node),
       factEl);
     wrap.append(
       dateEl,
       el("div", { class: "lb-rule", style: { top: `${CEIL - 2}px` } }),
-      el("div", { class: "lb-rule", style: { top: `${FLOOR}px` } }),
+      el("div", { class: "lb-horizon" }),
       floorEl,
     );
     grain(wrap, { opacity: 0.05 });
@@ -693,7 +718,7 @@ export default {
         let left = 0;
         for (let i = 0; i < NB; i++) if (reach[i] && kind[i] === 1) left++;
         const frac = left / reachTotal;
-        const target = 1 - 0.8 * Math.pow(clamp(p), 0.85);
+        const target = keepAt(p);
         ai.lazy = frac < target - 0.06;
         relayCool -= 1;
         if (frac < target - 0.015 && relayCool <= 0 && qn === 0) {
@@ -731,6 +756,45 @@ export default {
       env.fog = Math.max(w.fog ? 1 : 0, 0.7 * smoothstep(1, 0.1, w.visibility));
     }
 
+    // Carve the wall the way a ball would have: a cavern eaten in from the
+    // open air below (and, once it has tunnelled through, from the gap above
+    // the top course), along a seeded, uneven grain. Leaves `goal` of the
+    // reachable sky brick standing.
+    const pcCost = new Float32Array(NB);
+    const pcDone = new Uint8Array(NB);
+    function preCarve(goal, q) {
+      let n = Math.round(reachTotal * (1 - goal));
+      pcCost.fill(1e9);
+      pcDone.fill(0);
+      const wgt = (i) => 0.25 + 2.2 * hash(i, seed + q * 13) ** 2;
+      for (let c = 0; c < COLS; c++) {
+        const i = (ROWS - 1) * COLS + c;
+        if (reach[i]) pcCost[i] = wgt(i);
+      }
+      let top = false;
+      while (n > 0) {
+        let best = -1;
+        let bc = 1e8;
+        for (let i = 0; i < NB; i++) if (!pcDone[i] && pcCost[i] < bc) { bc = pcCost[i]; best = i; }
+        if (best < 0) break;
+        pcDone[best] = 1;
+        if (kind[best] === 1) { kind[best] = 0; n--; }
+        const c = best % COLS;
+        const r = (best / COLS) | 0;
+        const relax = (j) => {
+          if (!pcDone[j] && reach[j] && !steel[j]) pcCost[j] = Math.min(pcCost[j], bc + wgt(j));
+        };
+        if (c > 0) relax(best - 1);
+        if (c < COLS - 1) relax(best + 1);
+        if (r > 0) relax(best - COLS);
+        else if (!top) {
+          top = true;
+          for (let k = 0; k < COLS; k++) relax(k);
+        }
+        if (r < ROWS - 1) relax(best + COLS);
+      }
+    }
+
     // Lay the whole wall for this instant and play the quarter hour so far.
     function rebuild(s) {
       const c = s.clock;
@@ -761,12 +825,21 @@ export default {
       else balls[1].state = 0;
       const elapsed = (((s.ms % QUARTER) + QUARTER) % QUARTER) / 1000;
       const m0 = Math.floor(c.m / 15) * 15;
-      const h = 1 / 40;
-      const steps = Math.round(elapsed / h);
-      let minute = 0;
+      // Most of the quarter hour so far is carved analytically (quick); only
+      // the last 45 seconds are actually played, so the ball's own marks,
+      // the paddle and the shards are all where they would be.
+      const pre = Math.max(0, elapsed - 45);
       instant = true;
+      if (pre > 0) {
+        preCarve(keepAt(pre / 900), q);
+        relayCells(SLOT_B, MIN_ROW, 7, 15, 0, 0);
+        if ((m0 + Math.floor(pre / 60)) % 10 === 0) relayCells(SLOT_A, MIN_ROW, 7, 15, 0, 0);
+      }
+      const h = 1 / 30;
+      const steps = Math.round((elapsed - pre) / h);
+      let minute = Math.floor(pre / 60);
       for (let n = 0; n < steps; n++) {
-        const tau = n * h;
+        const tau = pre + n * h;
         const km = Math.floor(tau / 60);
         if (km !== minute) {
           minute = km;
@@ -806,7 +879,7 @@ export default {
     const lab4 = [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]];
     const DIRS = ["west", "northWest", "northEast", "east"];
     const Y_MAX = (luminance(STEEL_DAY) + 0.05) / 3.3 - 0.05; // keep the numerals 3.3:1 clear of the brightest glaze
-    let unlit = 1; // 0.42 at night .. 1 by day: how much light is on the wall
+    let unlit = 1; // U0 at night .. 1 by day: how much light is on the wall
     let steelDim = STEEL_DAY;
     let frost = 0;
     let wet = 0;
@@ -856,7 +929,7 @@ export default {
             hex = oklch(L, C, hue);
           }
           colLit[i] = hex;
-          colDim[i] = unlit > 0.985 ? hex : oklch(L * unlit, C * (0.5 + 0.5 * unlit), hue);
+          colDim[i] = unlit > 0.985 ? hex : oklch(L * unlit, C * (0.72 + 0.28 * unlit), hue);
         }
       }
     }
@@ -949,7 +1022,7 @@ export default {
         }
         lit.fillRect(bx + 1 - WX, y + 1 - WY, BW - 2, BH - 2);
       }
-      const k = 0.3 + 0.7 * ((unlit - 0.42) / 0.58);
+      const k = 0.3 + 0.7 * ((unlit - U0) / (1 - U0));
       skyDetail(wc, WX, WY, r, c0, c1, k);
       steelDetail(sc, WX, WY, r, c0, c1, k);
       skyDetail(lit, 0, 0, r, c0, c1, 1);
@@ -1039,7 +1112,7 @@ export default {
 
       // ----- light and colour -----
       const dl = s.daylight;
-      const u = Math.round((0.42 + 0.58 * smoothstep(0.06, 0.7, dl)) * 60) / 60;
+      const u = Math.round((U0 + (1 - U0) * smoothstep(0.06, 0.7, dl)) * 60) / 60;
       const fr = Math.round(smoothstep(35, 18, s.weather.temp) * 4) / 4;
       const wt = Math.round(env.slick * 4) / 4;
       const day = s.sky.day || [];
@@ -1049,19 +1122,28 @@ export default {
         unlit = u;
         frost = fr;
         wet = wt;
-        const k = (u - 0.42) / 0.58;
+        const k = (u - U0) / (1 - U0);
         steelDim = mix(STEEL_NIGHT, STEEL_DAY, k);
         ink = steelDim;
-        ground = mix(NIGHT_GROUND, adjust(s.sky.mean, { l: 0.115, c: (v) => Math.min(v, 0.035) }), smoothstep(0.05, 0.8, dl));
-        snowCol = mix("#8f97a3", "#ffffff", k);
-        rainCol = rgba(mix("#97a6ba", "#dfe9f2", k), 0.45 + 0.2 * k);
+        // The air behind the wall is the sky as it is now, held deep so the
+        // ivory always reads on it: cobalt at noon, slate under cloud, navy at
+        // night with the city's sodium glow under a low ceiling of cloud.
+        const dk = Math.round(smoothstep(0.03, 0.55, dl) * 40) / 40;
+        const cloud = clamp(s.weather.cloud / 100);
+        const top = mix(NIGHT_SKY, adjust(s.sky.mean, { l: 0.3, c: (v) => Math.min(v * 0.9, 0.075) }), dk);
+        const bot = mix(mix("#121a30", "#2b1c18", cloud * 0.85), adjust(s.sky.mean, { l: 0.43, c: (v) => Math.min(v * 1.1, 0.09) }), dk);
+        ground = mix(NIGHT_GROUND, adjust(s.sky.mean, { l: 0.18, c: (v) => Math.min(v, 0.03) }), dk);
+        skyEl.style.background = `linear-gradient(to bottom, ${top} 0%, ${mix(top, bot, 0.45)} 50%, ${bot} 100%)`;
+        groundEl.style.background = `linear-gradient(to bottom, ${mix(ground, bot, 0.25)} 0px, ${ground} 160px, ${ground} 100%)`;
+        starA = (1 - smoothstep(0.02, 0.3, dl)) * Math.pow(1 - cloud, 1.5) * (1 - env.fog);
+        snowCol = mix("#9aa3b2", "#ffffff", k);
+        rainCol = rgba(mix("#8fa2bd", "#e4eef7", k), 0.5 + 0.2 * k);
         trailCol = TRAIL_RAMP(clamp((s.weather.temp - 10) / 90));
         glaze(s);
         rowDirty.fill(1);
-        wrap.style.background = ground;
         wrap.style.setProperty("--ink", ink);
-        wrap.style.setProperty("--dim", mix(ink, ground, 0.3));
-        wrap.style.setProperty("--fog", adjust(s.sky.mean, { l: lerp(0.17, 0.5, smoothstep(0.05, 0.8, dl)), c: (v) => v * 0.5 }));
+        wrap.style.setProperty("--dim", mix(ink, ground, 0.28));
+        wrap.style.setProperty("--fog", adjust(s.sky.mean, { l: lerp(0.24, 0.56, dk), c: (v) => v * 0.4 }));
       }
 
       // ----- repaint what changed: single bricks at once, whole courses a few per frame -----
@@ -1082,6 +1164,17 @@ export default {
       // ----- weather, behind the wall -----
       const ac = air.ctx;
       air.clear();
+      if (starA > 0.02) {
+        // two magnitudes, one fill each
+        ac.fillStyle = "#dfe6ff";
+        for (let m = 0; m < 2; m++) {
+          ac.globalAlpha = starA * (m ? 0.95 : 0.45);
+          ac.beginPath();
+          for (let i = m; i < STN; i += 2) ac.rect(stX[i], stY[i], stZ[i], stZ[i]);
+          ac.fill();
+        }
+        ac.globalAlpha = 1;
+      }
       if (env.rain > 0.01) {
         const n = Math.min(RN, Math.round(70 + 300 * env.rain));
         const slant = env.wind * 9;
@@ -1182,7 +1275,7 @@ export default {
       // ----- everything that moves -----
       const fc = fx.ctx;
       fx.clear();
-      const dark = 1 - (unlit - 0.42) / 0.58; // 1 at night
+      const dark = 1 - (unlit - U0) / (1 - U0); // 1 at night
       if (dark > 0.03) {
         // the ball lights the glaze around it
         for (const b of balls) {
@@ -1357,7 +1450,9 @@ export default {
       }
     }
 
+    // Finished from the first frame: lay the wall and play the quarter hour so far now.
     readEnv(state);
+    frame(state);
     return { frame };
   },
 };

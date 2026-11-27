@@ -322,7 +322,10 @@ export default {
           const nightPaper = mix(NIGHT_PAPER(tt), mix("#000000", s.sky.mean, 0.34), twilight * 0.7);
           const paper = mix(nightPaper, dayPaper, day);
           const dark = contrast(paper, NIGHT_INK(tt)) > contrast(paper, INK(tt));
-          let ink = dark ? NIGHT_INK(tt) : INK(tt);
+          // At night the warm, heavy instances cover a lot of the sheet: their ink
+          // is held lower in deep night so the room is not lit by the figures.
+          const dim = (1 - day) * (0.1 + 0.3 * smoothstep(0.4, 0.85, tt));
+          let ink = dark ? mix(NIGHT_INK(tt), paper, dim) : INK(tt);
           if (w.fog) ink = mix(ink, paper, 0.2);
           wrap.style.background = paper;
           wrap.style.color = ink;

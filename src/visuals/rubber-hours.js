@@ -30,10 +30,10 @@ import {
 // ---------------------------------------------------------------------------
 const TUBE = 130; // tube thickness
 const SK_W = 318; // extent of a numeral's centreline
-const SK_H = 480;
+const SK_H = 456;
 const LEFT = 82;
-const ROW_H = 70; // top of the hours row (outer edge of the tubes)
-const ROW_M = 706; // top of the minutes row
+const ROW_H = 60; // top of the hours row (outer edge of the tubes)
+const ROW_M = 668; // top of the minutes row
 const CELL = SK_W + TUBE;
 const CELL_GAP = 20;
 const NN = 14; // nodes per numeral
@@ -139,9 +139,9 @@ const MATERIAL = [
   [50, 13, 0.34, 0],
   [62, 10, 0.22, 0],
   [72, 8.5, 0.19, 4],
-  [85, 6, 0.27, 16],
-  [95, 4.2, 0.38, 36],
-  [105, 3.4, 0.45, 46],
+  [85, 6, 0.27, 20],
+  [95, 4.2, 0.4, 46],
+  [105, 3.4, 0.48, 60],
 ];
 // One toy colour per temperature band: [upper limit F, lightness, chroma, hue].
 const BANDS = [
@@ -183,28 +183,36 @@ export default {
         font-family: "Patrick Hand", cursive; text-align: center; padding: 50px 16px 18px; }
       .rh .hole { position: absolute; left: 50%; top: 26px; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%;
         background: var(--hole); box-shadow: 0 0 0 5px var(--stk); }
-      .rh .lab { font-size: 32px; line-height: 1; color: var(--ink2); }
-      .rh .stk { width: 106px; height: 106px; border-radius: 50%; background: var(--stk); color: var(--stkink); flex: none;
-        display: flex; flex-direction: column; align-items: center; justify-content: center; }
-      .rh .stk b { font-family: "DM Sans", sans-serif; font-weight: 900; font-size: 24px; line-height: 1; letter-spacing: 0.06em; margin-top: 4px; }
-      .rh .stk i { font-style: normal; font-size: 54px; line-height: 0.92; }
-      .rh .t-temp .card { width: 226px; left: -113px; }
-      .rh .t-temp .temp { font-size: 136px; line-height: 0.84; margin: 0 -8px; white-space: nowrap; }
-      .rh .t-temp .cond { font-size: 46px; line-height: 0.98; margin-top: 4px; text-wrap: balance; }
-      .rh .t-temp .rule { margin: 14px -2px 14px; border-top: 3px dashed var(--ink2); opacity: 0.55; }
-      .rh .t-temp .stk { margin: 0 auto; transform: rotate(-7deg); }
-      .rh .t-sun .card { width: 338px; left: -169px; }
-      .rh .t-sun .paper { display: flex; align-items: center; justify-content: space-between; text-align: left; padding: 46px 16px 16px 22px; }
-      .rh .t-sun .val { font-size: 70px; line-height: 0.95; white-space: nowrap; }
-      .rh .t-sun .stk { transform: rotate(8deg); margin-top: -4px; }
-      .rh .t-moon .card { width: 212px; left: -106px; }
-      .rh .t-moon .paper { padding: 46px 12px 18px; }
-      .rh .t-moon .val { font-size: 48px; line-height: 0.96; margin-top: 4px; }
-      .rh .base { position: absolute; left: ${LEFT}px; right: ${LEFT}px; bottom: 66px; z-index: 3; font-family: "DM Sans", sans-serif; color: var(--base); }
-      .rh .date { font-weight: 900; font-size: 58px; line-height: 1.04; letter-spacing: -0.012em; white-space: nowrap;
-        text-shadow: 0 3px 0 var(--emb), 0 -1px 0 rgba(255,255,255,.12); }
-      .rh .flab { margin-top: 18px; font-weight: 800; font-size: 25px; line-height: 1.2; letter-spacing: 0.1em; color: var(--accent); }
-      .rh .fval { margin-top: 5px; font-weight: 500; font-size: 37px; line-height: 1.2; text-wrap: pretty; }
+      .rh .lab { font-size: 36px; line-height: 1; color: var(--ink2); }
+      .rh .stk { width: 136px; height: 136px; border-radius: 50%; background: var(--stk); color: var(--stkink); flex: none;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        box-shadow: inset 0 0 0 4px var(--stkrim); }
+      .rh .stk b { font-family: "DM Sans", sans-serif; font-weight: 900; font-size: 26px; line-height: 1; letter-spacing: 0.08em; margin-top: 6px; }
+      .rh .stk i { font-style: normal; font-size: 66px; line-height: 0.9; white-space: nowrap; }
+      .rh .t-temp .paper { padding: 54px 14px 26px; }
+      .rh .t-temp .temp { font-size: 216px; line-height: 0.8; margin: 4px -10px 0 0; white-space: nowrap; }
+      .rh .t-temp .cond { font-size: 58px; line-height: 0.96; margin-top: 10px; text-wrap: balance; }
+      .rh .t-sun .card { width: 384px; left: -192px; }
+      .rh .t-moon .card { width: 360px; left: -180px; }
+      .rh .t-sun .paper, .rh .t-moon .paper { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+        text-align: left; padding: 54px 18px 20px 26px; }
+      .rh .col { flex: 1; min-width: 0; }
+      .rh .t-sun .val { font-size: 86px; line-height: 0.92; white-space: nowrap; margin-top: 2px; }
+      .rh .t-sun .stk { transform: rotate(8deg); }
+      .rh .t-moon .val { font-size: 56px; line-height: 0.96; margin-top: 6px; }
+      .rh .t-moon .stk { transform: rotate(-9deg); }
+      .rh .law { position: absolute; left: 64px; right: 64px; bottom: 64px; z-index: 2; box-sizing: border-box;
+        background: var(--paper); color: var(--ink); border-radius: 4px 4px 10px 10px; padding: 30px 36px 30px;
+        font-family: "DM Sans", sans-serif; box-shadow: var(--shx) var(--shy) 0 rgba(0,0,0,var(--tsh)); }
+      .rh .law::before { content: ""; position: absolute; inset: 11px; border: 3px dashed var(--ink2); border-radius: 3px; opacity: 0.38; }
+      .rh .law::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 9px; background: var(--fold); border-radius: 4px 4px 0 0; }
+      .rh .lrow { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+      .rh .date { font-weight: 900; font-size: 62px; line-height: 1.02; letter-spacing: -0.015em; white-space: nowrap; }
+      .rh .made { flex: none; font-weight: 800; font-size: 24px; line-height: 1.04; letter-spacing: 0.14em; text-align: center;
+        color: var(--ink2); border: 3px solid var(--ink2); border-radius: 8px; padding: 7px 4px 6px 9px; transform: rotate(-6deg); }
+      .rh .fact { margin-top: 18px; padding-top: 16px; border-top: 3px solid var(--rule); }
+      .rh .flab { font-weight: 800; font-size: 25px; line-height: 1.2; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink2); }
+      .rh .fval { margin-top: 6px; font-weight: 700; font-size: 42px; line-height: 1.16; letter-spacing: -0.01em; text-wrap: pretty; }
     `);
 
     const wrap = el("div", { class: "rh" });
@@ -225,20 +233,22 @@ export default {
       wrap.append(node);
       return { node, card, len, w: 226, h: 300, th: 0, om: 0, ph: 0, pom: 0, x: 0, y: 0, tx: 0, ty: 0, pvx: 0, lim: 0.2, sx: "", sc: "" };
     };
-    const tagTemp = makeTag("t-temp", 38,
-      (T.temp = el("div", { class: "temp" })), (T.cond = el("div", { class: "cond" })),
-      el("div", { class: "rule" }), sticker("aqi", "AQI"));
-    const tagSun = makeTag("t-sun", 58,
-      el("div", {}, (T.sunLabel = el("div", { class: "lab" })), (T.sunValue = el("div", { class: "val" }))),
+    const tagTemp = makeTag("t-temp", 34,
+      (T.temp = el("div", { class: "temp" })), (T.cond = el("div", { class: "cond" })));
+    const tagSun = makeTag("t-sun", 46,
+      el("div", { class: "col" }, (T.sunLabel = el("div", { class: "lab" })), (T.sunValue = el("div", { class: "val" }))),
       sticker("uv", "UV"));
-    const tagMoon = makeTag("t-moon", 40, el("div", { class: "lab", text: "Moon" }), (T.moon = el("div", { class: "val" })));
-    tagTemp.w = 226; tagSun.w = 338; tagMoon.w = 212;
+    const tagMoon = makeTag("t-moon", 34,
+      el("div", { class: "col" }, el("div", { class: "lab", text: "Moon" }), (T.moon = el("div", { class: "val" }))),
+      sticker("aqi", "AQI"));
+    tagTemp.w = 280; tagSun.w = 384; tagMoon.w = 360;
     const tags = [tagTemp, tagSun, tagMoon];
 
-    const base = el("div", { class: "base" },
-      (T.date = el("div", { class: "date" })),
-      (T.fact = el("div", {}, (T.factLabel = el("div", { class: "flab" })), (T.factValue = el("div", { class: "fval" })))));
-    wrap.append(base);
+    // the sewn-in label at the toy's foot: when it was made, and today's fact
+    const law = el("div", { class: "law" },
+      el("div", { class: "lrow" }, (T.date = el("div", { class: "date" })), el("div", { class: "made" }, "MADE", el("br"), "FRESH")),
+      (T.fact = el("div", { class: "fact" }, (T.factLabel = el("div", { class: "flab" })), (T.factValue = el("div", { class: "fval" })))));
+    wrap.append(law);
     root.append(wrap);
     grain(wrap, { opacity: 0.05 });
 
@@ -308,9 +318,15 @@ export default {
       const mid = x0 + TUBE / 2 + (off + def.w / 2) * SK_W * xs;
       let best = -1e9;
       const cand = [];
+      // a tag under the minutes is tied near the bottom, as far toward its own side as the
+      // numeral allows, so the two tags hang clear of each other
+      let maxY = 0;
+      for (const st of def.strokes) for (let j = st[0] * SUB; j <= st[1] * SUB; j++) maxY = Math.max(maxY, tmpY[j]);
+      const target = sl.index === 2 ? 266 : sl.index === 3 ? 820 : mid;
+      const pull = sl.row ? 0.45 : 0.14;
       for (const st of def.strokes) {
         for (let j = st[0] * SUB; j <= st[1] * SUB; j++) {
-          const score = tmpY[j] - 0.14 * Math.abs(tmpX[j] - mid);
+          const score = sl.row && tmpY[j] < maxY - 46 ? -1e8 : tmpY[j] - pull * Math.abs(tmpX[j] - target);
           if (score > best) { best = score; sl.low = j; }
           // icicles: under level runs of tube and under downward ends, where there is room below
           const a = Math.max(st[0] * SUB, j - 1);
@@ -347,7 +363,7 @@ export default {
     }
 
     // ----- AM / PM -----
-    const mini = { letters: [], x: 0, y: ROW_H, ux: 0, uy: 0, vx: 0, vy: 0, key: "", tieX: 0, tieY: 0, width: 0 };
+    const mini = { letters: [], tieL: 1, tieJ: 0, tieX0: 0, x: 0, y: ROW_H, ux: 0, uy: 0, vx: 0, vy: 0, key: "", tieX: 0, tieY: 0, width: 0 };
     const MP = 64;
     function buildMini(letter) {
       const def = MINIS[letter];
@@ -371,6 +387,32 @@ export default {
       mini.letters[0].ox = MINI / 2;
       mini.letters[1].ox = w0 + 12 + MINI / 2;
       mini.key = ampm;
+      // the temperature tag hangs from whichever foot leaves it the most room
+      const mid = (zoneL + 1016) / 2;
+      const feet = [[0, 0], [1, 0], [1, (MINIS.M.p.length - 1) * SUB]];
+      let best = 1e9;
+      for (const [li, j] of feet) {
+        const L = mini.letters[li];
+        const fx = mini.x + L.ox + L.bx[j];
+        if (Math.abs(fx - mid) < best) { best = Math.abs(fx - mid); mini.tieL = li; mini.tieJ = j; mini.tieX0 = fx; }
+      }
+      const w = Math.round(clamp(2 * Math.min(1012 - mini.tieX0, mini.tieX0 - zoneL + 12), 250, 360));
+      if (w !== tagTemp.w || shown.tw === undefined) {
+        tagTemp.w = w;
+        shown.tw = w;
+        tagTemp.card.style.width = `${w}px`;
+        tagTemp.card.style.left = `${-w / 2}px`;
+        fitTemp();
+      }
+    }
+    function fitTemp() {
+      if (shown.temp === undefined) return;
+      fitText(T.temp, tagTemp.w - 34, 216);
+      // the condition wraps by word; a long single word is set smaller (never under 44 px)
+      let fs = 58;
+      T.cond.style.fontSize = `${fs}px`;
+      while (fs > 44 && (T.cond.scrollWidth > T.cond.clientWidth + 1 || T.cond.offsetHeight > fs * 2.1)) { fs -= 2; T.cond.style.fontSize = `${fs}px`; }
+      tagTemp.h = tagTemp.card.offsetHeight || tagTemp.h;
     }
 
     let timeKey = "";
@@ -434,7 +476,7 @@ export default {
     // ----- per-frame values -----
     const P = { w2: 81, zeta: 0.2, kc: 60, sag: 0, soft: 1, frost: 0, heat: 0, wx: 1, wy: 0, wind: 0, gust: 0, rainy: 0, snowy: 0, fog: 0, direct: 0, night: 0 };
     const pal = {
-      shade: "#000", body: "#888", light: "#999", spec: "#fff", shadow: "rgba(0,0,0,.3)", shx: 12, shy: 18,
+      shade: "#000", rim: "#000", body: "#888", light: "#999", spec: "#fff", shadow: "rgba(0,0,0,.3)", shx: 12, shy: 18,
       ice: "#fff", iceHi: "#fff", iceSh: "#99b", rain: "rgba(255,255,255,.5)", snow: "#fff", frost: "#fff", string: "#eee",
       bloom: "rgba(255,255,255,.05)", dimple: "#000",
     };
@@ -502,7 +544,10 @@ export default {
       const toy = toOklch(toyColor(P.feels));
       const frost = P.frost;
       const bodyDay = oklch(lerp(toy.l, 0.9, frost * 0.22), toy.c * (1 - 0.25 * frost), toy.h);
-      const bodyNight = oklch(0.53, Math.min(toy.c, 0.105) * 0.85, toy.h);
+      // at night the toy keeps its colour (warm hues lean redder so they stay candy, not mud)
+      // and is lit from behind by the city across the river: a bright rim on the far edge
+      const hN = toy.h > 40 && toy.h < 120 ? toy.h - 16 * (1 - Math.abs(toy.h - 75) / 45) : toy.h;
+      const bodyNight = oklch(0.52, clamp(toy.c * 0.8, 0.075, 0.13), hN);
       const body = mix(bodyNight, bodyDay, day);
       const b = toOklch(body);
       const flat = Math.max(P.fog * 0.6, 1 - clamp(P.direct * 1.6 + 0.35));
@@ -510,8 +555,9 @@ export default {
       pal.shade = oklch(b.l * lerp(0.7, 0.8, flat) - 0.03 * (1 - day), b.c * 1.08, b.h + (b.h > 180 ? 10 : -8));
       pal.light = oklch(Math.min(0.96, b.l + lerp(0.065, 0.035, flat)), b.c * 0.86, b.h);
       const specDay = mix(body, "#ffffff", lerp(0.9, 0.42, Math.max(flat * 0.8, frost * 0.5)));
-      const specNight = oklch(lerp(0.74, 0.9, P.moon), toy.c * 0.55, toy.h);
+      const specNight = oklch(lerp(0.86, 0.94, P.moon), toy.c * 0.4, hN);
       pal.spec = mix(specNight, specDay, day);
+      pal.rim = mix(oklch(0.83, clamp(toy.c * 0.7, 0.06, 0.13), hN), pal.shade, smoothstep(0.1, 0.45, s.daylight));
 
       // the ground: the measured sky, muted, and deep enough for the tubes to stand off it
       const bl = luminance(body);
@@ -536,24 +582,18 @@ export default {
       pal.iceHi = mix(pal.spec, "#ffffff", 0.5 * day);
       pal.iceSh = mix(pal.shade, pal.ice, 0.45);
       pal.rain = rgba(mix(gTop, "#eaf4ff", lerp(0.5, 0.86, day)), lerp(0.5, 0.62, day));
-      pal.snow = mix(gTop, "#ffffff", lerp(0.62, 0.95, day));
+      pal.snow = mix(gTop, "#ffffff", lerp(0.5, 0.95, day));
       pal.frost = mix(body, "#ffffff", lerp(0.5, 0.9, day));
       pal.string = mix(gTop, "#f1e8d4", lerp(0.4, 0.92, day));
 
       // paper and ink flip together where the paper passes mid-grey
       const pk = smoothstep(0.22, 0.55, s.daylight);
-      legible(mix("#24211d", "#f3ead6", pk), "#eadfc9", "#1b2030", pair);
+      legible(mix("#302f2d", "#f3ead6", pk), "#efe5d0", "#1b2030", pair);
       const paper = pair.bg, ink = pair.ink;
       legible(mix(oklch(0.36, Math.min(toy.c, 0.09), toy.h), bodyDay, pk), "#f6eedd", "#1b2030", pair);
-      const css = `--paper:${paper};--ink:${ink};--ink2:${mix(ink, paper, 0.26)};--string:${pal.string};--stk:${pair.bg};--stkink:${pair.ink};` +
-        `--hole:${mix(gTop, gBot, 0.4)};--base:${mix("#c9c2b2", "#fbf5e6", day)};--accent:${ensure(mix(body, "#ffffff", 0.35), gTop)};` +
-        `--emb:${rgba(oklch(gl.l * 0.45, gl.c, gl.h), 0.9)};--tsh:${(0.1 + 0.3 * clamp(P.direct * 1.2)).toFixed(2)};--shx:${(pal.shx * 0.5).toFixed(1)}px;--shy:${(pal.shy * 0.5).toFixed(1)}px`;
+      const css = `--paper:${paper};--ink:${ink};--ink2:${mix(ink, paper, 0.24)};--string:${pal.string};--stk:${pair.bg};--stkink:${pair.ink};` +
+        `--stkrim:${rgba(pair.ink, 0.16)};--hole:${mix(gTop, gBot, 0.4)};--fold:${mix(paper, pair.bg, 0.85)};--rule:${mix(paper, ink, 0.16)};--tsh:${(0.1 + 0.3 * clamp(P.direct * 1.2)).toFixed(2)};--shx:${(pal.shx * 0.5).toFixed(1)}px;--shy:${(pal.shy * 0.5).toFixed(1)}px`;
       if (shown.css !== css) { shown.css = css; wrap.style.cssText = css; }
-    }
-    function ensure(fg, bg) {
-      let n = 0;
-      while (contrast(fg, bg) < 4.7 && n++ < 12) fg = adjust(fg, { l: (v) => Math.min(1, v + 0.03), c: (v) => v * 0.92 });
-      return fg;
     }
 
     // ----- physics -----
@@ -662,9 +702,9 @@ export default {
           L.py[j] = mini.y + MINI / 2 + mini.uy + x * sa + y * ca;
         }
       }
-      const M = mini.letters[1];
-      mini.tieX = M.px[0];
-      mini.tieY = M.py[0];
+      const L = mini.letters[mini.tieL];
+      mini.tieX = L.px[mini.tieJ];
+      mini.tieY = L.py[mini.tieJ];
     }
 
     // Tags: a string on a knot and a card on the string, both swinging.
@@ -691,10 +731,12 @@ export default {
         tg.om = (tg.om + acc * dt) / (1 + 0.55 * dt);
         tg.th += tg.om * dt;
         // keep the card inside the frame (and off the numerals) however hard it blows
-        const roomR = 1040 - (tx + tg.w / 2);
-        const roomL = k === 0 ? tx - tg.w / 2 - (zoneL - 26) : tx - tg.w / 2 - 44;
+        let roomR = 1036 - (tx + tg.w / 2);
+        let roomL = k === 0 ? tx - tg.w / 2 - (zoneL - 26) : tx - tg.w / 2 - 50;
+        if (k === 1) roomR = Math.min(roomR, tags[2].x - tags[2].w / 2 - (tx + tg.w / 2) - 6);
+        if (k === 2) roomL = Math.min(roomL, tx - tg.w / 2 - (tags[1].x + tags[1].w / 2) - 6);
         const full = tg.len + tg.h;
-        const hi = clamp(roomL / full, 0.03, 0.42), lo = -clamp(roomR / full, 0.03, 0.42);
+        const hi = clamp(roomL / full, 0.015, 0.42), lo = -clamp(roomR / full, 0.015, 0.42);
         if (tg.th > hi) { tg.th = hi + (tg.th - hi) * 0.5; if (tg.om > 0) tg.om *= 0.6; }
         if (tg.th < lo) { tg.th = lo + (tg.th - lo) * 0.5; if (tg.om < 0) tg.om *= 0.6; }
         // the card turns on its hole, a beat behind the string
@@ -738,9 +780,9 @@ export default {
         if (B - e < 5) e = B;
         const first = s0 === A, last = e === B;
         ctx.lineCap = "butt";
-        ctx.strokeStyle = ctx.fillStyle = pal.shade;
+        ctx.strokeStyle = ctx.fillStyle = pal.rim;
         ctx.lineWidth = w;
-        ctx.beginPath(); trace(px, py, s0, e, 0, 0); ctx.stroke();
+        ctx.beginPath(); trace(px, py, Math.max(A, s0 - 1), e, 0, 0); ctx.stroke();
         if (first || last) {
           ctx.beginPath();
           if (first) ctx.arc(px[A], py[A], w / 2, 0, TAU);
@@ -749,7 +791,7 @@ export default {
         }
         ctx.strokeStyle = ctx.fillStyle = pal.body;
         ctx.lineWidth = bw;
-        ctx.beginPath(); trace(px, py, Math.max(A, s0 - 1), e, LX * bo, LY * bo); ctx.stroke();
+        ctx.beginPath(); trace(px, py, Math.max(A, s0 - 2), e, LX * bo, LY * bo); ctx.stroke();
         if (first || last) {
           ctx.beginPath();
           if (first) ctx.arc(px[A] + LX * bo, py[A] + LY * bo, bw / 2, 0, TAU);
@@ -1122,27 +1164,33 @@ export default {
     function texts(s) {
       const x = s.text;
       let measure = false;
-      if (put("temp", x.temp)) { fitText(T.temp, 204); measure = true; }
-      if (put("cond", x.condition)) measure = true;
+      const a = put("temp", x.temp);
+      if (put("cond", x.condition) || a) fitTemp();
       put("aqi", x.aqi);
       put("uv", x.uv);
       put("sunLabel", x.sunLabel);
-      if (put("sunValue", x.sunValue)) fitText(T.sunValue, 196);
-      if (put("moon", x.moon)) measure = true;
-      put("date", x.date);
-      if (shown.date2 !== x.date) { shown.date2 = x.date; fitText(T.date, W - 2 * LEFT); }
+      if (put("sunValue", x.sunValue)) fitText(T.sunValue, 200, 86);
+      if (put("moon", x.moon)) {
+        measure = true;
+        let fs = 56;
+        T.moon.style.fontSize = `${fs}px`;
+        while (fs > 44 && T.moon.scrollWidth > T.moon.clientWidth + 1) { fs -= 2; T.moon.style.fontSize = `${fs}px`; }
+      }
+      if (put("date", x.date)) fitText(T.date, 952 - 72 - 150, 62);
       const has = x.factValue !== "";
       if (shown.has !== has) { shown.has = has; T.fact.style.display = has ? "" : "none"; }
       if (has) {
         put("factLabel", x.factLabel);
         if (put("factValue", x.factValue)) {
-          T.factValue.style.fontSize = "37px";
-          if (T.factValue.offsetHeight > 100) T.factValue.style.fontSize = "36px";
+          // at most two lines
+          let fs = 42;
+          T.factValue.style.fontSize = `${fs}px`;
+          while (fs > 36 && T.factValue.offsetHeight > fs * 1.16 * 2 + 2) { fs -= 2; T.factValue.style.fontSize = `${fs}px`; }
         }
       }
       if (measure || shown.measured === undefined) {
         shown.measured = 1;
-        for (const tg of tags) tg.h = tg.card.offsetHeight || tg.h;
+        for (let k = 1; k < 3; k++) tags[k].h = tags[k].card.offsetHeight || tags[k].h;
       }
     }
 
@@ -1153,7 +1201,7 @@ export default {
     timeKey = state.text.time + state.text.ampm;
     texts(state);
     palette(state);
-    for (let i = 0; i < 90; i++) simulate(state, 1 / 30, i < 2);
+    for (let i = 0; i < 60; i++) simulate(state, 1 / 20, i < 2);
     for (const tg of tags) tg.om *= 0.3;
 
     return {

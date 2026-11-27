@@ -58,7 +58,7 @@ export default {
   title: "Die-Cut",
   description: "The time punched through a sheet of heavy paper; behind it, a paper-cut waterfront backlit by the measured sky.",
   fonts: ["Stardos Stencil:wght@400;700", "Cormorant Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600"],
-  fps: 24,
+  fps: 20,
 
   mount(root, { seed }) {
     const r = rng(seed);
@@ -916,6 +916,7 @@ export default {
       const swayX = Math.sin((t * TAU) / 40);
       const swayY = Math.cos((t * TAU) / 53);
 
+      scene.clear();
       ctx.save();
       ctx.beginPath();
       for (let i = 0; i < nClip; i++) ctx.rect(clip[i * 4], clip[i * 4 + 1], clip[i * 4 + 2], clip[i * 4 + 3]);
@@ -1448,8 +1449,10 @@ export default {
           put("factLabel", T.factLabel, tx.factLabel);
           put("factValue", T.factValue, tx.factValue);
         }
-        { const __e = performance.now(); if (__e - __t0 > 50) console.log('SLOW frame', s.frame, 'pre', (__a-__t0).toFixed(0), 'scene', (__b-__a).toFixed(0), 'post', (__e-__b).toFixed(0)); }
+        { const __e = performance.now(); if (__e - __t0 > 8) console.log('SLOW frame', s.frame, 'pre', (__a-__t0).toFixed(0), 'scene', (__b-__a).toFixed(0), 'post', (__e-__b).toFixed(0)); }
+        const __f = performance.now();
         if (a || b || c || d || e) fitText(T.cond, W - 2 * MX - T.temp.offsetWidth - T.ed.offsetWidth - 22 - 36);
+        { const __e = performance.now(); if (__e - __t0 > 8) console.warn('SLOWX', s.frame, (__f-__t0).toFixed(0), (__e-__f).toFixed(0)); }
       },
     };
   },

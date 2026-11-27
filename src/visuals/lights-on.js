@@ -283,7 +283,9 @@ export default {
     const vig = new Uint8Array(NWIN); // 1 cat, 2 someone walking past, 3 television
     const isOpen = new Uint8Array(NWIN);
     const rank = new Float32Array(NWIN * 3);
+    const blindK = new Uint8Array(NWIN); // how far down each daytime blind is drawn (0..3)
     for (let i = 0; i < NWIN; i++) {
+      blindK[i] = r.int(0, 3);
       lampAt[i] = r.range(0.17, 0.5);
       roomOf[i] = r.int(0, 15);
       isOpen[i] = r.chance(0.17) ? 1 : 0;
@@ -537,6 +539,33 @@ export default {
       x.beginPath(); x.moveTo(gloss.width * 0.55, 0); x.lineTo(gloss.width * 0.8, 0); x.lineTo(gloss.width * 0.3, gloss.height); x.lineTo(gloss.width * 0.05, gloss.height); x.fill();
     }
 
+    // the daytime blind's cloth: shade under the roller, light at the hem
+    const blindShade = offscreen((WW - 2 * FR) * 2, (WH - 2 * FR) * 2);
+    {
+      const x = blindShade.getContext("2d"), bw = blindShade.width, bh = blindShade.height;
+      let g = x.createLinearGradient(0, 0, 0, bh);
+      g.addColorStop(0, "rgba(60,40,20,0.22)"); g.addColorStop(0.25, "rgba(60,40,20,0.04)"); g.addColorStop(0.85, "rgba(255,255,255,0)"); g.addColorStop(1, "rgba(255,250,235,0.18)");
+      x.fillStyle = g; x.fillRect(0, 0, bw, bh);
+      g = x.createLinearGradient(0, 0, bw, 0);
+      g.addColorStop(0, "rgba(60,40,20,0.12)"); g.addColorStop(0.18, "rgba(60,40,20,0)"); g.addColorStop(0.82, "rgba(60,40,20,0)"); g.addColorStop(1, "rgba(60,40,20,0.12)");
+      x.fillStyle = g; x.fillRect(0, 0, bw, bh);
+    }
+    // frost creeping in from the corners of a pane on a bitter day
+    const frost = offscreen((WW - 2 * FR) * 2, (WH - 2 * FR) * 2);
+    {
+      const x = frost.getContext("2d"), fw = frost.width, fh = frost.height;
+      for (const [cx, cy, rad, a] of [[0, fh, fw * 0.62, 0.8], [fw, fh, fw * 0.55, 0.75], [0, 0, fw * 0.3, 0.45], [fw, 0, fw * 0.34, 0.45]]) {
+        const g = x.createRadialGradient(cx, cy, 0, cx, cy, rad);
+        g.addColorStop(0, `rgba(240,248,255,${a})`); g.addColorStop(0.55, `rgba(235,245,255,${a * 0.4})`); g.addColorStop(1, "rgba(235,245,255,0)");
+        x.fillStyle = g; x.fillRect(0, 0, fw, fh);
+      }
+      x.fillStyle = "rgba(255,255,255,0.5)";
+      for (let k = 0; k < 120; k++) {
+        const cx = r() < 0.5 ? 0 : fw, rr = Math.pow(r(), 1.6) * fw * 0.55, an = r() * TAU;
+        x.fillRect(cx + Math.cos(an) * rr, fh + Math.sin(an) * rr * 0.9, 1.5, 1.5);
+      }
+    }
+
     // ---- things that fall ---------------------------------------------------------------
     const NR = 460, NS = 520;
     const rain = new Float32Array(NR * 3), snow = new Float32Array(NS * 4);
@@ -554,7 +583,7 @@ export default {
     };
     let lastMs = null, lastH = -1, lastM = -1, first = true;
     let wetness = 0, snowDepth = 0, scrollX = 0, palKey1 = -1, palKey2 = -1, skyKey = "", shKey = -1e9, glowKey = -1, digitVersion = 0;
-    let hasFact = false;
+    let hasFact = false, frostK = 0;
 
     function setDigits(h12, m) {
       target.fill(0);
@@ -602,14 +631,24 @@ export default {
       const brickNow = fogged(brickBase, 1);
 
       css("sky", skyDiv, "background", `linear-gradient(90deg, ${sky.west}, ${sky.northWest} 34%, ${sky.northEast} 66%, ${sky.east})`);
-      css("amb", ambDiv, "background", amb);
-      css("ambA", ambDiv, "opacity", ambA.toFixed(3));
-      css("sun", sunDiv, "background", sunCol);
-      css("sunA", sunDiv, "opacity", sunA.toFixed(3));
       css("shA", shadow.canvas, "opacity", env.sunS.toFixed(3));
-      const f = parse(fogCol);
-      const fa = (k) => `rgba(${f[0]},${f[1]},${f[2]},${(fogA * k).toFixed(3)})`;
-      css("fog", fogDiv, "background", fogA < 0.01 ? "none" : `linear-gradient(180deg, ${fa(0.85)} 0%, ${fa(1)} 14%, ${fa(1)} 66%, ${fa(0.45)} 76%, ${fa(0.3)} 100%)`);
+      css("shV", shadow.canvas, "visibility", env.sunS > 0.01 ? "visible" : "hidden");
+      // Stack the flat washes (sky tint, sun, night veil) and the fog band into
+      // one premultiplied color per gradient stop.
+      const A1 = parse(amb), A2 = parse(sunCol), A3 = parse(VEIL), A4 = parse(fogCol);
+      const stop = (wall, fk, pct) => {
+        let r0 = 0, g0 = 0, b0 = 0, al = 0;
+        const add = (c, a) => {
+          if (a <= 0) return;
+          r0 = r0 * (1 - a) + c[0] * a; g0 = g0 * (1 - a) + c[1] * a; b0 = b0 * (1 - a) + c[2] * a; al = al * (1 - a) + a;
+        };
+        if (wall) { add(A1, ambA); add(A2, sunA); add(A3, va); }
+        add(A4, fogA * fk);
+        const d = al > 0.0001 ? 1 / al : 0;
+        return `rgba(${Math.round(r0 * d)},${Math.round(g0 * d)},${Math.round(b0 * d)},${al.toFixed(3)}) ${pct}`;
+      };
+      const rf = ((ROOF / H) * 100).toFixed(2);
+      css("air", airDiv, "background", `linear-gradient(180deg, ${stop(false, 0.85, "0%")}, ${stop(false, 0.97, rf + "%")}, ${stop(true, 0.97, rf + "%")}, ${stop(true, 1, "14%")}, ${stop(true, 1, "66%")}, ${stop(true, 0.45, "76%")}, ${stop(true, 0.3, "100%")})`);
       const snowWalk = snowDepth > wetness;
       css("walk", walkDiv, "background", snowWalk ? "#e6eaf0" : "#0a0c12");
       css("walkA", walkDiv, "opacity", (snowWalk ? Math.min(0.9, snowDepth * 1.3) : wetness * 0.5).toFixed(3));
@@ -626,6 +665,8 @@ export default {
 
       PAL.frame = fogged(under("#f7f2e8"), 0.35);
       PAL.blind = under("#5a4a40");
+      PAL.blindDay = fogged(under(mix("#e4e0d8", "#fff7e6", env.sunS)), 0.3);
+      PAL.blindBar = fogged(under("#b8ab96"), 0.3);
       PAL.tower = fogged(blend("#3a2a22", VEIL, va * 0.9), 1.5);
       PAL.towerHi = fogged(blend("#5a4436", VEIL, va * 0.9), 1.5);
       PAL.lattice = PAL.tower;
@@ -683,6 +724,42 @@ export default {
       x.restore();
     }
 
+    // The parts of an awake window that only change with the light: white
+    // frame, glass reflection, the daytime blind at one of four heights, sun
+    // shade in the reveal, meeting rail and roller. Repainted when the palette
+    // moves; each window is then glass + drifting cloud + one of these.
+    const FRONT_N = 4;
+    const fronts = [];
+    for (let k = 0; k < FRONT_N; k++) fronts.push(offscreen(WW * 2, WH * 2));
+    const frontLv = (k) => 0.4 + (0.22 * k) / (FRONT_N - 1);
+    function paintFronts() {
+      const gw = WW - 2 * FR, gh = WH - 2 * FR;
+      for (let k = 0; k < FRONT_N; k++) {
+        const x = fronts[k].getContext("2d");
+        x.setTransform(2, 0, 0, 2, 0, 0);
+        x.clearRect(0, 0, WW, WH);
+        x.fillStyle = PAL.frame; x.fillRect(0, 0, WW, WH);
+        x.clearRect(FR, FR, gw, gh);
+        x.globalAlpha = PAL.glossA; x.drawImage(gloss, FR, FR, gw, gh); x.globalAlpha = 1;
+        // A cream roller blind part way down: sunlit cloth is the brightest
+        // thing on the wall, which is what makes the digits read by day.
+        const bh = gh * frontLv(k);
+        x.fillStyle = PAL.blindDay; x.fillRect(FR + 1, FR, gw - 2, bh);
+        x.drawImage(blindShade, FR + 1, FR, gw - 2, bh);
+        x.fillStyle = PAL.blindBar; x.fillRect(FR + 1, FR + bh - 3, gw - 2, 3);
+        x.fillRect(FR + gw * 0.5 - 1, FR + bh, 2, 5);
+        if (PAL.sunS > 0.03) {
+          x.globalAlpha = 0.3 * PAL.sunS; x.fillStyle = "#10182c";
+          x.fillRect(FR, FR, gw, PAL.shTop);
+          if (PAL.shSide > 0) x.fillRect(FR, FR + PAL.shTop, PAL.shSide, gh - PAL.shTop);
+          else x.fillRect(FR + gw + PAL.shSide, FR + PAL.shTop, -PAL.shSide, gh - PAL.shTop);
+          x.globalAlpha = 1;
+        }
+        x.fillStyle = PAL.frame; x.fillRect(FR, FR + gh * 0.5 - 1.5, gw, 3);
+        x.fillStyle = PAL.blind; x.fillRect(FR, FR, gw, 5);
+      }
+    }
+
     // One awake window: sky in the glass, or a lit room, behind a white frame.
     function drawWin(i, a, lamp, s, flash) {
       const c = i % 9, x = colX(c), y = rowY((i / 9) | 0);
@@ -693,15 +770,18 @@ export default {
       const clipped = e < 1;
       if (clipped) { wctx.save(); wctx.beginPath(); wctx.rect(x, top, WW, y + WH - top); wctx.clip(); }
       const gx = x + FR, gy = y + FR, gw = WW - 2 * FR, gh = WH - 2 * FR;
-      wctx.fillStyle = PAL.frame; wctx.fillRect(x, y, WW, WH);
-      wctx.fillStyle = PAL.glass[c]; wctx.fillRect(gx, gy, gw, gh);
       if (lamp < 0.995) {
-        if (PAL.aW > 0.01) { wctx.globalAlpha = PAL.aW; wctx.fillStyle = patWw; wctx.fillRect(gx, gy, gw, gh); }
-        if (PAL.aD > 0.01) { wctx.globalAlpha = PAL.aD; wctx.fillStyle = patDw; wctx.fillRect(gx, gy, gw, gh); }
-        wctx.globalAlpha = PAL.glossA; wctx.drawImage(gloss, gx, gy, gw, gh);
+        const k = blindK[i], cy = gy + gh * frontLv(k) - 3;
+        wctx.fillStyle = PAL.glass[c]; wctx.fillRect(gx, cy, gw, gy + gh - cy);
+        if (PAL.aW > 0.01) { wctx.globalAlpha = PAL.aW; wctx.fillStyle = patWw; wctx.fillRect(gx, cy, gw, gy + gh - cy); }
+        if (PAL.aD > 0.01) { wctx.globalAlpha = PAL.aD; wctx.fillStyle = patDw; wctx.fillRect(gx, cy, gw, gy + gh - cy); }
+        // the lower sash pushed up on a warm day: the room's shade behind it
+        if (isOpen[i] && env.openK > 0.02) { wctx.globalAlpha = 0.6 * env.openK; wctx.fillStyle = "#0e1218"; wctx.fillRect(gx, gy + gh * 0.5, gw, gh * 0.5); }
+        if (flash > 0.01) { wctx.globalAlpha = flash * 0.4; wctx.fillStyle = "#e1e6ff"; wctx.fillRect(gx, cy, gw, gy + gh - cy); }
         wctx.globalAlpha = 1;
-        if (isOpen[i] && s.env.openK > 0.02) { wctx.fillStyle = `rgba(14,18,24,${(0.4 * s.env.openK).toFixed(3)})`; wctx.fillRect(gx, gy + gh * 0.52, gw, gh * 0.48); }
-        if (flash > 0.01) { wctx.fillStyle = `rgba(225,230,255,${(flash * 0.4).toFixed(3)})`; wctx.fillRect(gx, gy, gw, gh); }
+        wctx.drawImage(fronts[k], x, y, WW, WH);
+      } else {
+        wctx.fillStyle = PAL.frame; wctx.fillRect(x, y, WW, WH);
       }
       if (lamp > 0.005) {
         wctx.globalAlpha = lamp; wctx.drawImage(rooms[roomOf[i]], gx, gy, gw, gh); wctx.globalAlpha = 1;
@@ -739,21 +819,19 @@ export default {
           } else {
             // a television: slow blue light, never a flicker
             const k = 0.3 + 0.2 * noise.n2(t * 0.55, 9.1) + 0.1 * noise.n2(t * 1.4, 2.2);
-            wctx.fillStyle = `rgba(120,170,255,${(k * lamp).toFixed(3)})`; wctx.fillRect(gx, gy, gw, gh);
-            wctx.fillStyle = "rgba(30,14,8,0.85)"; wctx.fillRect(gx + 8, gy + gh - 22, 30, 22);
-            wctx.fillStyle = `rgba(190,220,255,${(0.5 + k * 0.6).toFixed(3)})`; wctx.fillRect(gx + 11, gy + gh - 19, 24, 14);
+            wctx.globalAlpha = k * lamp; wctx.fillStyle = "#78aaff"; wctx.fillRect(gx, gy, gw, gh);
+            wctx.globalAlpha = 0.85; wctx.fillStyle = "#1e0e08"; wctx.fillRect(gx + 8, gy + gh - 22, 30, 22);
+            wctx.globalAlpha = clamp(0.5 + k * 0.6); wctx.fillStyle = "#bedcff"; wctx.fillRect(gx + 11, gy + gh - 19, 24, 14);
+            wctx.globalAlpha = 1;
           }
         }
       }
-      if (PAL.sunS > 0.03 && lamp < 0.9) {
-        wctx.fillStyle = `rgba(16,24,44,${(0.3 * PAL.sunS).toFixed(3)})`;
-        wctx.fillRect(gx, gy, gw, PAL.shTop);
-        if (PAL.shSide > 0) wctx.fillRect(gx, gy + PAL.shTop, PAL.shSide, gh - PAL.shTop);
-        else wctx.fillRect(gx + gw + PAL.shSide, gy + PAL.shTop, -PAL.shSide, gh - PAL.shTop);
+      if (frostK > 0.01) { wctx.globalAlpha = frostK * (1 - 0.4 * lamp); wctx.drawImage(frost, gx, gy, gw, gh); wctx.globalAlpha = 1; }
+      if (lamp > 0.005) {
+        wctx.fillStyle = PAL.frame; wctx.fillRect(gx, gy + gh * 0.5 - 1.5, gw, 3);
+        wctx.fillStyle = PAL.blind; wctx.fillRect(gx, gy, gw, 5);
       }
-      wctx.fillStyle = PAL.frame; wctx.fillRect(gx, gy + gh * 0.5 - 1.5, gw, 3);
-      wctx.fillStyle = PAL.blind; wctx.fillRect(gx, gy, gw, 5);
-      if (clipped) { wctx.fillRect(x, top, WW, 4); wctx.restore(); }
+      if (clipped) { wctx.fillStyle = PAL.blind; wctx.fillRect(x, top, WW, 4); wctx.restore(); }
     }
 
     // Light that lit rooms and shop windows throw on the wall and the street.
@@ -818,7 +896,6 @@ export default {
         const w = s.weather, dl = s.daylight, t = s.t, dt = s.dt;
         const jumped = first || lastMs == null || Math.abs(s.ms - lastMs - dt * 1000) > 4000;
         lastMs = s.ms;
-        s.env = env;
 
         // ---- what the weather is doing, as a few numbers ----
         const cloudK = clamp(w.cloud / 100);
@@ -836,6 +913,7 @@ export default {
         env.cloudK = cloudK; env.rainK = rainK; env.snowK = snowK; env.murk = murk; env.light = light; env.sunS = sunS;
         env.dark = rainK > 0 ? rainK : snowK * 0.4;
         env.openK = smoothstep(60, 72, w.temp) * (w.falling ? 0 : 1);
+        frostK = smoothstep(30, 14, w.temp) * 0.9;
 
         // wet brick and lying snow build and fade slowly; a new showing starts settled
         let wetT = rainK > 0 ? 0.3 + 0.7 * rainK : 0;
@@ -879,22 +957,27 @@ export default {
         const k1 = Math.round(dl * 400) + 1000 * Math.round(w.cloud) + 2e5 * Math.round(murk * 60) + 2e7 * Math.round(wetness * 40);
         const k2 = Math.round(sh.alt * 2) + 1000 * Math.round(sh.az / 2) + 1e6 * Math.round(w.aqi / 4) + 1e8 * Math.round(snowDepth * 30) + 1e10 * Math.round(sunS * 50) + 1e12 * Math.round(light * 200);
         let palChanged = false;
+        // sun shadows: length and lean follow the sun
+        if (sunS > 0.01) {
+          const dx = clamp(Math.tan(rel), -2.2, 2.2), dy = clamp(Math.tan((sh.alt * Math.PI) / 180) / Math.max(0.2, Math.cos(rel)), 0.2, 3.4);
+          const key = Math.round(dx * 16) * 1000 + Math.round(dy * 16);
+          if (key !== shKey) {
+            shKey = key; paintShadows(dx, dy);
+            PAL.shTop = Math.min(26, 3.4 * dy); PAL.shSide = clamp(dx * 3.4, -20, 20);
+            palChanged = true;
+          }
+        }
         if (k1 !== palKey1 || k2 !== palKey2 || skyKey !== s.sky.mean + s.sky.west) {
           palKey1 = k1; palKey2 = k2; skyKey = s.sky.mean + s.sky.west;
           updatePalette(s, env);
           palChanged = true;
         }
-        css("veil", veilDiv, "opacity", (Math.round(PAL.va * (1 - 0.16 * flash) * 250) / 250).toFixed(3));
+        if (palChanged) paintFronts();
+        css("airO", airDiv, "opacity", (1 - Math.round(flash * 0.16 * 100) / 100).toFixed(2));
         css("flash", flashDiv, "opacity", (Math.round(flash * 0.34 * 100) / 100).toFixed(2));
         css("wet", wet.canvas, "transform", `translateY(${-Math.round((1 - clamp(wetness)) * WET_T)}px)`);
+        css("wetV", wetClip, "visibility", wetness > 0.01 ? "visible" : "hidden");
 
-        // sun shadows: length and lean follow the sun
-        if (sunS > 0.01) {
-          const dx = clamp(Math.tan(rel), -2.2, 2.2), dy = clamp(Math.tan((sh.alt * Math.PI) / 180) / Math.max(0.2, Math.cos(rel)), 0.2, 3.4);
-          const key = Math.round(dx * 16) * 1000 + Math.round(dy * 16);
-          if (key !== shKey) { shKey = key; paintShadows(dx, dy); }
-          PAL.shTop = Math.min(26, 3.4 * dy); PAL.shSide = clamp(dx * 3.4, -20, 20);
-        }
 
         // ---- clouds drift at the wind's speed ----
         scrollX += (windX >= 0 ? 1 : -1) * (3 + ws * 2.4) * dt;

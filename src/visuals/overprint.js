@@ -25,15 +25,16 @@
 import {
   W, H, clamp, lerp, remap, smoothstep, lerpAngle, ease, rng, createNoise,
   mix, oklch, toOklch, toOklab, luminance, parse, toHex,
-  el, addStyle, shader, canvas2d, grain, fitText,
+  el, addStyle, shader, grain, fitText, wrapText,
 } from "../lib/kit.js";
 
 // ---- the sheet -------------------------------------------------------------
 const M = 64;                 // unprinted margin: no plate prints nearer the edge than this
 const TILT = 3;               // degrees the printed block is turned, counter-clockwise
 const PX = 540, PY = 784;     // the point it turns about
-const A0 = [-140, 174], A1 = [962, 794];   // ink A field, in block coordinates
-const B0 = [122, 756], B1 = [1240, 1374];  // ink B field
+const A0 = [-140, 174], A1 = [962, 804];   // ink A field, in block coordinates
+const B0 = [122, 744], B1 = [1240, 1374];  // ink B field (the band where they cross sits in the gap between the two lines of numerals)
+const SLOT = 15 * 60 * 1000;  // the display cuts to a new piece on every quarter hour
 const FS = 604;               // numerals: Anton digits are 0.875 em tall, so 528 px
 const HY = 210, MY = 810;     // tops of the hour and minute digits
 const DX = 30;                // where the numerals start: left of the margin, so the plate edge cuts them
@@ -67,7 +68,9 @@ uniform vec4 u_reg;   // xy plate A offset, zw plate B offset (px)
 uniform vec4 u_sky;   // x cloud 0..1, y ink gain 0..1, zw cloud drift (px)
 uniform vec4 u_wx;    // x rain weight, y rain slant (tangent), z snow, w fog
 uniform vec4 u_mo;    // x rain travel (px), y snow fall (px), z storm, w seed
-uniform vec4 u_roll;  // x, y: how far down plates A and B are inked (px); z, w: how wet they are
+uniform vec4 u_roll;  // x, y: where the rollers re-inking plates A and B are (px; above it is the new pull); z, w: how wet they are
+uniform vec4 u_old;   // the last pull's registration, relative to the new one (A xy, B zw), shown below a roller
+uniform vec4 u_fx;    // x clear-sky bars, y heat shimmer, z haze (air quality), w shimmer phase
 uniform vec4 u_stamp; // xy centre, zw half size of the stamped box (z = 0: none)
 uniform vec2 u_srot;  // its angle: sin, cos
 
@@ -78,7 +81,6 @@ const vec2 A1 = vec2(${glf(A1[0])}, ${glf(A1[1])});
 const vec2 B0 = vec2(${glf(B0[0])}, ${glf(B0[1])});
 const vec2 B1 = vec2(${glf(B1[0])}, ${glf(B1[1])});
 const float MG = ${glf(M)};
-const float PROOF = 0.2;
 
 float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 float vn(vec2 p) {
@@ -107,10 +109,15 @@ void main() {
   float seed = u_mo.w;
   float gain = u_sky.y;
   float soft = 0.75 + 0.9 * gain;
+  // a roller re-inking a plate: above it the new pull, below it the last one
+  float newA = smoothstep(u_roll.x + 6.0, u_roll.x - 6.0, p.y);
+  float newB = smoothstep(u_roll.y + 6.0, u_roll.y - 6.0, p.y);
+  vec2 offA = u_reg.xy + u_old.xy * (1.0 - newA);
+  vec2 offB = u_reg.zw + u_old.zw * (1.0 - newB);
 
   // ---- plate A: the sky field ------------------------------------------
-  vec2 qa = q - u_reg.xy;
-  float pax = p.x - u_reg.x;
+  vec2 qa = q - offA;
+  float pax = p.x - offA.x;
   float cropA = smoothstep(MG - 0.7, MG + 0.7, pax) * smoothstep(${glf(W)} - MG + 0.7, ${glf(W)} - MG - 0.7, pax);
   float wobA = (vn(qa * 0.05 + seed) - 0.5) * (1.6 + 3.4 * gain);
   float inA = smoothstep(soft, -soft, box(qa, A0, A1) + wobA) * cropA;
@@ -125,10 +132,14 @@ void main() {
     + 0.016 * sin(u_time * 0.7 + n * 21.0) * (1.0 - tone);
   float haa = (0.9 + 0.8 * gain) / 14.0;
   float dotA = max(smoothstep(rad + haa, rad - haa, rr), step(0.992, tone));
+  // bad air: the sky ink goes dusty, a fine stipple of paper showing through
+  if (u_fx.z > 0.002) dotA *= 1.0 - specks(qa + u_sky.zw * 0.3, 8.0, u_fx.z, seed + 21.0) * 0.85;
 
   // ---- plate B: the temperature field, carrying the weather ---------------
-  vec2 qb = q - u_reg.zw;
-  float pbx = p.x - u_reg.z;
+  vec2 qb = q - offB;
+  // heat: the plate shimmers, its edges and rules swimming slowly
+  qb.x += u_fx.y * sin(qb.y * 0.031 + u_fx.w) * (0.6 + 0.4 * sin(qb.y * 0.0071 - u_fx.w * 0.37));
+  float pbx = p.x - offB.x;
   float cropB = smoothstep(MG - 0.7, MG + 0.7, pbx) * smoothstep(${glf(W)} - MG + 0.7, ${glf(W)} - MG - 0.7, pbx);
   float wobB = (vn(qb * 0.05 + seed + 31.7) - 0.5) * (1.6 + 3.4 * gain);
   float storm = u_mo.z;
@@ -139,6 +150,15 @@ void main() {
   float inAb = smoothstep(soft, -soft, box(qb, A0, A1));   // the sky field as plate B sees it
   float tin = 1.0;    // coverage inside the field
   float tout = 0.0;   // what the plate throws across the sky field
+
+  // clear sky: three bold flat bars thrown across the sky field, beside the hour
+  if (u_fx.x > 0.002) {
+    float yb = qb.y - 452.0;
+    float kk = floor(yb / 96.0);
+    float fy = yb - kk * 96.0;
+    float bar = step(0.0, kk) * step(kk, 2.0) * smoothstep(soft, -soft, max(max(612.0 - qb.x, qb.x - B1.x), max(-fy, fy - 52.0)) + wobB);
+    tout = max(tout, bar * u_fx.x);
+  }
 
   float rain = u_wx.x;
   if (rain > 0.002) {
@@ -151,7 +171,7 @@ void main() {
     float m = vn(vec2(li * 3.17, v * 0.0042 + li * 0.37));
     float aa = (0.8 + 0.7 * gain) / 15.0;
     float win = (0.15 + 0.2 * rain) * (0.5 + 1.0 * m);
-    float wout = (0.05 + 0.13 * rain) * (0.25 + 1.0 * m) * smoothstep(0.34, 0.52, m);
+    float wout = (0.07 + 0.15 * rain) * (0.3 + 1.0 * m) * smoothstep(0.3, 0.5, m);
     float on = smoothstep(0.0, 0.06, rain);
     tin = mix(tin, smoothstep(win + aa, win - aa, fu), on);
     tout = max(tout, on * smoothstep(wout + aa, wout - aa, fu) * step(0.004, wout));
@@ -159,11 +179,11 @@ void main() {
 
   float fog = u_wx.w;
   if (fog > 0.002) {
-    float yy = qb.y / 24.0;
+    float yy = qb.y / 26.0;
     float li = floor(yy);
     float fr = fract(yy);
-    float th = (qb.y - 430.0) / (B1.y - 500.0);   // rules thicken down the sheet
-    th = th * th * 1.25 + 0.2 * (vn(vec2(qb.x * 0.0032 + u_sky.z * 0.004, li * 0.71 + seed)) - 0.5);
+    float th = (qb.y - 300.0) / (B1.y - 380.0);   // rules thicken down the sheet
+    th = th * th * 1.15 + 0.22 * (vn(vec2(qb.x * 0.0032 + u_sky.z * 0.004, li * 0.71 + seed)) - 0.5);
     float ln = smoothstep(th + 0.05, th - 0.05, fr) * step(0.03, th);
     tin = mix(tin, ln, fog);
     tout = max(tout, ln * fog);
@@ -181,7 +201,7 @@ void main() {
 
   // the stamped box at the foot of the sheet belongs to plate B too
   if (u_stamp.z > 0.0) {
-    vec2 sp = vec2(pbx, p.y - u_reg.w) - u_stamp.xy;
+    vec2 sp = vec2(pbx, p.y - offB.y) - u_stamp.xy;
     sp = vec2(sp.x * u_srot.y + sp.y * u_srot.x, -sp.x * u_srot.x + sp.y * u_srot.y);
     vec2 dd = abs(sp) - u_stamp.zw + 14.0;
     float sd = length(max(dd, 0.0)) + min(max(dd.x, dd.y), 0.0) - 14.0;
@@ -191,23 +211,23 @@ void main() {
     cb = max(cb, ring * press * bite);
   }
 
-  // ---- ink on paper: mottle, pinholes, roller banding, the proof before each pass --
+  // ---- ink on paper: mottle, pinholes, roller banding (fresh with each pull) --
   float pin = smoothstep(0.83, 0.93, vn(p * 1.9 + seed));
   float mot = vn(p * 0.47 + 17.0);
-  float bandA = 1.0 - 0.1 * vn(vec2(seed + 2.0, (p.y - u_reg.y) * 0.011)) - 0.05 * mot;
-  float bandB = 1.0 - 0.1 * vn(vec2(seed + 8.0, (p.y - u_reg.w) * 0.013)) - 0.05 * (1.0 - mot);
-  float inkedA = mix(PROOF, 1.0, smoothstep(u_roll.x + 5.0, u_roll.x - 5.0, p.y));
-  float inkedB = mix(PROOF, 1.0, smoothstep(u_roll.y + 5.0, u_roll.y - 5.0, p.y));
-  float ca = inA * dotA * (1.0 - drop) * bandA * (1.0 - 0.45 * pin) * inkedA;
-  cb = cb * (1.0 - drop * inB) * bandB * (1.0 - 0.45 * pin) * inkedB;
+  float sA = seed + 2.0 + 5.3 * newA, sB = seed + 8.0 + 5.3 * newB;
+  float bandA = 1.0 - 0.1 * vn(vec2(sA, (p.y - offA.y) * 0.011)) - 0.05 * mot;
+  float bandB = 1.0 - 0.1 * vn(vec2(sB, (p.y - offB.y) * 0.013)) - 0.05 * (1.0 - mot);
+  float ca = inA * dotA * (1.0 - drop) * bandA * (1.0 - 0.45 * pin);
+  cb = cb * (1.0 - drop * inB) * bandB * (1.0 - 0.45 * pin);
 
   vec3 col = mix(mix(u_p, u_a, ca), mix(u_b, u_ab, ca), cb);
   // fresh ink is glossy for a few seconds
-  float wet = max(u_roll.z * ca, u_roll.w * cb);
-  col *= 1.0 - 0.1 * wet;
-  col += 0.05 * wet * smoothstep(0.55, 0.9, vn(vec2(p.x * 0.004 + p.y * 0.002, p.y * 0.05)));
-  // paper tooth
+  float wet = max(u_roll.z * ca * newA, u_roll.w * cb * newB);
+  col *= 1.0 - 0.12 * wet;
+  col += 0.07 * wet * smoothstep(0.5, 0.9, vn(vec2(p.x * 0.004 + p.y * 0.002, p.y * 0.05)));
+  // paper tooth, and a dither so dark flats never band
   col *= 0.985 + 0.03 * vn(p * 1.3 + 5.0);
+  col += (h21(p + fract(u_time)) - 0.5) / 255.0;
   gl_FragColor = vec4(col, 1.0);
 }
 `;
@@ -253,14 +273,21 @@ export default {
     root.style.background = PAPER_NIGHT;
 
     // ---- the colour plates -------------------------------------------------
-    const gl = shader(root, { frag: FRAG, maxScale: 1 });
+    // One shader, drawn below full resolution (soft dots are fine; every edge
+    // that must be sharp is DOM above it) and only when something on the
+    // plates has moved: about 15 times a second while the weather crawls,
+    // barely at all on a still, clear day.
+    const gl = shader(root, { frag: FRAG, maxScale: 0.75 });
     const uP = new Float32Array(3), uA = new Float32Array(3), uB = new Float32Array(3), uAB = new Float32Array(3);
     const uReg = new Float32Array(4), uSky = new Float32Array(4), uWx = new Float32Array(4), uMo = new Float32Array(4);
-    const uRoll = new Float32Array(4), uStamp = new Float32Array(4), uSrot = new Float32Array(2);
+    const uRoll = new Float32Array(4), uOld = new Float32Array(4), uFx = new Float32Array(4);
+    const uStamp = new Float32Array(4), uSrot = new Float32Array(2);
     gl.set("u_p", uP); gl.set("u_a", uA); gl.set("u_b", uB); gl.set("u_ab", uAB);
     gl.set("u_reg", uReg); gl.set("u_sky", uSky); gl.set("u_wx", uWx); gl.set("u_mo", uMo);
-    gl.set("u_roll", uRoll); gl.set("u_stamp", uStamp); gl.set("u_srot", uSrot);
+    gl.set("u_roll", uRoll); gl.set("u_old", uOld); gl.set("u_fx", uFx);
+    gl.set("u_stamp", uStamp); gl.set("u_srot", uSrot);
     uMo[3] = (seed % 977) * 0.137 + 1.3;
+    uRoll[0] = uRoll[1] = 1e5; // at rest the whole sheet is the current pull
 
     const wrap = el("div", { class: "op" });
     root.append(wrap);
@@ -321,6 +348,16 @@ export default {
       return true;
     };
     const measure = document.createElement("canvas").getContext("2d");
+    const FACT_W = W - 144 - 24 - 76; // the stamp's inner width
+    // the largest size (76 px down to 36) at which the fact fits on two lines
+    const factSize = (text) => {
+      for (const size of [76, 64, 54, 46, 40, 36]) {
+        measure.font = `700 ${size}px "Space Grotesk"`;
+        const lines = wrapText(measure, text, FACT_W - 8);
+        if (lines.length <= 2 && lines.every((l) => measure.measureText(l).width <= FACT_W - 8)) return size;
+      }
+      return 36;
+    };
 
     function writeReadouts(s) {
       const tx = s.text;
@@ -344,8 +381,7 @@ export default {
       const a = put("fl", tx.factLabel || "");
       const b = put("fv", fact);
       if (a || b) {
-        const len = fact.length;
-        const size = len <= 16 ? 76 : len <= 26 ? 60 : len <= 40 ? 48 : 40;
+        const size = fact ? factSize(fact) : 40;
         for (const L of layers) {
           L.stamp.style.display = fact ? "" : "none";
           L.fv.style.fontSize = `${size}px`;
@@ -360,6 +396,7 @@ export default {
         } else uStamp[2] = 0;
         uSrot[0] = Math.sin((stampAngle * Math.PI) / 180);
         uSrot[1] = Math.cos((stampAngle * Math.PI) / 180);
+        dirty = true;
       }
     }
     function writeTime(L, s) {
@@ -386,12 +423,14 @@ export default {
     };
     let hueB = null;
     let pal = { p: PAPER_NIGHT, a: "#000", b: "#000", ab: "#000", g: 0 };
+    let dirty = true;
     function palette(s, snap) {
       const g = smoothstep(0.16, 0.62, s.daylight);
       const sky = toOklch(s.sky.mean);
       const hA = lerpAngle(255, sky.h, smoothstep(0.004, 0.02, sky.c));
       const Ad = oklch(clamp(sky.l, 0.66, 0.8), clamp(sky.c * 1.15, 0.045, 0.15), hA);
-      const An = oklch(0.27, clamp(sky.c * 1.3, 0.05, 0.1), hA);
+      // at night the sky ink is a deep, saturated version of itself on black stock
+      const An = oklch(0.27, clamp(sky.c * 1.6, 0.075, 0.12), hA);
       // ink B from the temperature ladder
       let f = 0;
       for (const th of STEPS) f += smoothstep(th - 2.5, th + 2.5, s.weather.temp);
@@ -401,14 +440,19 @@ export default {
       const diff = ((hB - hA + 540) % 360) - 180;
       if (Math.abs(diff) < 60) hB = (hA + (Math.abs(diff) > 12 ? Math.sign(diff) : k < 0.5 ? lo[3] : hi[3]) * 60 + 360) % 360;
       hueB = hueB == null || snap ? hB : lerpAngle(hueB, hB, 0.12);
-      const Bd = oklch(lerp(lo[0], hi[0], k), lerp(lo[1], hi[1], k), hueB);
-      const Bn = oklch(0.35, lerp(lo[1], hi[1], k) * 0.6, hueB);
+      const cB = lerp(lo[1], hi[1], k);
+      const Bd = oklch(lerp(lo[0], hi[0], k), cB, hueB);
+      // yellow cannot glow at night (dark yellow is olive): it turns to amber
+      const hBn = hueB > 70 && hueB < 125 ? lerpAngle(hueB, 64, smoothstep(125, 95, hueB) * smoothstep(70, 85, hueB)) : hueB;
+      const Bn = oklch(0.31, Math.min(0.125, cB * 0.8), hBn);
 
       const PAd = mul(PAPER_DAY, Ad), PBd = mul(PAPER_DAY, Bd), PABd = mul(PAd, Bd);
       const PAn = scr(PAPER_NIGHT, An), PBn = scr(PAPER_NIGHT, Bn), PABn = scr(PAn, Bn);
-      pal = { p: cross(PAPER_NIGHT, PAPER_DAY, g), a: cross(PAn, PAd, g), b: cross(PBn, PBd, g), ab: cross(PABn, PABd, g), g };
+      const p = cross(PAPER_NIGHT, PAPER_DAY, g);
+      if (p !== pal.p || g !== pal.g) dirty = true;
+      pal = { p, a: cross(PAn, PAd, g), b: cross(PBn, PBd, g), ab: cross(PABn, PABd, g), g };
       fill(uP, pal.p); fill(uA, pal.a); fill(uB, pal.b); fill(uAB, pal.ab);
-      if (shown.fr !== pal.ab) { shown.fr = pal.ab; wrap.style.setProperty("--fr", pal.ab); }
+      if (shown.fr !== pal.ab) { shown.fr = pal.ab; wrap.style.setProperty("--fr", pal.ab); dirty = true; }
       if (shown.bg !== pal.p) { shown.bg = pal.p; root.style.background = pal.p; }
       if (fallback) {
         fallback.fbA.style.background = pal.a;
@@ -416,10 +460,7 @@ export default {
         fallback.fbAB.style.background = pal.ab;
       }
     }
-    const inkFor = (day, proof) => {
-      const ink = day ? INK_DAY : INK_NIGHT;
-      return proof ? mix(ink, pal.p, 0.5) : ink;
-    };
+    const inkFor = (day) => (day ? INK_DAY : INK_NIGHT);
 
     // ---- pulls: a drum pass that wipes the black plate from one copy to the other ----
     let cur = 0;
@@ -436,7 +477,6 @@ export default {
       a.win.style.transform = a.inner.style.transform = "none";
       a.win.style.visibility = "visible";
       b.win.style.visibility = "hidden";
-      bar.style.visibility = "hidden";
       pull.on = false;
     };
     const endPull = () => { cur = 1 - cur; rest(); };
@@ -453,52 +493,63 @@ export default {
       pull.y1 = full ? H + 40 : 1440;
     }
 
-    // ---- first state ------------------------------------------------------------------
+    // ---- first state: the poster is already printed ---------------------------------
     palette(state, true);
     let inkDay = pal.g > 0.5;
     writeReadouts(state);
     writeTime(layers[0], state);
     writeTime(layers[1], state);
     let timeShown = state.text.time;
-    layers[0].win.style.color = inkFor(inkDay, true); // the proof, before the black pass
-    layers[1].win.style.color = inkFor(inkDay, false);
+    layers[0].win.style.color = layers[1].win.style.color = inkFor(inkDay);
     rest();
-    let blackPassDone = false;
     let lastMs = state.ms;
     let palT = 0;
     let driftX = r.range(0, 4000), driftY = r.range(0, 4000), rainTravel = r.range(0, 3000), snowFall = r.range(0, 3000);
-    let jolt = [0, 0, 0, 0], joltTarget = [0, 0, 0, 0], nextJolt = r.range(3, 8);
-    let regKey = "";
+    const jolt = new Float32Array(4), joltTarget = new Float32Array(4), regQ = new Int16Array(4);
+    let nextJolt = r.range(3, 8);
+    let lastDraw = -1, drawnW = 0, drawnH = 0;
 
-    // print-in: three rolling passes, 1.6 s each
-    const PASS_A = 0.5, PASS_B = 2.4, PASS_C = 4.3, PASS = 1.6;
-    const rollY = (t, t0) => lerp(-50, H + 50, ease.inOut(clamp((t - t0) / PASS)));
+    // The print-in. The display cuts to this piece on the quarter hour; at that
+    // moment the press runs the sheet again: three rollers pass down it (sky,
+    // temperature, black), each laying fresh, glossy ink in a new registration
+    // over the last pull. The poster is complete before, during and after.
+    let printT0 = -1e9;
+    const PASS_A = 0.4, PASS_B = 2.2, PASS_C = 4.0, PASS = 1.6;
+    const rollY = (t, t0) => lerp(-60, H + 60, ease.inOut(clamp((t - t0) / PASS)));
+    let blackDone = true;
 
     return {
       frame(s) {
         const t = s.t, dt = s.dt, wx = s.weather;
         const jumped = Math.abs(s.ms - lastMs) > 5000;
+        if (!jumped && s.frame > 0 && Math.floor(s.ms / SLOT) > Math.floor(lastMs / SLOT)) {
+          printT0 = t;
+          blackDone = false;
+          for (let i = 0; i < 4; i++) uOld[i] = r.range(-3.5, 3.5); // the last pull sat elsewhere
+        }
         lastMs = s.ms;
 
         if (jumped || t - palT > 0.4 || s.frame < 3) { palette(s, jumped); palT = t; }
         writeReadouts(s);
 
         // ---- the black plate ---------------------------------------------------
-        if (!blackPassDone && t >= PASS_C) {
-          blackPassDone = true;
-          if (t < PASS_C + PASS) { startPull(s, true, inkFor(inkDay, false)); pull.t0 = PASS_C; timeShown = s.text.time; }
-          else { layers[cur].win.style.color = inkFor(inkDay, false); }
+        const pt = t - printT0;
+        if (!blackDone && pt >= PASS_C) {
+          blackDone = true;
+          timeShown = s.text.time;
+          startPull(s, true, inkFor(inkDay));
+          pull.t0 = printT0 + PASS_C;
         }
         const wantDay = inkDay ? pal.g > 0.48 : pal.g > 0.52;
-        if (wantDay !== inkDay && blackPassDone) {
+        if (wantDay !== inkDay) {
           inkDay = wantDay;
           timeShown = s.text.time;
-          if (jumped) { if (pull.on) endPull(); writeTime(layers[cur], s); layers[cur].win.style.color = inkFor(inkDay, false); }
-          else startPull(s, true, inkFor(inkDay, false));
+          if (jumped) { if (pull.on) endPull(); writeTime(layers[cur], s); layers[0].win.style.color = layers[1].win.style.color = inkFor(inkDay); }
+          else startPull(s, true, inkFor(inkDay));
         } else if (s.text.time !== timeShown) {
           timeShown = s.text.time;
-          if (jumped || !blackPassDone) { if (pull.on) endPull(); writeTime(layers[0], s); writeTime(layers[1], s); }
-          else startPull(s, false, inkFor(inkDay, false));
+          if (jumped) { if (pull.on) endPull(); writeTime(layers[0], s); writeTime(layers[1], s); }
+          else startPull(s, false, inkFor(inkDay));
         }
         let barY = -1e4;
         if (pull.on) {
@@ -509,21 +560,30 @@ export default {
           if (k >= 1) endPull();
         }
 
-        // ---- the colour plates: print-in, register, weather ---------------------
-        const yA = t < PASS_A + PASS ? rollY(t, PASS_A) : 1e5;
-        const yB = t < PASS_B + PASS ? rollY(t, PASS_B) : 1e5;
-        uRoll[0] = t < PASS_A ? -1e4 : yA;
-        uRoll[1] = t < PASS_B ? -1e4 : yB;
-        uRoll[2] = t < PASS_A ? 0 : Math.exp(-Math.max(0, t - PASS_A - PASS * 0.5) / 2.2);
-        uRoll[3] = t < PASS_B ? 0 : Math.exp(-Math.max(0, t - PASS_B - PASS * 0.5) / 2.2);
-        if (t >= PASS_A && t < PASS_A + PASS) barY = yA;
-        else if (t >= PASS_B && t < PASS_B + PASS) barY = yB;
+        // ---- the colour plates: print-in rollers --------------------------------
+        let rolling = false;
+        if (pt < PASS_C + 8) {
+          const yA = pt < PASS_A ? -1e4 : rollY(pt, PASS_A);
+          const yB = pt < PASS_B ? -1e4 : rollY(pt, PASS_B);
+          uRoll[0] = pt < PASS_A + PASS ? yA : 1e5;
+          uRoll[1] = pt < PASS_B + PASS ? yB : 1e5;
+          uRoll[2] = pt < PASS_A ? 0 : Math.exp(-Math.max(0, pt - PASS_A - PASS * 0.5) / 2.2);
+          uRoll[3] = pt < PASS_B ? 0 : Math.exp(-Math.max(0, pt - PASS_B - PASS * 0.5) / 2.2);
+          if (pt >= PASS_A && pt < PASS_A + PASS) barY = yA;
+          else if (pt >= PASS_B && pt < PASS_B + PASS) barY = yB;
+          rolling = true;
+        } else if (uRoll[2] !== 0 || uRoll[3] !== 0) {
+          uRoll[0] = uRoll[1] = 1e5;
+          uRoll[2] = uRoll[3] = 0;
+          dirty = true;
+        }
         if (barY > -100 && barY < H + 100) {
           bar.style.visibility = "visible";
           bar.style.transform = `translateY(${f1(barY - 46)}px)`;
         } else if (bar.style.visibility !== "hidden") bar.style.visibility = "hidden";
 
-        // wind: where it blows to on the sheet (east is right, north is up)
+        // ---- registration: the wind knocks the colour plates about -------------------
+        // where it blows to on the sheet (east is right, north is up)
         const head = ((wx.windDir + 180) * Math.PI) / 180;
         const vx = Math.sin(head), vy = -Math.cos(head);
         const amp = remap(wx.wind, 0, 28, 0.45, MAXREG);
@@ -541,22 +601,26 @@ export default {
         for (let i = 0; i < 4; i++) {
           joltTarget[i] *= decay;
           jolt[i] += (joltTarget[i] - jolt[i]) * chase;
-          let v = amp * 0.85 * noise.n2(t * sp + i * 17.3, i * 5.1 + 0.5) + jolt[i];
-          uReg[i] = v;
+          uReg[i] = amp * 0.85 * noise.n2(t * sp + i * 17.3, i * 5.1 + 0.5) + jolt[i];
         }
         for (let i = 0; i < 4; i += 2) {
           const len = Math.hypot(uReg[i], uReg[i + 1]);
           if (len > MAXREG) { uReg[i] *= MAXREG / len; uReg[i + 1] *= MAXREG / len; }
         }
-        // the colour laid under the numerals for a rich black shows as a fringe when a plate slips
-        const key = `${Math.round(uReg[0] * 4)},${Math.round(uReg[1] * 4)},${Math.round(uReg[2] * 4)},${Math.round(uReg[3] * 4)}`;
-        if (key !== regKey) {
-          regKey = key;
-          const tb = `translate(${uReg[2].toFixed(2)}px,${uReg[3].toFixed(2)}px)`;
-          const ta = `translate(${uReg[0].toFixed(2)}px,${uReg[1].toFixed(2)}px)`;
+        // redraw for registration only when a plate has moved a quarter pixel
+        let moved = false;
+        for (let i = 0; i < 4; i++) {
+          const q = Math.round(uReg[i] * 4);
+          if (q !== regQ[i]) { regQ[i] = q; moved = true; }
+        }
+        if (moved) {
+          // the colour laid under the numerals for a rich black shows as a fringe when a plate slips
+          const tb = `translate(${f1(uReg[2])}px,${f1(uReg[3])}px)`;
+          const ta = `translate(${f1(uReg[0])}px,${f1(uReg[1])}px)`;
           for (const L of layers) { L.hhF.style.transform = tb; L.mmF.style.transform = ta; }
         }
 
+        // ---- the weather, as print texture -------------------------------------------
         const drift = Math.max(1.6, wx.wind * 0.9) * dt;
         driftX -= vx * drift;
         driftY -= vy * drift;
@@ -576,8 +640,22 @@ export default {
         uMo[0] = rainTravel;
         uMo[1] = snowFall;
         uMo[2] = wx.kind === "storm" ? 1 : 0;
+        uFx[0] = wx.falling || wx.fog ? 0 : smoothstep(45, 15, wx.cloud);
+        uFx[1] = smoothstep(84, 96, wx.temp) * 3.2;
+        uFx[2] = smoothstep(90, 170, wx.aqi) * 0.42;
+        uFx[3] += dt * 0.55;
 
-        gl.draw(t);
+        // ---- draw the plates when something on them has changed ---------------------
+        const crawling = uWx[0] > 0 || uWx[2] > 0 || uWx[3] > 0 || uFx[1] > 0.05 || uSky[0] > 0.08;
+        const since = t - lastDraw;
+        const resized = gl.canvas.width !== drawnW || gl.canvas.height !== drawnH;
+        if (dirty || resized || jumped || moved || rolling || (crawling && since >= 1 / 15) || since >= 0.5 || s.frame < 2) {
+          dirty = false;
+          lastDraw = t;
+          drawnW = gl.canvas.width;
+          drawnH = gl.canvas.height;
+          gl.draw(t);
+        }
       },
     };
   },

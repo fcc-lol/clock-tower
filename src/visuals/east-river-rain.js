@@ -249,8 +249,8 @@ export default {
       .er .fact .lab { font-size: 28px; letter-spacing: 0.08em; color: var(--beniText); }
       .er .fact .val { font-size: 40px; line-height: 1.2; margin-top: 4px; }
       .er .colo { position: absolute; left: ${LX}px; width: ${RX - LX}px; top: 1764px; display: flex; justify-content: space-between; align-items: flex-start; white-space: nowrap; }
-      .er .colo .lab { font-size: 28px; letter-spacing: 0.08em; color: var(--beniText); line-height: 32px; }
-      .er .colo .val { font-size: 46px; line-height: 52px; margin-top: 0; }
+      .er .colo .lab { font-size: 27px; letter-spacing: 0.07em; color: var(--beniText); line-height: 32px; }
+      .er .colo .val { font-size: 42px; line-height: 52px; margin-top: 0; }
       .er .edge { position: absolute; left: ${X0}px; top: ${Y0}px; width: ${PW}px; height: ${PH}px; box-sizing: border-box; border: 2px solid var(--edge); pointer-events: none; }
     `);
 
@@ -584,6 +584,8 @@ export default {
       const flatNight = mix(adjust(up, { l: (v) => Math.min(v, 0.26) }), "#0a1026", 0.55);
       let flat = mix(flatNight, flatDay, dd);
       flat = adjust(flat, { l: (v) => v * (1 - 0.22 * f.storm) });
+      // fog: a luminous, colourless grey that brightens with the day
+      flat = mix(flat, mix("#2b2d33", "#cfcdc3", smoothstep(0.05, 0.8, d)), 0.5 * f.fog);
       let glowDay = adjust(mix(s.sky.west, PAPER_D, 0.74 - 0.56 * sunLow), { c: (v) => v * (1 + 0.7 * sunLow) });
       glowDay = mix(glowDay, "#eba25c", 0.66 * sunLow * (1 - 0.6 * cl * cl));
       glowDay = mix(glowDay, "#dcae56", 0.6 * f.heat);
@@ -636,7 +638,8 @@ export default {
       rivDay = adjust(rivDay, { l: (v) => v * (1 - 0.2 * wetI) });
       rivDay = mix(rivDay, "#4f6072", 0.5 * f.snow);
       const riv = mix(mix("#0a1330", rivDay, dd), flat, 0.45 * f.fog);
-      river.style.background = `linear-gradient(to bottom, ${mix(riv, glow, 0.5)} 0%, ${mix(riv, glow, 0.12)} 16%, ${riv} 34%, ${riv} 62%, ${adjust(riv, { l: (v) => v * 0.6 })} 100%)`;
+      // in fog the far water dissolves into the sky
+      river.style.background = `linear-gradient(to bottom, ${mix(mix(riv, glow, 0.5), flat, 0.9 * f.fog)} 0%, ${mix(mix(riv, glow, 0.12), flat, 0.7 * f.fog)} 16%, ${mix(riv, flat, 0.3 * f.fog)} 34%, ${riv} 62%, ${adjust(riv, { l: (v) => v * 0.6 })} 100%)`;
       setVar("--waterLight", mix(mix(riv, "#93a6cf", 0.32), mix(riv, "#f6efdc", 0.8), dd));
       setVar("--waterDark", adjust(riv, { l: (v) => v * 0.6 }));
 
@@ -645,11 +648,11 @@ export default {
       near = mix(near, "#1b1f3e", 0.7 * sunLow * dd);
       near = mix(near, glow, 0.3 * f.heat);
       let far = mix(near, glow, 0.46 + 0.3 * f.heat);
-      near = mix(near, flat, 0.74 * f.fog);
-      far = mix(far, flat, 0.95 * f.fog);
+      near = mix(near, flat, 0.88 * f.fog);
+      far = mix(far, flat, f.fog);
       setVar("--near", near);
       setVar("--far", far);
-      setVar("--bridge", mix(mix("#020309", "#252a40", dd), flat, 0.56 * f.fog));
+      setVar("--bridge", mix(mix("#020309", "#252a40", dd), flat, 0.72 * f.fog));
       setVar("--pier", mix(mix("#0c0e17", mix("#b8a37b", "#8e8c85", cl * 0.6), dd), flat, 0.5 * f.fog));
       setVar("--island", mix(mix("#03040a", "#2f4a45", dd), flat, 0.6 * f.fog));
       setVar("--gantry", mix("#010103", "#17120f", dd));
@@ -687,19 +690,21 @@ export default {
         }
       }
       for (let i = 0; i < 16; i++) {
-        const o = Math.round(clamp((0.07 + 0.36 * (i / 15) - d) * 30) * 20) / 20;
+        const o = Math.round(clamp((0.07 + 0.36 * (i / 15) - d) * 30) * (1 - 0.88 * f.fog) * 20) / 20;
         if (winShown[i] !== o) {
           winShown[i] = o;
           winNodes[i].setAttribute("opacity", o);
         }
       }
       const lampOn = smoothstep(0.42, 0.14, d);
-      setOpacity("lamps", brLamps, lampOn);
+      setOpacity("lamps", brLamps, lampOn * (1 - 0.7 * f.fog));
       setOpacity("beacons", brBeacons, lampOn);
       // glints on the far water: lamplight at night, hard sun on a clear day
       const sunGlint = dd * (1 - cl) * (1 - f.wet) * (1 - f.snow);
       setVar("--glint", lampOn > sunGlint ? "#e8b656" : "#fbf5e4");
       setOpacity("glint", glint, Math.max(lampOn * 0.75, sunGlint * 0.9) * (1 - f.fog));
+      const bargeO = String(Math.round((1 - 0.6 * f.fog) * 20) / 20);
+      if (barge.style.opacity !== bargeO) barge.style.opacity = bargeO;
       const capOn = f.snow;
       setOpacity("capS", slCaps, capOn);
       setOpacity("capB", brCaps, capOn);

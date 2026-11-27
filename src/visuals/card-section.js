@@ -88,7 +88,7 @@ const CSS = `
   border-top: 4px solid var(--hem); border-bottom: 4px solid var(--hem); }
 .cs .tx { position: absolute; inset: 0; color: var(--paint); }
 .cs .g { display: inline-block; white-space: pre; }
-.cs i { font-style: normal; font-size: 0.64em; color: var(--soft); margin-right: 0.38em; }
+.cs i { font-style: normal; font-size: 28px; color: var(--soft); margin-right: 12px; }
 .cs .date .tx { display: flex; align-items: center; justify-content: center; font-size: 58px; line-height: 1; white-space: nowrap; }
 .cs .mid .tx { display: flex; align-items: center; padding: 0 30px 0 34px; gap: 26px; }
 .cs .temp { flex: none; font-size: 122px; line-height: 1; margin-top: -4px; }
@@ -99,7 +99,7 @@ const CSS = `
 .cs .tifo .tx { display: flex; flex-direction: column; justify-content: center; padding: 0 36px; gap: 13px; }
 .cs .row1 { display: flex; justify-content: space-between; align-items: baseline; font-size: 44px; line-height: 1; white-space: nowrap; }
 .cs .rule { height: 4px; border-radius: 2px; background: var(--soft); opacity: 0.5; }
-.cs .flabel { font-size: 28px; line-height: 1; color: var(--soft); white-space: nowrap; }
+.cs .flabel { font-size: 30px; line-height: 1; color: var(--soft); white-space: nowrap; }
 .cs .fvalue { font-size: 52px; line-height: 1.08; }
 .cs .flash { position: absolute; inset: 0; z-index: 4; background: #c9d4ff; opacity: 0; pointer-events: none; }
 `;
@@ -160,10 +160,11 @@ export default {
     const dirty = new Uint8Array(N);
     const lift = new Float32Array(N); // the stadium wave: how far this person is out of the seat
     const liftWas = new Float32Array(N);
-    const TURN = 1 / 0.48; // turns per second
+    const TURN = 1 / 0.6; // turns per second
+    const stage = new Uint8Array(N); // the turn in six steps: a seat is redrawn only when its step changes
 
     // Fidgets: a few people at a time peek over their card, wobble it, stir in their sleep.
-    const MAXF = 72;
+    const MAXF = 32;
     const fSeat = new Int16Array(MAXF).fill(-1);
     const fT0 = new Float32Array(MAXF);
     const fDur = new Float32Array(MAXF);
@@ -216,8 +217,8 @@ export default {
       beanie: new Array(6), umb: new Array(6), umbDark: new Array(6), veil: new Array(ROWS), veilNum: new Array(ROWS),
     };
     const env = {
-      cloud: 0, thrCloud: 9, thrCore: 9, moatCloud: false, lit: false, umb: 0, sleep: 0, snow: 0, beanie: 0, sunhat: 0, fog: 0,
-      wx: 1, wy: 0, cloudSpeed: 0, gusty: 0, dayK: 1, t: 0, bannerAmp: 2, bannerOm: 1,
+      cloud: 0, thrCloud: 9, thrCore: 9, lit: false, umb: 0, sleep: 0, snow: 0, beanie: 0, sunhat: 0, fog: 0,
+      wx: 1, wy: 0, cloudSpeed: 0, gloomLight: 1, lean: 0, gusty: 0, dayK: 1, t: 0, bannerAmp: 2, bannerOm: 1,
     };
     let paletteKey = "";
     let clothDay = null;
@@ -255,13 +256,15 @@ export default {
       const midSky = P.sky[18 * 3 + 1];
       const midCloud = P.cloud[18 * 3 + 1];
 
-      // Numerals turn from ink to lit cards where the cards behind them are mid-dark.
-      if (env.moatCloud ? wx.cloud < 45 : wx.cloud > 55) env.moatCloud = !env.moatCloud;
-      const bgLum = luminance(env.moatCloud ? midCloud : midSky);
-      if (paletteKey === "") env.lit = bgLum < 0.15;
-      else if (env.lit ? bgLum > 0.17 : bgLum < 0.13) env.lit = !env.lit;
-      const litBase = mix("#c88a35", "#ffd98a", smoothstep(0.02, 0.12, bgLum));
-      for (let k = 0; k < 4; k++) P.lit[k] = mix(litBase, "#7d4c1a", (3 - k) * 0.11);
+      // Numerals switch from ink to lit cards in one step, well before the crowd
+      // goes dark: when the light is low (twilight under heavy cloud counts as
+      // night) or the cards behind them are no longer light enough for ink.
+      const bgLum = lerp(luminance(midSky), luminance(midCloud), env.cloud);
+      const gloom = env.gloomLight;
+      if (paletteKey === "") env.lit = bgLum < 0.125 || gloom < 0.155;
+      else env.lit = env.lit ? bgLum < 0.14 || gloom < 0.17 : bgLum < 0.11 || gloom < 0.14;
+      const litBase = mix("#d99a42", "#ffd98a", smoothstep(0.0, 0.1, bgLum));
+      for (let k = 0; k < 4; k++) P.lit[k] = mix(litBase, "#8a5520", (3 - k) * 0.1);
 
       for (let k = 0; k < 6; k++) {
         P.skin[k] = person(SKIN[k]);
@@ -292,7 +295,7 @@ export default {
 
       // Cloth and paint. The cloth is cream by day and dark at night; the paint
       // flips from ink to amber while the cloth is passing through mid-grey.
-      const k = smoothstep(0.12, 0.32, dl);
+      const k = smoothstep(0.13, 0.17, env.gloomLight);
       const day = k > 0.5;
       const st = wrap.style;
       st.setProperty("--cloth", mix("#17181e", "#f1e7d3", k));
@@ -308,6 +311,9 @@ export default {
 
     function updateEnv(s) {
       const wx = s.weather;
+      // The light as it feels under the weather: heavy cloud, rain and fog make
+      // an evening night early.
+      env.gloomLight = s.daylight * clamp(1 - 0.3 * clamp(wx.cloud / 100) - 0.25 * wx.intensity - 0.1 * (wx.fog ? 1 : 0), 0.3, 1);
       env.t = s.t;
       env.cloud = clamp(wx.cloud / 100);
       env.thrCloud = env.cloud < 0.02 ? 9 : env.cloud > 0.985 ? -9 : quantile(1 - env.cloud);
@@ -325,6 +331,9 @@ export default {
       env.wy = -Math.cos(b);
       env.cloudSpeed = wx.wind * 1.7;
       env.gusty = clamp((wx.gust - 10) / 30);
+      // Cards are held a little crooked against the wind (rounded so it only
+      // changes the palette key when it really moves).
+      env.lean = Math.round(clamp((wx.wind - 6) / 30) * 0.16 * (env.wx < 0 ? -1 : 1) * 50) / 50;
       env.bannerAmp = clamp(1.4 + wx.wind * 0.2, 1.4, 6.5);
       env.bannerOm = (0.55 + wx.wind * 0.07) * (env.wx < 0 ? -1 : 1);
     }
@@ -529,7 +538,9 @@ export default {
       if (ro === R_COVER) return F_NONE;
       if (ro === R_HOLD) return F_HOLD;
       if (ro === R_NUM) return env.lit ? F_LIT : F_INK;
-      if (ro === R_MOAT) return sTh[i] < env.sleep ? F_SLEEP : env.moatCloud ? F_CLOUD : F_SKY;
+      // The moat: a one-seat ring that frames the numerals. By day it holds up the
+      // white side; once the numerals are lit it lowers its cards, a dark halo.
+      if (ro === R_MOAT) return env.lit ? F_SLEEP : F_CLOUD;
       if (uTh[i] < env.umb) return F_UMB;
       if (sTh[i] < env.sleep) return F_SLEEP;
       if (env.thrCloud < 8) {
@@ -555,14 +566,21 @@ export default {
       wOn.fill(0);
     }
     // On the minute: a diagonal wave of card flips runs down the stand.
-    function minuteWave() {
+    // Every card in the minute half of the stand turns over; on the hour, the
+    // whole stand. Seats that change face do so as part of the wave.
+    function minuteWave(whole) {
+      const r0 = whole ? 0 : ROW_MID;
+      const span = whole ? 6.5 : 4.5; // seconds from the first card to the last
+      const k = span / (COLS + (ROWS - r0) * 1.4);
       for (let i = 0; i < N; i++) {
         const w = wantOf(i);
-        if (w === face[i] && face[i] > F_LIT) continue;
+        const row = (i / COLS) | 0;
+        if (w === face[i] && (face[i] > F_LIT || row < r0)) continue;
         if (ap[i] < 1) continue;
         prev[i] = face[i];
         face[i] = w;
-        ap[i] = -((i % COLS) * 0.05 + ((i / COLS) | 0) * 0.034 + hash(i, 3) * 0.12) * TURN;
+        ap[i] = -((i % COLS) + (row - r0) * 1.4 + hash(i, 3) * 2.5) * k * TURN;
+        stage[i] = 0;
       }
     }
 
@@ -667,7 +685,7 @@ export default {
 
       if (f <= F_LIT) {
         // Someone holding a card: hair and eyes over the top edge, fingers gripping it.
-        const hy = 9.6 - 2.4 * peek - 0.85 * up;
+        const hy = Math.max(7.2, 9.6 - 2.4 * peek - 0.4 * up); // stays inside its own seat
         const numeral = f >= F_INK;
         if (open < 0.97 || up > 0.4) torso(i, hy);
         if (numeral && P.veilNum[row] === "" && P.veil[row] !== "") {
@@ -677,7 +695,7 @@ export default {
         head(i, cx, hy, peek > 0.12, look, 0, f === F_LIT ? 2 : role[i] === R_MOAT ? 1 : 0);
         const hh = 9.5 * open;
         if (hh > 0.35) {
-          const a = tilt[i] + wob;
+          const a = tilt[i] + wob + env.lean * capVar[i];
           const c = Math.cos(a) * R;
           const sn = Math.sin(a) * R;
           ctx.setTransform(c, sn, -sn, c, (x0 + cx) * R, (y0 + 20.1 - up + dip) * R);
@@ -848,6 +866,9 @@ export default {
     let jumped = false;
     let flood = 0;
     let flashWas = 0;
+    let refreshLeft = 0;
+    let drawAt = 0;
+    const DRAW_BUDGET = 64;
 
     function frame(s) {
       const t = s.t;
@@ -859,10 +880,11 @@ export default {
       updateText(s);
       updateEnv(s);
       if (jump || s.frame % 8 === 0) {
-        const key = `${s.sky.west}${s.sky.northWest}${s.sky.northEast}${s.sky.east}${Math.round(s.daylight * 500)}|${Math.round(s.weather.cloud)}|${Math.round(env.fog * 100)}|${Math.round(s.moon.alt)}`;
+        const key = `${s.sky.west}${s.sky.northWest}${s.sky.northEast}${s.sky.east}${Math.round(s.daylight * 500)}|${Math.round(s.weather.cloud)}|${Math.round(env.fog * 100)}|${Math.round(s.moon.alt)}|${env.lean}`;
         if (key !== paletteKey) {
           computePalette(s);
           paletteKey = key;
+          refreshLeft = N; // repaint everyone once, a few dozen seats a frame
         }
       }
 
@@ -873,13 +895,14 @@ export default {
 
       const newMinute = s.clock.h12 !== lastH || s.clock.m !== lastM;
       if (newMinute || rolesStale) {
+        const hourWas = lastH;
         lastH = s.clock.h12;
         lastM = s.clock.m;
         const relaid = rolesStale;
         rolesStale = false;
         computeRoles(s);
         if (!jump) {
-          if (newMinute) minuteWave();
+          if (newMinute) minuteWave(s.clock.h12 !== hourWas);
           else if (relaid) snapAll();
         }
       }
@@ -898,6 +921,7 @@ export default {
           face[i] = w;
           const slow = w === F_UMB || prev[i] === F_UMB ? 2.6 : w === F_SLEEP || prev[i] === F_SLEEP ? 5 : 0.5;
           ap[i] = -hash(i, s.frame) * slow * TURN;
+          stage[i] = 0;
         }
       }
       jumped = jump;
@@ -912,7 +936,11 @@ export default {
         if (ap[i] >= 1) continue;
         const a = ap[i] + step;
         ap[i] = a >= 1 ? 1 : a;
-        if (a > 0) dirty[i] = 1;
+        const q = a <= 0 ? 0 : a >= 1 ? 7 : 1 + ((a * 6) | 0);
+        if (q !== stage[i]) {
+          stage[i] = q;
+          dirty[i] = 1;
+        }
       }
 
       // Gusts set off stadium waves that travel downwind.
@@ -926,8 +954,8 @@ export default {
             wT0[k] = t;
             wDx[k] = env.wx;
             wDy[k] = env.wy;
-            wSpeed[k] = 230 + 300 * env.gusty;
-            wAmp[k] = 5 + 4 * env.gusty;
+            wSpeed[k] = 150 + 130 * env.gusty;
+            wAmp[k] = 6 + 3 * env.gusty; // never out of the seat: the card goes up past the face
             const ext = Math.abs(env.wx) * 540 + Math.abs(env.wy) * 960;
             const mid = env.wx * 540 + env.wy * 960;
             wFrom[k] = mid - ext - 90;
@@ -957,16 +985,13 @@ export default {
             const d = (i % COLS) * ax + ((i / COLS) | 0) * ay + base;
             if (d > -75 && d < 75) {
               const c = Math.cos(d * 0.020944); // pi / 150
-              const v = wAmp[k] * c * c;
+              const v = Math.round(wAmp[k] * c * c * 0.34) * 3; // in 3 px steps: fewer redraws
               if (v > lift[i]) lift[i] = v;
             }
           }
         }
         for (let i = 0; i < N; i++) {
-          if (lift[i] > 0.05 || liftWas[i] > 0.05) {
-            dirty[i] = 1;
-            if (i >= COLS) dirty[i - COLS] = 1;
-          } else lift[i] = 0;
+          if (lift[i] !== liftWas[i]) dirty[i] = 1;
         }
       }
 
@@ -974,13 +999,14 @@ export default {
       for (let k = 0; k < MAXF; k++) {
         const i = fSeat[k];
         if (i < 0) continue;
-        dirty[i] = 1;
+        if (((s.frame + k) & 1) === 0) dirty[i] = 1; // small motions at half rate
         if (t - fT0[k] >= fDur[k]) {
+          dirty[i] = 1;
           fSeat[k] = -1;
           fidOf[i] = -1;
         }
       }
-      fidAcc += dt * (5 + 24 * env.dayK);
+      fidAcc += dt * (3 + 9 * env.dayK);
       while (fidAcc >= 1) {
         fidAcc -= 1;
         const i = Math.floor(r() * N);
@@ -1003,17 +1029,24 @@ export default {
         numAt = (numAt + 1) % numCount;
         dirty[numList[numAt]] = 1;
       }
-      for (let k = 0; k < 26; k++) {
+      for (let k = 0; k < 40 && refreshLeft > 0; k++, refreshLeft--) {
         orderAt = (orderAt + 1) % N;
         dirty[order[orderAt]] = 1;
       }
 
-      for (let i = 0; i < N; i++) {
+      // Draw what changed, at most a budget of seats a frame, round-robin, so a
+      // busy moment is spread over a few frames instead of costing one big one.
+      let budget = first ? N : jump ? 700 : DRAW_BUDGET;
+      let i = drawAt;
+      for (let n = 0; n < N && budget > 0; n++) {
         if (dirty[i]) {
           dirty[i] = 0;
           drawSeat(i);
+          budget--;
         }
+        if (++i === N) i = 0;
       }
+      drawAt = i;
       drawWet(s);
       if (jump || (s.frame & 1) === 0) ripple(t);
 
