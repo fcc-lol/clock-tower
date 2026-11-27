@@ -33,7 +33,7 @@ import {
 // ---------------------------------------------------------------------------
 const TUBE = 130; // tube thickness
 const SK_W = 318; // extent of a numeral's centreline
-const SK_H = 400; // a little shorter than they could be: the tags below must hang clear even over a two-line fact
+const SK_H = 388; // shorter than they could be: the two rows keep 40 px apart even when the hours sag, and the tags below hang clear over a two-line fact
 const LEFT = 82;
 const ROW_H = 68; // top of the hours row (outer edge of the tubes)
 const ROW_M = 656; // top of the minutes row: clear air between the two rows of the time
@@ -460,8 +460,16 @@ export default {
       // the condition is set smaller (never under 44 px) to stay on one line; only what
       // still does not fit wraps, by word, with the lines well apart
       let fs = 54;
+      const over = () => T.cond.scrollWidth > T.cond.clientWidth + 1 || T.cond.offsetHeight > fs + 42 + 4;
+      T.cond.style.padding = "";
       T.cond.style.fontSize = `${fs}px`;
-      while (fs > 44 && (T.cond.scrollWidth > T.cond.clientWidth + 1 || T.cond.offsetHeight > fs + 42 + 4)) { fs -= 2; T.cond.style.fontSize = `${fs}px`; }
+      while (fs > 44 && over()) { fs -= 2; T.cond.style.fontSize = `${fs}px`; }
+      if (!over()) {
+        // on one line: keep it off the edges of the card as well, where it can still be 44 px
+        T.cond.style.padding = "0 12px";
+        while (fs > 44 && over()) { fs -= 2; T.cond.style.fontSize = `${fs}px`; }
+        if (over()) T.cond.style.padding = "";
+      }
       tagTemp.h = tagTemp.card.offsetHeight || tagTemp.h;
     }
 
