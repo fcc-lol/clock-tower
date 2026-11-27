@@ -1,0 +1,1363 @@
+// Last Brick Standing
+//
+// A game of Breakout that plays itself against a wall of 18 x 40 glazed
+// bricks. Each course of the wall is glazed in the colour the sky really was:
+// the top course is 24 hours ago, the bottom course is now, and west to east
+// runs left to right. The only bricks the ball can never break are the ivory
+// steel ones, and they spell the time. Over each quarter hour the ball chips
+// the sky away until the hour is left standing; every minute the changed
+// numeral is re-laid with fresh brick, and a mason quietly re-lays a ragged
+// course now and then so the wall never falls to rubble.
+//
+// What the conditions do:
+//   clock        the steel numerals; how far the wall is carved is how far we
+//                are into the quarter hour (a fresh wall at :00 :15 :30 :45)
+//   sky record   the glaze of every course (a computed sky stands in if the
+//                camera record is missing)
+//   daylight     by day the glaze is lit; at night the wall is unlit tile and
+//                the ball carries a small pool of light across it
+//   wind         a real sideways force: the ball's path curves, the paddle is
+//                shoved by gusts, rain slants, shards fly downwind
+//   rain         is seen through the gaps the ball has opened and in the open
+//                playfield; it patters on the paddle, which goes slick and
+//                overshoots
+//   snow         settles on every ledge left standing, is knocked loose by the
+//                ball, and muffles the bounce
+//   heat / cold  hot days quicken play and draw a long molten trail; cold
+//                slows it to a short icy one and frosts the brick edges
+//   fog          a bank hides the upper wall (never the numerals)
+//   thunder      a second ball enters, the wall shivers on a slow rumble and
+//                now and then the whole glaze is softly lit
+//
+// The paddle is played by a slightly human hand: it reacts late, aims for
+// sky brick, is thrown off by wind, and now and then misses.
+
+import {
+  W, H, TAU, clamp, lerp, smoothstep, approach, rng, hash, createNoise,
+  toOklab, oklch, mix, adjust, ramp, rgba, luminance,
+  el, addStyle, canvas2d, grain, fitText,
+} from "../lib/kit.js";
+import { sunPosition } from "../lib/astro.js";
+
+// ----- geometry (stage units) ------------------------------------------------
+const COLS = 18;
+const ROWS = 40;
+const NB = COLS * ROWS;
+const BW = 58; // brick pitch
+const BH = 26;
+const WX = 18; // wall and playfield, left edge
+const WR = WX + COLS * BW; // right edge
+const WY = 172; // wall top
+const WB = WY + ROWS * BH; // wall bottom
+const CEIL = 120;
+const FLOOR = 1524;
+const PAD_Y = 1480;
+const PAD_W = 148;
+const PAD_H = 14;
+const BR = 9; // ball radius
+const QUARTER = 15 * 60 * 1000;
+const ROW_MS = 36 * 60 * 1000; // 24 hours over 40 courses
+const TRAIL = 48;
+
+const STEEL_DAY = "#f3ebd9";
+const STEEL_NIGHT = "#9c9583";
+const NIGHT_GROUND = "#05060a";
+
+// ----- the numerals: 7 x 15 bricks, strokes two bricks wide, bars three tall ---
+const SEG = { a: [0, 0, 7, 3], g: [0, 6, 7, 3], d: [0, 12, 7, 3], f: [0, 0, 2, 9], b: [5, 0, 2, 9], e: [0, 6, 2, 9], c: [5, 6, 2, 9] };
+const DIGITS = ["abcdef", "", "abged", "abgcd", "fgbc", "afgcd", "afgecd", "abc", "abcdefg", "abfgcd"].map((k) => [...k].map((ch) => SEG[ch]));
+DIGITS[1] = [[3, 0, 2, 15], [1, 0, 2, 3], [1, 12, 6, 3]];
+const LETTERS = {
+  A: ["111", "101", "111", "101", "101"],
+  P: ["111", "101", "111", "100", "100"],
+  M: ["10001", "11011", "10101", "10001", "10001"],
+};
+const HOUR_ROW = 2;
+const AMPM_ROW = 18;
+const MIN_ROW = 24;
+const SLOT_A = 1;
+const SLOT_B = 10;
+
+function stampDigit(map, d, c0, r0) {
+  for (const [x, y, w, h] of DIGITS[d] || []) for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) map[(r0 + y + r) * COLS + c0 + x + c] = 1;
+}
+function stampLetter(map, ch, c0, r0) {
+  const rows = LETTERS[ch];
+  if (!rows) return;
+  for (let r = 0; r < rows.length; r++) for (let c = 0; c < rows[r].length; c++) if (rows[r][c] === "1") map[(r0 + r) * COLS + c0 + c] = 1;
+}
+function buildSteel(map, hh, mm, ampm) {
+  map.fill(0);
+  if (hh.length > 1) {
+    stampDigit(map, +hh[0], SLOT_A, HOUR_ROW);
+    stampDigit(map, +hh[1], SLOT_B, HOUR_ROW);
+  } else stampDigit(map, +hh, SLOT_A, HOUR_ROW);
+  stampLetter(map, ampm[0], SLOT_A, AMPM_ROW);
+  stampLetter(map, "M", SLOT_A + 4, AMPM_ROW);
+  stampDigit(map, +mm[0], SLOT_A, MIN_ROW);
+  stampDigit(map, +mm[1], SLOT_B, MIN_ROW);
+}
+
+// ----- a computed sky, for courses the camera record does not cover -----------
+const alt01 = (alt) => clamp((alt + 18) / 78);
+const M_CLEAR = ramp([[0, "#05070f"], [0.115, "#121b3d"], [0.19, "#445488"], [0.27, "#7fa3d6"], [0.6, "#4f8fdc"], [1, "#3d7fd0"]]);
+const M_CLOUD = ramp([[0, "#1d1b1c"], [0.15, "#3b3e48"], [0.23, "#7a808a"], [0.5, "#b1bac2"], [1, "#bcc4cb"]]);
+const M_GLOW = ramp([[0.09, "#3a2f5e"], [0.17, "#b5557a"], [0.24, "#f29a54"], [0.35, "#e9d9a6"]]);
+const BEARINGS = [270, 315, 45, 90];
+function modelSky(ms, cloud, bearing) {
+  const sun = sunPosition(ms);
+  const a = alt01(sun.alt);
+  const off = Math.abs((((sun.az - bearing) % 360) + 540) % 360 - 180);
+  const near = Math.exp(-((off / 60) ** 2));
+  const low = sun.alt > -11 && sun.alt < 9 ? Math.sin(((sun.alt + 11) / 20) * Math.PI) : 0;
+  return mix(mix(M_CLEAR(a), M_GLOW(a), near * low * 0.8), M_CLOUD(a), Math.pow(clamp(cloud), 1.2));
+}
+
+const TRAIL_RAMP = ramp([[0, "#9fd4ff"], [0.42, "#f3ebd9"], [0.72, "#ffc56e"], [1, "#ff5f2e"]]);
+
+const CSS = `
+.lb { position: absolute; inset: 0; overflow: hidden; background: ${NIGHT_GROUND}; color: var(--ink, ${STEEL_DAY}); font-family: "Silkscreen", "Courier New", monospace; text-transform: uppercase; }
+.lb canvas { z-index: 1; }
+.lb-date { position: absolute; z-index: 6; left: 76px; top: 50px; font-size: 56px; line-height: 1; white-space: nowrap; }
+.lb-rule { position: absolute; z-index: 6; left: ${WX}px; width: ${WR - WX}px; height: 2px; background: currentColor; opacity: 0.3; }
+.lb-bed { position: absolute; z-index: 0; left: ${WX}px; top: ${WY}px; width: ${COLS * BW}px; height: ${ROWS * BH}px; opacity: 0.075;
+  background-image: linear-gradient(to bottom, currentColor 2px, transparent 2px), linear-gradient(to right, currentColor 2px, transparent 2px);
+  background-size: ${BW}px ${BH}px; background-position: -1px -1px; }
+.lb-fog { position: absolute; z-index: 3; left: 0; top: 0; width: ${W}px; height: ${WB + 60}px; overflow: hidden; opacity: 0; display: none;
+  background: linear-gradient(to bottom, transparent 0%, var(--fog) 16%, var(--fog) 34%, transparent 82%); }
+.lb-fog i { position: absolute; display: block; background: radial-gradient(closest-side, var(--fog) 0%, var(--fog) 30%, transparent 100%); will-change: transform; }
+.lb-floor { position: absolute; z-index: 6; left: 76px; top: ${FLOOR + 26}px; width: 928px; font-family: "Jersey 10", "Silkscreen", monospace; text-transform: none; }
+.lb-a { position: relative; height: 90px; }
+.lb-temp { position: absolute; left: 0; bottom: 0; font-size: 140px; line-height: 0.64; white-space: nowrap; }
+.lb-cond { position: absolute; left: ${4 * BW}px; bottom: 0; font-size: 62px; line-height: 0.64; white-space: nowrap; }
+.lb-b { position: relative; height: 56px; margin-top: 30px; }
+.lb-cell { position: absolute; top: 0; white-space: nowrap; }
+.lb-k { font-family: "Silkscreen", monospace; text-transform: uppercase; font-size: 24px; line-height: 16px; color: var(--dim, #9a9484); }
+.lb-v { font-size: 46px; line-height: 30px; margin-top: 10px; }
+.lb-fact { margin-top: 28px; }
+.lb-fv { font-size: 46px; line-height: 40px; margin-top: 6px; }
+`;
+
+export default {
+  title: "Last Brick Standing",
+  description: "Breakout plays itself against a wall glazed in the last day's sky; the bricks it cannot break spell the time.",
+  fonts: ["Silkscreen:wght@400;700", "Jersey 10"],
+
+  mount(root, { state, seed }) {
+    addStyle(root, CSS);
+    const wrap = el("div", { class: "lb" });
+    root.append(wrap);
+
+    // Layers, back to front: weather seen through the wall, the glazed wall,
+    // fog, the steel numerals, then everything that moves.
+    wrap.append(el("div", { class: "lb-bed" }));
+    const air = canvas2d(wrap, { adaptive: true });
+    const wall = canvas2d(wrap, { maxScale: 2 });
+    const fogBlobs = [0, 1, 2, 3].map(() => el("i"));
+    const fog = el("div", { class: "lb-fog" }, fogBlobs);
+    wrap.append(fog);
+    const steelL = canvas2d(wrap, { maxScale: 2 });
+    const fx = canvas2d(wrap, { adaptive: true });
+    air.canvas.style.zIndex = "1";
+    wall.canvas.style.zIndex = "2";
+    steelL.canvas.style.zIndex = "4";
+    fx.canvas.style.zIndex = "5";
+    fogBlobs.forEach((b, i) => {
+      const w = 760 + i * 130;
+      const h = 300 + ((i * 97) % 160);
+      Object.assign(b.style, { width: `${w}px`, height: `${h}px`, left: `${-200 + i * 190}px`, top: `${-60 + i * 150}px` });
+    });
+
+    const dateEl = el("div", { class: "lb-date" });
+    const tempEl = el("div", { class: "lb-temp" });
+    const condEl = el("div", { class: "lb-cond" });
+    const cell = (left, label) => {
+      const k = el("div", { class: "lb-k", text: label });
+      const v = el("div", { class: "lb-v" });
+      return { k, v, node: el("div", { class: "lb-cell", style: { left: `${left}px` } }, k, v) };
+    };
+    const sunC = cell(0, "");
+    const moonC = cell(4 * BW, "Moon");
+    const airC = cell(9 * BW, "Air");
+    const uvC = cell(13 * BW, "UV");
+    const factK = el("div", { class: "lb-k" });
+    const factV = el("div", { class: "lb-fv" });
+    const factEl = el("div", { class: "lb-fact" }, factK, factV);
+    const floorEl = el("div", { class: "lb-floor" },
+      el("div", { class: "lb-a" }, tempEl, condEl),
+      el("div", { class: "lb-b" }, sunC.node, moonC.node, airC.node, uvC.node),
+      factEl);
+    wrap.append(
+      dateEl,
+      el("div", { class: "lb-rule", style: { top: `${CEIL - 2}px` } }),
+      el("div", { class: "lb-rule", style: { top: `${FLOOR}px` } }),
+      floorEl,
+    );
+    grain(wrap, { opacity: 0.05 });
+
+    // The fully lit wall, kept off screen: the ball's pool of light at night
+    // and the soft glow of far lightning are cut from it.
+    const litCanvas = document.createElement("canvas");
+    litCanvas.width = COLS * BW;
+    litCanvas.height = ROWS * BH;
+    const lit = litCanvas.getContext("2d");
+    const POOL = 440;
+    const poolCanvas = document.createElement("canvas");
+    poolCanvas.width = poolCanvas.height = POOL;
+    const pool = poolCanvas.getContext("2d");
+    const maskCanvas = document.createElement("canvas");
+    maskCanvas.width = maskCanvas.height = POOL;
+    {
+      const m = maskCanvas.getContext("2d");
+      const g = m.createRadialGradient(POOL / 2, POOL / 2, 0, POOL / 2, POOL / 2, POOL / 2);
+      g.addColorStop(0, "rgba(0,0,0,1)");
+      g.addColorStop(0.25, "rgba(0,0,0,0.8)");
+      g.addColorStop(0.6, "rgba(0,0,0,0.28)");
+      g.addColorStop(1, "rgba(0,0,0,0)");
+      m.fillStyle = g;
+      m.fillRect(0, 0, POOL, POOL);
+    }
+    const haloCanvas = document.createElement("canvas");
+    haloCanvas.width = haloCanvas.height = 128;
+    {
+      const m = haloCanvas.getContext("2d");
+      const g = m.createRadialGradient(64, 64, 0, 64, 64, 64);
+      g.addColorStop(0, "rgba(255,244,222,0.55)");
+      g.addColorStop(0.3, "rgba(255,240,214,0.2)");
+      g.addColorStop(1, "rgba(255,240,214,0)");
+      m.fillStyle = g;
+      m.fillRect(0, 0, 128, 128);
+    }
+
+    // ----- the game ----------------------------------------------------------
+    const kind = new Uint8Array(NB); // 0 gap, 1 sky brick, 2 steel
+    const steel = new Uint8Array(NB); // where the numerals are
+    const steelNext = new Uint8Array(NB);
+    const reach = new Uint8Array(NB); // sky bricks a ball could ever get to
+    const cap = new Float32Array(NB); // snow lying on a brick, 0..1
+    const fresh = new Float32Array(NB); // seconds of wet-glaze shine left on a new brick
+    const glint = new Float32Array(NB); // a struck steel brick rings for a moment
+    const cellFlag = new Uint8Array(NB);
+    const cellList = new Int16Array(NB);
+    let nCells = 0;
+    const rowDirty = new Uint8Array(ROWS);
+    const QN = 2048;
+    const qI = new Int16Array(QN);
+    const qT = new Float64Array(QN);
+    const qK = new Uint8Array(QN);
+    let qn = 0;
+    const stack = new Int16Array(NB);
+
+    let gr = rng(seed); // the game's dice
+    const vr = rng(seed + 17); // dice for things that are only looked at
+    const noise = createNoise(seed);
+
+    const env = { wind: 0, ax: 0, speed: 520, rain: 0, snow: 0, slick: 0, storm: false, gust: 0, fog: 0 };
+    const pad = { x: W / 2, v: 0, target: W / 2, react: 0, freeze: 0, aim: 0, err: 0 };
+    const ai = { lazy: false };
+    const mkBall = () => ({ state: 0, x: 0, y: 0, vx: 0, vy: 0, timer: 0, quiet: 0, sincePad: 0, muffle: 1, aimed: false, keep: true, fade: 0, trail: new Float32Array(TRAIL * 2), th: 0, tn: 0 });
+    const balls = [mkBall(), mkBall()];
+    let simNow = 0;
+    let instant = false; // lay bricks at once (catching up, or the clock jumped)
+    let ctrlT = 0;
+    let snowT = 0;
+    let relayCool = 0;
+    let reachTotal = 1;
+    let shownH = "";
+    let shownM = "";
+    let shownA = "";
+
+    // shards of broken brick, and small square particles (snow, spray, sparks)
+    const SH = 96;
+    const shX = new Float32Array(SH), shY = new Float32Array(SH), shVX = new Float32Array(SH), shVY = new Float32Array(SH);
+    const shA = new Float32Array(SH), shVA = new Float32Array(SH), shL = new Float32Array(SH), shW = new Float32Array(SH);
+    const shI = new Int16Array(SH);
+    let shN = 0;
+    const PT = 256;
+    const ptX = new Float32Array(PT), ptY = new Float32Array(PT), ptVX = new Float32Array(PT), ptVY = new Float32Array(PT);
+    const ptL = new Float32Array(PT), ptM = new Float32Array(PT), ptS = new Float32Array(PT);
+    const ptK = new Uint8Array(PT); // 0 ivory, 1 snow, 2 water
+    let ptN = 0;
+    function spark(x, y, vx, vy, life, size, k) {
+      const i = ptN++ % PT;
+      ptX[i] = x; ptY[i] = y; ptVX[i] = vx; ptVY[i] = vy; ptL[i] = life; ptM[i] = life; ptS[i] = size; ptK[i] = k;
+    }
+
+    const markCell = (i) => {
+      if (!cellFlag[i]) {
+        cellFlag[i] = 1;
+        cellList[nCells++] = i;
+      }
+    };
+
+    function serve(b, delay) {
+      b.state = 1;
+      b.timer = delay;
+      b.quiet = 0;
+      b.sincePad = 0;
+      b.tn = 0;
+      b.aimed = false;
+      b.muffle = 1;
+    }
+    function launch(b) {
+      const a = gr.range(-0.55, 0.55);
+      b.vx = Math.sin(a) * env.speed;
+      b.vy = -Math.cos(a) * env.speed;
+      b.x = pad.x;
+      b.y = PAD_Y - BR - 1;
+      b.state = 2;
+    }
+    function pop(b, live) {
+      if (live) for (let k = 0; k < 10; k++) spark(b.x, b.y, Math.cos(k * 0.628) * 90, Math.sin(k * 0.628) * 90, 0.45, 4, 0);
+      b.state = 3;
+      b.timer = 0.9;
+      b.tn = 0;
+    }
+
+    // Which sky bricks can a ball ever reach? Everything connected to the open
+    // playfield through cells that are not steel (the air above the wall links
+    // the top course).
+    function computeReach() {
+      reach.fill(0);
+      let n = 0;
+      let top = false;
+      const push = (i) => {
+        if (!reach[i] && !steel[i]) {
+          reach[i] = 1;
+          stack[n++] = i;
+        }
+      };
+      for (let c = 0; c < COLS; c++) push((ROWS - 1) * COLS + c);
+      reachTotal = 0;
+      while (n) {
+        const i = stack[--n];
+        reachTotal++;
+        const c = i % COLS;
+        const r = (i / COLS) | 0;
+        if (c > 0) push(i - 1);
+        if (c < COLS - 1) push(i + 1);
+        if (r > 0) push(i - COLS);
+        else if (!top) {
+          top = true;
+          for (let k = 0; k < COLS; k++) push(k);
+        }
+        if (r < ROWS - 1) push(i + COLS);
+      }
+      reachTotal = Math.max(1, reachTotal);
+    }
+
+    // Put one brick in place. A sky brick is not laid on top of a ball; a steel
+    // one always is (the time must be right), and a ball caught inside is lost.
+    function lay(i, k, live) {
+      const x0 = WX + (i % COLS) * BW;
+      const y0 = WY + ((i / COLS) | 0) * BH;
+      for (const b of balls) {
+        if (b.state !== 2) continue;
+        if (b.x > x0 - BR && b.x < x0 + BW + BR && b.y > y0 - BR && b.y < y0 + BH + BR) {
+          if (k === 1) return;
+          if (b.x > x0 && b.x < x0 + BW && b.y > y0 && b.y < y0 + BH) pop(b, live);
+        }
+      }
+      kind[i] = k;
+      cap[i] = 0;
+      if (i + COLS < NB) cap[i + COLS] = 0;
+      if (live) fresh[i] = 0.55;
+      markCell(i);
+    }
+    function schedule(i, k, delay) {
+      if (instant || qn >= QN) lay(i, k, false);
+      else {
+        qI[qn] = i;
+        qT[qn] = simNow + delay;
+        qK[qn] = k;
+        qn++;
+      }
+    }
+    function relayCells(c0, r0, w, h, rowGap, colGap) {
+      for (let r = h - 1; r >= 0; r--) for (let c = 0; c < w; c++) {
+        const i = (r0 + r) * COLS + c0 + c;
+        schedule(i, steel[i] ? 2 : 1, (h - 1 - r) * rowGap + c * colGap);
+      }
+    }
+    // How long is the run of cells between steel that (r, c) sits in? The mason
+    // only lays proper lengths of wall, never a stub between two numerals.
+    function runAt(r, c) {
+      let a = c;
+      let b = c;
+      while (a > 0 && !steel[r * COLS + a - 1]) a--;
+      while (b < COLS - 1 && !steel[r * COLS + b + 1]) b++;
+      return b - a + 1;
+    }
+    // The mason: re-lay the most ragged course, one brick after another.
+    function relayCourse() {
+      let best = -1;
+      let bestScore = 0;
+      for (let r = 0; r < ROWS; r++) {
+        let missing = 0;
+        for (let c = 0; c < COLS; c++) if (!kind[r * COLS + c] && runAt(r, c) >= 3) missing++;
+        if (!missing) continue;
+        let near = false;
+        for (const b of balls) if (b.state === 2 && Math.abs((b.y - WY) / BH - r - 0.5) < 2.5) near = true;
+        if (near) continue;
+        const score = missing + gr() * 5;
+        if (score > bestScore) {
+          bestScore = score;
+          best = r;
+        }
+      }
+      if (best < 0) return;
+      const dir = gr() < 0.5;
+      let n = 0;
+      for (let k = 0; k < COLS; k++) {
+        const c = dir ? k : COLS - 1 - k;
+        const i = best * COLS + c;
+        if (!kind[i] && runAt(best, c) >= 3) schedule(i, 1, n++ * 0.075);
+      }
+    }
+
+    function breakBrick(i, b, live) {
+      kind[i] = 0;
+      markCell(i);
+      b.quiet = 0;
+      if (!live) {
+        cap[i] = 0;
+        return;
+      }
+      const x0 = WX + (i % COLS) * BW;
+      const y0 = WY + ((i / COLS) | 0) * BH;
+      for (let k = 0; k < 4; k++) {
+        const j = shN++ % SH;
+        shX[j] = x0 + (k & 1 ? 0.75 : 0.25) * BW;
+        shY[j] = y0 + (k & 2 ? 0.75 : 0.25) * BH;
+        shVX[j] = b.vx * 0.22 + (k & 1 ? 70 : -70) + vr.range(-50, 50) + env.wind * 4;
+        shVY[j] = b.vy * 0.18 + (k & 2 ? 30 : -110) + vr.range(-40, 40);
+        shA[j] = 0;
+        shVA[j] = vr.range(-7, 7);
+        shL[j] = vr.range(0.8, 1.2);
+        shW[j] = vr.range(0.36, 0.5);
+        shI[j] = i;
+      }
+      if (cap[i] > 0.1) for (let k = 0; k < 7; k++) spark(x0 + vr() * BW, y0 - 2, vr.range(-60, 60) + env.wind * 5, vr.range(-90, -10), vr.range(0.5, 0.9), vr.range(3, 5), 1);
+      cap[i] = 0;
+    }
+    function strike(i, b, live) {
+      if (kind[i] === 1) breakBrick(i, b, live);
+      else {
+        // steel: it rings, and whatever snow lay on it jumps off
+        if (live) {
+          glint[i] = 0.3;
+          if (cap[i] > 0.1) {
+            const x0 = WX + (i % COLS) * BW;
+            const y0 = WY + ((i / COLS) | 0) * BH;
+            for (let k = 0; k < 6; k++) spark(x0 + vr() * BW, y0 - 2, vr.range(-60, 60) + env.wind * 5, vr.range(-80, -10), vr.range(0.5, 0.9), vr.range(3, 5), 1);
+          }
+        }
+        cap[i] = 0;
+        // a hair of spin so it never settles into a loop between two plates
+        const a = (gr() - 0.5) * 0.07;
+        const cs = Math.cos(a);
+        const sn = Math.sin(a);
+        const vx = b.vx * cs - b.vy * sn;
+        b.vy = b.vx * sn + b.vy * cs;
+        b.vx = vx;
+      }
+      if (env.snow > 0) b.muffle = 0.62; // snow deadens the bounce
+    }
+
+    function collide(b, live) {
+      const x = b.x;
+      const y = b.y;
+      if (y - BR >= WB || y + BR <= WY) return;
+      const c0 = Math.max(0, Math.floor((x - BR - WX) / BW));
+      const c1 = Math.min(COLS - 1, Math.floor((x + BR - WX) / BW));
+      const r0 = Math.max(0, Math.floor((y - BR - WY) / BH));
+      const r1 = Math.min(ROWS - 1, Math.floor((y + BR - WY) / BH));
+      let best = -1;
+      let bestD = BR * BR;
+      let nx = 0;
+      let ny = 0;
+      let qx = 0;
+      let qy = 0;
+      for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+        const i = r * COLS + c;
+        if (!kind[i]) continue;
+        const x0 = WX + c * BW;
+        const y0 = WY + r * BH;
+        const px = x < x0 ? x0 : x > x0 + BW ? x0 + BW : x;
+        const py = y < y0 ? y0 : y > y0 + BH ? y0 + BH : y;
+        const dx = x - px;
+        const dy = y - py;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) {
+          best = i; bestD = d; nx = dx; ny = dy; qx = px; qy = py;
+        }
+      }
+      if (best < 0) return;
+      if (bestD < 1e-6) {
+        // the centre is inside a brick (one was laid around it)
+        if (kind[best] === 1) breakBrick(best, b, live);
+        else pop(b, live);
+        return;
+      }
+      if (Math.abs(nx) > Math.abs(ny)) {
+        b.vx = nx > 0 ? Math.abs(b.vx) : -Math.abs(b.vx);
+        b.x = qx + (nx > 0 ? BR : -BR);
+      } else {
+        b.vy = ny > 0 ? Math.abs(b.vy) : -Math.abs(b.vy);
+        b.y = qy + (ny > 0 ? BR : -BR);
+      }
+      strike(best, b, live);
+    }
+
+    function stepBall(b, dt, live) {
+      if (b.state === 0) return;
+      if (b.state === 1) {
+        b.timer -= dt;
+        b.x = pad.x;
+        b.y = PAD_Y - BR - 1;
+        if (b.timer <= 0) launch(b);
+        return;
+      }
+      if (b.state === 3) {
+        b.timer -= dt;
+        if (b.timer <= 0) {
+          if (b.keep) serve(b, 0.8);
+          else b.state = 0;
+        }
+        return;
+      }
+      b.quiet += dt;
+      b.sincePad += dt;
+      if (b.sincePad > 10 && b.quiet > 6) {
+        pop(b, live); // rattling somewhere it cannot get out of
+        return;
+      }
+      b.vx += env.ax * dt;
+      b.muffle = approach(b.muffle, 1, dt, 0.4);
+      const sp = Math.hypot(b.vx, b.vy) || 1;
+      const want = env.speed * b.muffle;
+      const ns = sp + (want - sp) * Math.min(1, dt * 7);
+      b.vx *= ns / sp;
+      b.vy *= ns / sp;
+      const minV = 0.3 * ns;
+      if (Math.abs(b.vy) < minV) {
+        b.vy = b.vy < 0 ? -minV : minV;
+        b.vx = (b.vx < 0 ? -1 : 1) * Math.sqrt(ns * ns - minV * minV);
+      }
+      const n = Math.max(1, Math.ceil((ns * dt) / 6));
+      const h = dt / n;
+      for (let s = 0; s < n && b.state === 2; s++) {
+        b.x += b.vx * h;
+        b.y += b.vy * h;
+        if (b.x < WX + BR) {
+          b.x = WX + BR;
+          b.vx = Math.abs(b.vx);
+        } else if (b.x > WR - BR) {
+          b.x = WR - BR;
+          b.vx = -Math.abs(b.vx);
+        }
+        if (b.y < CEIL + BR) {
+          b.y = CEIL + BR;
+          b.vy = Math.abs(b.vy);
+        }
+        if (b.vy > 0 && b.y + BR >= PAD_Y && b.y + BR <= PAD_Y + PAD_H + 12 && Math.abs(b.x - pad.x) <= PAD_W / 2 + BR * 0.6) {
+          // off the paddle: where it lands on the paddle sets the angle
+          const off = clamp((b.x - pad.x) / (PAD_W / 2), -1, 1);
+          const a = clamp(off * 1.05 + pad.v * 0.00012, -1.15, 1.15);
+          b.vx = Math.sin(a) * ns;
+          b.vy = -Math.cos(a) * ns;
+          b.y = PAD_Y - BR;
+          b.sincePad = 0;
+          b.quiet = Math.min(b.quiet, 2);
+          b.aimed = false;
+          if (live && env.rain > 0) for (let k = 0; k < 4; k++) spark(b.x + vr.range(-8, 8), PAD_Y, vr.range(-90, 90), vr.range(-150, -60), 0.35, 3, 2);
+        } else if (b.y - BR > FLOOR) {
+          // missed
+          if (live) for (let k = 0; k < 8; k++) spark(b.x + vr.range(-6, 6), FLOOR, vr.range(-110, 110), vr.range(-200, -60), vr.range(0.3, 0.6), 4, 0);
+          b.state = 3;
+          b.timer = 1.1;
+          b.tn = 0;
+        } else collide(b, live);
+      }
+      if (b.state === 2) {
+        b.trail[b.th * 2] = b.x;
+        b.trail[b.th * 2 + 1] = b.y;
+        b.th = (b.th + 1) % TRAIL;
+        if (b.tn < TRAIL) b.tn++;
+        if (b.y < WB - 80 && b.vy < 0) b.aimed = false;
+      }
+    }
+
+    // What would a ball sent from (x, y) in direction (dx, dy) hit first?
+    function cast(x, y, dx, dy) {
+      for (let n = 0; n < 320; n++) {
+        x += dx * 8;
+        y += dy * 8;
+        if (x < WX + BR) {
+          x = 2 * (WX + BR) - x;
+          dx = -dx;
+        } else if (x > WR - BR) {
+          x = 2 * (WR - BR) - x;
+          dx = -dx;
+        }
+        if (y < CEIL) return 0;
+        if (y < WB && y >= WY) {
+          const k = kind[(((y - WY) / BH) | 0) * COLS + (((x - WX) / BW) | 0)];
+          if (k) return k;
+        }
+      }
+      return 0;
+    }
+    const OFFS = 13;
+    const offHit = new Uint8Array(OFFS);
+    function chooseAim(lx) {
+      let match = 0;
+      for (let k = 0; k < OFFS; k++) {
+        const a = (-0.9 + k * 0.15) * 1.05;
+        const hit = cast(lx, PAD_Y - BR, Math.sin(a), -Math.cos(a));
+        offHit[k] = ai.lazy ? (hit !== 1 ? 1 : 0) : hit === 1 ? 1 : 0;
+        match += offHit[k];
+      }
+      let pick = gr.int(0, OFFS - 1);
+      if (match) {
+        let m = gr.int(1, match);
+        for (let k = 0; k < OFFS; k++) if (offHit[k] && --m === 0) pick = k;
+      }
+      pad.aim = clamp(-0.9 + pick * 0.15 + gr.gauss() * 0.06, -0.95, 0.95);
+      // the odd lapse: a late start and a misjudged ball
+      const lapse = 0.016 + 0.0011 * env.gust + 0.02 * env.slick;
+      if (gr() < lapse) {
+        pad.freeze = gr.range(0.3, 0.5);
+        pad.err = gr.sign() * gr.range(40, 120);
+      } else pad.err = gr.gauss() * 5;
+    }
+    function think() {
+      pad.react = gr.range(0.09, 0.17);
+      let b = null;
+      let other = null;
+      for (const q of balls) {
+        if (q.state === 2 && q.vy > 0 && (!b || q.y > b.y)) b = q;
+        if (q.state === 1 || q.state === 2) other = other || q;
+      }
+      if (!b) {
+        pad.target = other && other.state === 2 ? lerp(other.x, W / 2, 0.3) : pad.target;
+        return;
+      }
+      // where a straight line says it will come down (wind only half reckoned with)
+      const t = (PAD_Y - BR - b.y) / b.vy;
+      const lo = WX + BR;
+      const span = WR - WX - 2 * BR;
+      let u = (b.x + b.vx * t + 0.25 * env.ax * t * t - lo) % (2 * span);
+      if (u < 0) u += 2 * span;
+      if (u > span) u = 2 * span - u;
+      const lx = lo + u;
+      if (!b.aimed && b.y > WB - 60) {
+        b.aimed = true;
+        chooseAim(lx);
+      }
+      pad.target = clamp(lx - (b.aimed ? pad.aim * (PAD_W / 2) + pad.err : 0), WX + PAD_W / 2, WR - PAD_W / 2);
+    }
+
+    // One step of the game. `p` is how far through the quarter hour we are.
+    function simStep(dt, live, p) {
+      simNow += dt;
+      pad.react -= dt;
+      if (pad.freeze > 0) pad.freeze -= dt;
+      else if (pad.react <= 0) think();
+      const K = 300;
+      const zeta = lerp(0.95, 0.4, env.slick); // a wet paddle slides past its mark
+      pad.v += ((pad.target - pad.x) * K - pad.v * 2 * Math.sqrt(K) * zeta + env.wind * 0.8 * K) * dt;
+      pad.v = clamp(pad.v, -1900, 1900);
+      pad.x += pad.v * dt;
+      if (pad.x < WX + PAD_W / 2) {
+        pad.x = WX + PAD_W / 2;
+        pad.v = 0;
+      } else if (pad.x > WR - PAD_W / 2) {
+        pad.x = WR - PAD_W / 2;
+        pad.v = 0;
+      }
+      stepBall(balls[0], dt, live);
+      stepBall(balls[1], dt, live);
+
+      for (let j = 0; j < qn; ) {
+        if (qT[j] <= simNow) {
+          lay(qI[j], qK[j], live);
+          qn--;
+          qI[j] = qI[qn]; qT[j] = qT[qn]; qK[j] = qK[qn];
+        } else j++;
+      }
+
+      ctrlT -= dt;
+      if (ctrlT <= 0) {
+        ctrlT += 1;
+        let left = 0;
+        for (let i = 0; i < NB; i++) if (reach[i] && kind[i] === 1) left++;
+        const frac = left / reachTotal;
+        const target = 1 - 0.8 * Math.pow(clamp(p), 0.85);
+        ai.lazy = frac < target - 0.06;
+        relayCool -= 1;
+        if (frac < target - 0.015 && relayCool <= 0 && qn === 0) {
+          relayCourse();
+          relayCool = gr.range(3, 7);
+        }
+      }
+      if (env.snow > 0) {
+        snowT -= dt;
+        if (snowT <= 0) {
+          snowT += 0.5;
+          const rate = (env.snow * 0.5) / 40;
+          for (let i = 0; i < NB; i++) {
+            if (kind[i] && (i < COLS || !kind[i - COLS])) cap[i] = Math.min(1, cap[i] + rate);
+            else cap[i] = 0;
+          }
+        }
+      }
+    }
+
+    function readEnv(s) {
+      const w = s.weather;
+      const g = Math.max(0, noise.n2(s.t * 0.33, 4.2));
+      const speed = w.wind + (w.gust - w.wind) * g * g;
+      const sx = -Math.sin((w.windDir * Math.PI) / 180); // + is a wind from the west, blowing rightward
+      const lateral = (sx < 0 ? -1 : 1) * Math.max(Math.abs(sx), 0.45);
+      env.wind = speed * lateral;
+      env.gust = w.gust;
+      env.ax = env.wind * 14;
+      env.rain = w.falling && w.falling !== "snow" ? w.intensity : 0;
+      env.snow = w.falling === "snow" ? w.intensity : 0;
+      env.slick = Math.min(1, env.rain * 1.6);
+      env.storm = w.falling === "storm";
+      env.speed = 520 * lerp(1, 1.28, smoothstep(78, 100, w.temp)) * lerp(1, 0.9, smoothstep(40, 10, w.temp)) * (1 - 0.12 * env.snow);
+      env.fog = Math.max(w.fog ? 1 : 0, 0.7 * smoothstep(1, 0.1, w.visibility));
+    }
+
+    // Lay the whole wall for this instant and play the quarter hour so far.
+    function rebuild(s) {
+      const c = s.clock;
+      shownH = c.hh; shownM = c.mm; shownA = c.ampm;
+      buildSteel(steel, shownH, shownM, shownA);
+      computeReach();
+      for (let i = 0; i < NB; i++) kind[i] = steel[i] ? 2 : 1;
+      cap.fill(0);
+      fresh.fill(0);
+      glint.fill(0);
+      if (env.snow > 0) for (let i = 0; i < COLS; i++) cap[i] = 1;
+      qn = 0;
+      shL.fill(0);
+      ptL.fill(0);
+      const q = Math.floor(s.ms / QUARTER);
+      gr = rng(seed + (q % 100000) * 7919);
+      simNow = 0;
+      ctrlT = 1;
+      snowT = 0.5;
+      relayCool = 0;
+      ai.lazy = false;
+      pad.x = pad.target = W / 2 + gr.range(-200, 200);
+      pad.v = pad.freeze = pad.react = 0;
+      balls[0].keep = true;
+      serve(balls[0], 0.6);
+      balls[1].keep = env.storm;
+      if (env.storm) serve(balls[1], 2.2);
+      else balls[1].state = 0;
+      const elapsed = (((s.ms % QUARTER) + QUARTER) % QUARTER) / 1000;
+      const m0 = Math.floor(c.m / 15) * 15;
+      const h = 1 / 40;
+      const steps = Math.round(elapsed / h);
+      let minute = 0;
+      instant = true;
+      for (let n = 0; n < steps; n++) {
+        const tau = n * h;
+        const km = Math.floor(tau / 60);
+        if (km !== minute) {
+          minute = km;
+          relayCells(SLOT_B, MIN_ROW, 7, 15, 0, 0);
+          if ((m0 + km) % 10 === 0) relayCells(SLOT_A, MIN_ROW, 7, 15, 0, 0);
+        }
+        simStep(h, false, tau / 900);
+      }
+      instant = false;
+      nCells = 0;
+      cellFlag.fill(0);
+      rowDirty.fill(1);
+    }
+
+    // The clock moved on: re-lay what changed.
+    function timeChanged(s, now) {
+      const c = s.clock;
+      buildSteel(steelNext, c.hh, c.mm, c.ampm);
+      const whole = c.hh !== shownH || c.ampm !== shownA;
+      const tens = c.mm[0] !== shownM[0];
+      const ones = c.mm[1] !== shownM[1];
+      shownH = c.hh; shownM = c.mm; shownA = c.ampm;
+      steel.set(steelNext);
+      computeReach();
+      instant = now;
+      if (whole) relayCells(0, 0, COLS, ROWS, 0.045, 0.004);
+      else {
+        if (tens) relayCells(SLOT_A, MIN_ROW, 7, 15, 0.08, 0.01);
+        if (ones) relayCells(SLOT_B, MIN_ROW, 7, 15, 0.08, 0.01);
+      }
+      instant = false;
+    }
+
+    // ----- glaze -------------------------------------------------------------
+    const colDim = new Array(NB).fill("#000");
+    const colLit = new Array(NB).fill("#000");
+    const lab4 = [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]];
+    const DIRS = ["west", "northWest", "northEast", "east"];
+    const Y_MAX = (luminance(STEEL_DAY) + 0.05) / 3.3 - 0.05; // keep the numerals 3.3:1 clear of the brightest glaze
+    let unlit = 1; // 0.42 at night .. 1 by day: how much light is on the wall
+    let steelDim = STEEL_DAY;
+    let frost = 0;
+    let wet = 0;
+    let palKey = "";
+
+    function glaze(s) {
+      const day = s.sky.day || [];
+      const n = day.length;
+      const past = s.pastHours;
+      let j = 0;
+      for (let r = 0; r < ROWS; r++) {
+        const tr = s.ms - (ROWS - 1 - r) * ROW_MS;
+        let src = null;
+        if (r === ROWS - 1) src = s.sky;
+        else if (n) {
+          while (j < n - 1 && Math.abs(day[j + 1].ms - tr) <= Math.abs(day[j].ms - tr)) j++;
+          if (Math.abs(day[j].ms - tr) < 50 * 60000) src = day[j];
+        }
+        if (src) for (let d = 0; d < 4; d++) lab4[d] = toOklab(src[DIRS[d]]);
+        else {
+          let cloud = 0.4;
+          if (past && past.length) {
+            const k = clamp(Math.round((tr - past[0].ms) / 3600000), 0, past.length - 1);
+            cloud = past[k].cloud / 100;
+          }
+          for (let d = 0; d < 4; d++) lab4[d] = toOklab(modelSky(tr, cloud, BEARINGS[d]));
+        }
+        for (let c = 0; c < COLS; c++) {
+          const i = r * COLS + c;
+          const f = (c / (COLS - 1)) * 3;
+          const seg = Math.min(2, Math.floor(f));
+          const t = f - seg;
+          const A = lab4[seg];
+          const B = lab4[seg + 1];
+          const L0 = A[0] + (B[0] - A[0]) * t;
+          const a = A[1] + (B[1] - A[1]) * t;
+          const b = A[2] + (B[2] - A[2]) * t;
+          // sky into fired glaze: mid-toned, a little richer, never quite the same twice
+          const j1 = hash(i, seed) - 0.5;
+          const j2 = hash(i, seed + 31) - 0.5;
+          let L = Math.min(0.62, 0.25 + 0.42 * L0) + j1 * 0.06;
+          const C = Math.min(0.2, Math.hypot(a, b) * 1.4 + 0.018) * (1 + j2 * 0.25);
+          const hue = (Math.atan2(b, a) * 180) / Math.PI + j2 * 9;
+          let hex = oklch(L, C, hue);
+          while (luminance(hex) > Y_MAX && L > 0.3) {
+            L -= 0.02;
+            hex = oklch(L, C, hue);
+          }
+          colLit[i] = hex;
+          colDim[i] = unlit > 0.985 ? hex : oklch(L * unlit, C * (0.5 + 0.5 * unlit), hue);
+        }
+      }
+    }
+
+    function skyDetail(ctx, ox, oy, r, c0, c1, k) {
+      const y = oy + r * BH;
+      let any = false;
+      ctx.beginPath();
+      for (let c = c0; c <= c1; c++) {
+        if (kind[r * COLS + c] !== 1) continue;
+        any = true;
+        const x = ox + c * BW;
+        ctx.rect(x + 1, y + 1, BW - 2, 2);
+        ctx.rect(x + 1, y + 3, 2, BH - 7);
+      }
+      if (!any) return;
+      ctx.fillStyle = `rgba(255,255,255,${((0.16 + 0.2 * wet) * k).toFixed(3)})`;
+      ctx.fill();
+      ctx.beginPath();
+      for (let c = c0; c <= c1; c++) {
+        if (kind[r * COLS + c] !== 1) continue;
+        const x = ox + c * BW;
+        ctx.rect(x + 1, y + BH - 4, BW - 2, 3);
+        ctx.rect(x + BW - 3, y + 1, 2, BH - 5);
+      }
+      ctx.fillStyle = "rgba(0,0,0,0.24)";
+      ctx.fill();
+      if (frost > 0.02) {
+        ctx.beginPath();
+        for (let c = c0; c <= c1; c++) {
+          const i = r * COLS + c;
+          if (kind[i] !== 1) continue;
+          const x = ox + c * BW;
+          for (let q = 0; q < 5; q++) {
+            const hx = hash(i * 7 + q, 91);
+            const hy = hash(i * 7 + q, 17);
+            ctx.rect(x + 2 + Math.floor(hx * (BW - 7)), y + 2 + Math.floor(hy * hy * 9), hx > 0.6 ? 3 : 2, 2);
+          }
+        }
+        ctx.fillStyle = `rgba(214,236,255,${(0.42 * frost * k).toFixed(3)})`;
+        ctx.fill();
+      }
+    }
+    function steelDetail(ctx, ox, oy, r, c0, c1, k) {
+      const y = oy + r * BH;
+      let any = false;
+      ctx.beginPath();
+      for (let c = c0; c <= c1; c++) {
+        if (kind[r * COLS + c] !== 2) continue;
+        any = true;
+        const x = ox + c * BW;
+        ctx.rect(x + 1, y + 1, BW - 2, 2);
+        ctx.rect(x + 1, y + 3, 2, BH - 7);
+      }
+      if (!any) return;
+      ctx.fillStyle = `rgba(255,255,255,${(0.6 * k).toFixed(3)})`;
+      ctx.fill();
+      ctx.beginPath();
+      for (let c = c0; c <= c1; c++) {
+        if (kind[r * COLS + c] !== 2) continue;
+        const x = ox + c * BW;
+        ctx.rect(x + 1, y + BH - 4, BW - 2, 3);
+        ctx.rect(x + BW - 3, y + 3, 2, BH - 7);
+      }
+      ctx.fillStyle = "rgba(74,60,36,0.22)";
+      ctx.fill();
+    }
+    function paintRange(r, c0, c1) {
+      const y = WY + r * BH;
+      const x = WX + c0 * BW;
+      const w = (c1 - c0 + 1) * BW;
+      const wc = wall.ctx;
+      const sc = steelL.ctx;
+      wc.clearRect(x, y, w, BH);
+      sc.clearRect(x, y, w, BH);
+      lit.clearRect(x - WX, y - WY, w, BH);
+      sc.fillStyle = steelDim;
+      for (let c = c0; c <= c1; c++) {
+        const i = r * COLS + c;
+        const k = kind[i];
+        if (!k) continue;
+        const bx = WX + c * BW;
+        if (k === 1) {
+          wc.fillStyle = colDim[i];
+          wc.fillRect(bx + 1, y + 1, BW - 2, BH - 2);
+          lit.fillStyle = colLit[i];
+        } else {
+          sc.fillRect(bx + 1, y + 1, BW - 2, BH - 2);
+          lit.fillStyle = STEEL_DAY;
+        }
+        lit.fillRect(bx + 1 - WX, y + 1 - WY, BW - 2, BH - 2);
+      }
+      const k = 0.3 + 0.7 * ((unlit - 0.42) / 0.58);
+      skyDetail(wc, WX, WY, r, c0, c1, k);
+      steelDetail(sc, WX, WY, r, c0, c1, k);
+      skyDetail(lit, 0, 0, r, c0, c1, 1);
+      steelDetail(lit, 0, 0, r, c0, c1, 1);
+    }
+
+    // ----- weather behind the wall --------------------------------------------
+    const RN = 360;
+    const rX = new Float32Array(RN), rY = new Float32Array(RN), rV = new Float32Array(RN), rLen = new Float32Array(RN);
+    for (let i = 0; i < RN; i++) {
+      rX[i] = vr.range(-200, W + 200);
+      rY[i] = vr.range(-100, FLOOR);
+      rV[i] = vr.range(950, 1400);
+      rLen[i] = vr.range(22, 46);
+    }
+    const SN = 300;
+    const sX = new Float32Array(SN), sY = new Float32Array(SN), sV = new Float32Array(SN), sS = new Float32Array(SN), sP = new Float32Array(SN);
+    for (let i = 0; i < SN; i++) {
+      sX[i] = vr.range(-100, W + 100);
+      sY[i] = vr.range(-40, FLOOR);
+      sV[i] = vr.range(55, 150);
+      sS[i] = vr.range(3, 7);
+      sP[i] = vr.range(0, TAU);
+    }
+
+    // ----- frame ---------------------------------------------------------------
+    const shown = {};
+    const put = (key, node, value) => {
+      if (shown[key] === value) return false;
+      shown[key] = value;
+      node.textContent = value;
+      return true;
+    };
+    let lastMs = null;
+    let lastQ = null;
+    let ink = STEEL_DAY;
+    let ground = NIGHT_GROUND;
+    let trailCol = STEEL_DAY;
+    let snowCol = "#ffffff";
+    let rainCol = "rgba(200,220,240,0.4)";
+    let flash = 0; // far lightning: 0..1
+    let flashT = 6;
+    let rumble = 0;
+    let shiver = false;
+    let fogOn = false;
+
+    function frame(s) {
+      const dms = lastMs == null ? 0 : s.ms - lastMs;
+      const first = lastMs == null;
+      lastMs = s.ms;
+      readEnv(s);
+      const dt = s.dt;
+      const q = Math.floor(s.ms / QUARTER);
+      const p = (((s.ms % QUARTER) + QUARTER) % QUARTER) / QUARTER;
+
+      // ----- the game -----
+      let jumped = false;
+      if (first || Math.abs(dms) > 60000) {
+        rebuild(s);
+        jumped = true;
+      } else {
+        const fast = dms > 1000 * dt * 3 + 200; // the clock is being run fast: play to keep up, without ceremony
+        const c = s.clock;
+        if (q !== lastQ && dms > 0) {
+          // a new quarter hour: the whole wall is laid again
+          gr = rng(seed + (q % 100000) * 7919);
+          shownH = "";
+        }
+        if (c.hh !== shownH || c.mm !== shownM || c.ampm !== shownA) timeChanged(s, fast || Math.abs(dms) > 3000);
+        if (env.storm && !balls[1].keep) {
+          balls[1].keep = true;
+          if (balls[1].state === 0) serve(balls[1], 1.5);
+        } else if (!env.storm) balls[1].keep = false;
+        if (fast) {
+          const span = Math.min(60, dms / 1000);
+          const n = Math.ceil(span * 40);
+          instant = true;
+          for (let k = 0; k < n; k++) simStep(span / n, false, p);
+          instant = false;
+          jumped = true;
+        } else {
+          const n = Math.max(1, Math.ceil(dt * 60));
+          for (let k = 0; k < n; k++) simStep(dt / n, true, p);
+        }
+      }
+      lastQ = q;
+
+      // ----- light and colour -----
+      const dl = s.daylight;
+      const u = Math.round((0.42 + 0.58 * smoothstep(0.06, 0.7, dl)) * 60) / 60;
+      const fr = Math.round(smoothstep(35, 18, s.weather.temp) * 4) / 4;
+      const wt = Math.round(env.slick * 4) / 4;
+      const day = s.sky.day || [];
+      const key = `${Math.floor(s.ms / 60000)}|${u}|${fr}|${wt}|${day.length}|${day.length ? day[day.length - 1].ms : 0}|${s.sky.west}${s.sky.east}`;
+      if (key !== palKey) {
+        palKey = key;
+        unlit = u;
+        frost = fr;
+        wet = wt;
+        const k = (u - 0.42) / 0.58;
+        steelDim = mix(STEEL_NIGHT, STEEL_DAY, k);
+        ink = steelDim;
+        ground = mix(NIGHT_GROUND, adjust(s.sky.mean, { l: 0.115, c: (v) => Math.min(v, 0.035) }), smoothstep(0.05, 0.8, dl));
+        snowCol = mix("#8f97a3", "#ffffff", k);
+        rainCol = rgba(mix("#97a6ba", "#dfe9f2", k), 0.45 + 0.2 * k);
+        trailCol = TRAIL_RAMP(clamp((s.weather.temp - 10) / 90));
+        glaze(s);
+        rowDirty.fill(1);
+        wrap.style.background = ground;
+        wrap.style.setProperty("--ink", ink);
+        wrap.style.setProperty("--dim", mix(ink, ground, 0.3));
+        wrap.style.setProperty("--fog", adjust(s.sky.mean, { l: lerp(0.17, 0.5, smoothstep(0.05, 0.8, dl)), c: (v) => v * 0.5 }));
+      }
+
+      // ----- repaint what changed: single bricks at once, whole courses a few per frame -----
+      let budget = jumped || first ? ROWS : 5;
+      for (let r = 0; r < ROWS && budget > 0; r++) {
+        if (!rowDirty[r]) continue;
+        rowDirty[r] = 0;
+        paintRange(r, 0, COLS - 1);
+        budget--;
+      }
+      for (let k = 0; k < nCells; k++) {
+        const i = cellList[k];
+        cellFlag[i] = 0;
+        paintRange((i / COLS) | 0, i % COLS, i % COLS);
+      }
+      nCells = 0;
+
+      // ----- weather, behind the wall -----
+      const ac = air.ctx;
+      air.clear();
+      if (env.rain > 0.01) {
+        const n = Math.min(RN, Math.round(70 + 300 * env.rain));
+        const slant = env.wind * 9;
+        ac.strokeStyle = rainCol;
+        ac.lineCap = "butt";
+        for (let pass = 0; pass < 2; pass++) {
+          ac.lineWidth = pass ? 3 : 2;
+          ac.beginPath();
+          for (let i = pass; i < n; i += 2) {
+            const v = rV[i];
+            if (!jumped) {
+              rX[i] += slant * dt;
+              rY[i] += v * dt;
+            }
+            if (rY[i] > FLOOR || (rY[i] > PAD_Y && rY[i] - v * dt <= PAD_Y && Math.abs(rX[i] - pad.x) < PAD_W / 2)) {
+              const onPad = rY[i] <= FLOOR;
+              spark(rX[i], onPad ? PAD_Y : FLOOR, vr.range(-70, 70) + slant * 0.2, vr.range(-170, -70), 0.28, 3, 2);
+              rX[i] = vr.range(-200, W + 200);
+              rY[i] = vr.range(-160, -20);
+              continue;
+            }
+            const k = rLen[i] / v;
+            ac.moveTo(rX[i], rY[i]);
+            ac.lineTo(rX[i] - slant * k, rY[i] - rLen[i]);
+          }
+          ac.stroke();
+        }
+      }
+      if (env.snow > 0.01) {
+        const n = Math.min(SN, Math.round(70 + 260 * env.snow));
+        ac.fillStyle = snowCol;
+        ac.globalAlpha = 0.85;
+        ac.beginPath();
+        for (let i = 0; i < n; i++) {
+          if (!jumped) {
+            sX[i] += (env.wind * 7 + Math.sin(s.t * 1.3 + sP[i]) * 22) * dt;
+            sY[i] += sV[i] * dt;
+          }
+          if (sY[i] > FLOOR - 2) {
+            sY[i] = -10;
+            sX[i] = vr.range(-100, W + 100);
+          }
+          if (sX[i] < -120) sX[i] += W + 240;
+          else if (sX[i] > W + 120) sX[i] -= W + 240;
+          const z = sS[i];
+          ac.rect(sX[i], sY[i], z, z);
+        }
+        ac.fill();
+        ac.globalAlpha = 1;
+      }
+
+      // ----- fog over the upper wall -----
+      const fogAmt = Math.round(env.fog * 50) / 50;
+      if (fogAmt > 0.02 !== fogOn) {
+        fogOn = fogAmt > 0.02;
+        fog.style.display = fogOn ? "block" : "none";
+      }
+      if (fogOn) {
+        if (shown.fog !== fogAmt) {
+          shown.fog = fogAmt;
+          fog.style.opacity = String(fogAmt);
+        }
+        for (let i = 0; i < 4; i++) {
+          const dx = Math.sin(s.t * (0.05 + i * 0.013) + i * 2.1) * 140 + env.wind * 3;
+          const dy = Math.cos(s.t * (0.04 + i * 0.01) + i) * 26;
+          fogBlobs[i].style.transform = `translate(${dx.toFixed(1)}px,${dy.toFixed(1)}px)`;
+        }
+      }
+
+      // ----- thunder: a soft glow now and then, and a slow shiver after it -----
+      if (env.storm && !jumped) {
+        flashT -= dt;
+        if (flashT <= 0) {
+          flashT = vr.range(9, 20);
+          flash = 0.001;
+          rumble = 3.2;
+        }
+      }
+      if (flash > 0) {
+        // rises over half a second, fades over two
+        flash += dt * (flash < 1 && rumble > 2.7 ? 2 : 0);
+        if (rumble <= 2.7) flash = Math.max(0, flash - dt * 0.5);
+        flash = Math.min(1, flash);
+      }
+      if (rumble > 0) {
+        rumble = Math.max(0, rumble - dt);
+        const amp = 2 * Math.min(1, rumble / 1.5) * Math.min(1, (3.2 - rumble) * 2);
+        const tx = `translate(${(Math.sin(s.t * 13) * amp).toFixed(2)}px,${(Math.sin(s.t * 9.1 + 1) * amp * 0.5).toFixed(2)}px)`;
+        wall.canvas.style.transform = tx;
+        steelL.canvas.style.transform = tx;
+        shiver = true;
+      } else if (shiver) {
+        shiver = false;
+        wall.canvas.style.transform = "";
+        steelL.canvas.style.transform = "";
+      }
+
+      // ----- everything that moves -----
+      const fc = fx.ctx;
+      fx.clear();
+      const dark = 1 - (unlit - 0.42) / 0.58; // 1 at night
+      if (dark > 0.03) {
+        // the ball lights the glaze around it
+        for (const b of balls) {
+          if (b.state !== 2 && b.state !== 1) continue;
+          const sx = Math.round(b.x - WX - POOL / 2);
+          const sy = Math.round(b.y - WY - POOL / 2);
+          if (sy > ROWS * BH || sy + POOL < 0) continue;
+          pool.globalCompositeOperation = "copy";
+          pool.drawImage(litCanvas, -sx, -sy);
+          pool.globalCompositeOperation = "destination-in";
+          pool.drawImage(maskCanvas, 0, 0);
+          fc.globalAlpha = dark * 0.9;
+          fc.drawImage(poolCanvas, sx + WX, sy + WY);
+        }
+        if (flash > 0.01) {
+          fc.globalAlpha = dark * 0.34 * flash * (2 - flash);
+          fc.drawImage(litCanvas, WX, WY);
+        }
+        fc.globalAlpha = 1;
+      }
+
+      // snow on the ledges, wet glaze on new bricks, the ring of struck steel
+      let anyCap = false;
+      fc.beginPath();
+      for (let i = 0; i < NB; i++) {
+        const cp = cap[i];
+        if (cp < 0.06 || !kind[i]) continue;
+        anyCap = true;
+        const x = WX + (i % COLS) * BW;
+        const y = WY + ((i / COLS) | 0) * BH;
+        const hgt = 2 + Math.round(cp * 4);
+        fc.rect(x + 1, y - hgt + 2, BW - 2, hgt);
+        if (cp > 0.5) fc.rect(x + 5 + ((hash(i, 5) * 12) | 0), y - hgt, BW - 22, 2);
+      }
+      if (anyCap) {
+        fc.fillStyle = snowCol;
+        fc.fill();
+      }
+      for (let i = 0; i < NB; i++) {
+        if (fresh[i] > 0) {
+          fc.fillStyle = `rgba(255,248,230,${(0.5 * (fresh[i] / 0.55) ** 2).toFixed(3)})`;
+          fc.fillRect(WX + (i % COLS) * BW + 1, WY + ((i / COLS) | 0) * BH + 1, BW - 2, BH - 2);
+          fresh[i] -= dt;
+        }
+        if (glint[i] > 0) {
+          fc.fillStyle = `rgba(255,255,255,${(0.55 * (glint[i] / 0.3)).toFixed(3)})`;
+          fc.fillRect(WX + (i % COLS) * BW + 1, WY + ((i / COLS) | 0) * BH + 1, BW - 2, BH - 2);
+          glint[i] -= dt;
+        }
+      }
+
+      // shards
+      for (let j = 0; j < SH; j++) {
+        if (shL[j] <= 0) continue;
+        shL[j] -= dt;
+        shVY[j] += 1500 * dt;
+        shVX[j] += env.ax * 0.6 * dt;
+        shX[j] += shVX[j] * dt;
+        shY[j] += shVY[j] * dt;
+        shA[j] += shVA[j] * dt;
+        if (shY[j] > FLOOR) {
+          shL[j] = 0;
+          continue;
+        }
+        const w = BW * shW[j];
+        fc.save();
+        fc.translate(shX[j], shY[j]);
+        fc.rotate(shA[j]);
+        fc.globalAlpha = Math.min(1, shL[j] * 2.2);
+        fc.fillStyle = colDim[shI[j]];
+        fc.fillRect(-w / 2, -BH * 0.22, w, BH * 0.44);
+        fc.restore();
+      }
+      // small particles
+      for (let kd = 0; kd < 3; kd++) {
+        let any = false;
+        fc.beginPath();
+        for (let i = 0; i < PT; i++) {
+          if (ptL[i] <= 0 || ptK[i] !== kd) continue;
+          if (kd === 0) {
+            ptL[i] -= dt;
+            ptVY[i] += 520 * dt;
+          } else {
+            ptL[i] -= dt;
+            ptVY[i] += (kd === 1 ? 260 : 900) * dt;
+          }
+          ptX[i] += ptVX[i] * dt;
+          ptY[i] += ptVY[i] * dt;
+          const z = ptS[i] * Math.min(1, (ptL[i] / ptM[i]) * 2);
+          if (z < 0.5) continue;
+          any = true;
+          fc.rect(ptX[i] - z / 2, ptY[i] - z / 2, z, z);
+        }
+        if (any) {
+          fc.fillStyle = kd === 0 ? ink : kd === 1 ? snowCol : rainCol;
+          fc.globalAlpha = kd === 2 ? 1 : 0.9;
+          fc.fill();
+        }
+      }
+      fc.globalAlpha = 1;
+
+      // the paddle
+      {
+        const x0 = pad.x - PAD_W / 2;
+        fc.fillStyle = ink;
+        fc.fillRect(x0 + 4, PAD_Y, PAD_W - 8, PAD_H);
+        fc.fillRect(x0, PAD_Y + 4, PAD_W, PAD_H - 8);
+        fc.fillStyle = "rgba(255,255,255,0.45)";
+        fc.fillRect(x0 + 4, PAD_Y, PAD_W - 8, 2);
+        fc.fillStyle = "rgba(74,60,36,0.3)";
+        fc.fillRect(x0 + 4, PAD_Y + PAD_H - 3, PAD_W - 8, 3);
+      }
+
+      // the balls and their trails: long and molten in heat, short and icy in cold
+      const tl = Math.round(lerp(9, TRAIL, smoothstep(15, 96, s.weather.temp)));
+      const glow = 0.25 + 0.75 * dark + env.fog * 0.6;
+      fc.lineCap = "round";
+      for (const b of balls) {
+        if (b.state === 0 || b.state === 3) continue;
+        const n = Math.min(b.tn, tl);
+        if (b.state === 2 && n > 1) {
+          fc.strokeStyle = trailCol;
+          let px = b.x;
+          let py = b.y;
+          for (let k = 0; k < n; k++) {
+            const j = ((b.th - 1 - k + TRAIL * 2) % TRAIL) * 2;
+            const a = 1 - k / n;
+            fc.globalAlpha = 0.42 * a * a;
+            fc.lineWidth = BR * 2 * (0.25 + 0.75 * a);
+            fc.beginPath();
+            fc.moveTo(px, py);
+            px = b.trail[j];
+            py = b.trail[j + 1];
+            fc.lineTo(px, py);
+            fc.stroke();
+          }
+        }
+        const hs = 64 * (1.1 + glow * 1.6);
+        fc.globalAlpha = Math.min(1, 0.1 + glow * 0.6);
+        fc.drawImage(haloCanvas, b.x - hs, b.y - hs, hs * 2, hs * 2);
+        fc.globalAlpha = b.state === 1 ? 0.5 + 0.5 * Math.sin(s.t * 9) ** 2 : 1;
+        fc.fillStyle = "#fffaf0";
+        fc.beginPath();
+        fc.arc(b.x, b.y, BR, 0, TAU);
+        fc.fill();
+        fc.globalAlpha = 1;
+      }
+
+      // ----- the readouts -----
+      const tx = s.text;
+      if (put("date", dateEl, tx.date)) fitText(dateEl, 928);
+      put("temp", tempEl, tx.temp);
+      put("cond", condEl, tx.condition);
+      put("sunK", sunC.k, tx.sunLabel);
+      put("sunV", sunC.v, tx.sunValue);
+      put("moon", moonC.v, tx.moon);
+      put("aqi", airC.v, tx.aqi);
+      put("uv", uvC.v, tx.uv);
+      if (shown.factOn !== (tx.factValue !== "")) {
+        shown.factOn = tx.factValue !== "";
+        factEl.style.display = shown.factOn ? "block" : "none";
+      }
+      put("factK", factK, tx.factLabel);
+      if (put("factV", factV, tx.factValue) && shown.factOn) {
+        // two lines at most: step the size down if a long one would run to three
+        let size = 46;
+        factV.style.fontSize = `${size}px`;
+        while (size > 36 && factV.offsetHeight > 84) {
+          size -= 2;
+          factV.style.fontSize = `${size}px`;
+        }
+      }
+    }
+
+    readEnv(state);
+    return { frame };
+  },
+};
