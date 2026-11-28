@@ -92,6 +92,7 @@ const INK_L = "#f4ecdc"; // the two inks: warm paper white, and the structure's 
 const INK_D = "#0a1018";
 const NUM_PALE = "#fffaf2"; // the numerals' lit faces are lifted toward this when amber alone would not read
 const LAMP_RAMP = 1.2; // seconds for the floodlights to come up or go down
+const VEIL_MIN = 0.35; // the least of the fog veil left in front of the numerals when neither ink would hold through it
 
 const NUM_FONT = `900 ${NUM_PX}px "Big Shoulders Display"`;
 const AMPM_FONT = `900 ${AMPM_PX}px "Big Shoulders Display"`;
@@ -525,6 +526,7 @@ export default {
     const fanK = () => Math.max(0, 1 - 2.5 * lift);
     let WL = (WL_HIGH + WL_LOW) / 2;
     let haze = 0, direct = 0, night = 0, haloW = 1;
+    let veilS = 1, veilMoved = false; // how much of the fog veil stands in front of the numerals (see slow())
     let driftX = 0;
     let sceneKey = "", sceneDue = -1, lastPaint = -1, snowDepth = 0, snowKey = "", capsKey = "";
     let glitX = -999, glitK = 0, glitDp = 0;
@@ -757,7 +759,7 @@ export default {
       const cW = rgb(skW), cN = rgb(skN), cZ = rgb(zen), cH = rgb(hzCol), cS = rgb(sunCol), cM = rgb(skyMid);
       const cHalo = [1, 0.63, 0.24], cSwell = [0.84, 0.87, 0.94];
       const zenEndC = WL * 0.66, hzStartC = WL * (0.6 - 0.3 * hot);
-      const veilAt = (y) => haze <= 0.03 ? 0 : haze * (y < 380 ? 0 : y < 470 ? 0.24 * (y - 380) / 90 : y < MIN_BASE - 200 ? lerp(0.24, 0.15, (y - 470) / (MIN_BASE - 670)) : y < DECK_BOT ? lerp(0.15, 0.04, (y - MIN_BASE + 200) / (DECK_BOT - MIN_BASE + 200)) : 0.04);
+      const veilAt = (y) => haze <= 0.03 ? 0 : haze * veilS * (y < 380 ? 0 : y < 470 ? 0.24 * (y - 380) / 90 : y < MIN_BASE - 200 ? lerp(0.24, 0.15, (y - 470) / (MIN_BASE - 670)) : y < DECK_BOT ? lerp(0.15, 0.04, (y - MIN_BASE + 200) / (DECK_BOT - MIN_BASE + 200)) : 0.04);
       // (the fog veil is composited over sky and faces alike, in sRGB as the browser does)
       const seenL = (col, v) => lumOf(over(Array.isArray(col) ? col : rgb(col), cM, v));
       const skyHi = [0, 0, 0], veilK = [0, 0, 0], behind = [];
@@ -826,9 +828,21 @@ export default {
       // when the day ink reads better. A running piece changes only once the other
       // side is ahead by 3.5%: a narrow, symmetric dead band against flicker, so it
       // is never more than a few seconds behind what a fresh start would choose.
+      // (The side that is showing is not held once it has sunk to the 3:1 line
+      // itself: in fog both inks meet near 3:1, and holding one for 3.5% more
+      // took it under.)
       const lampScore = Math.min(litC, 4) / dayC;
+      const band = (lampOn ? litC : dayC) < 3.1 ? 0.005 : 0.035;
       if (P.jump || lampOn === null) lampOn = lampScore > 1;
-      else if (lampOn ? lampScore < 0.965 : lampScore > 1.035) lampOn = !lampOn;
+      else if (lampOn ? lampScore < 1 - band : lampScore > 1 + band) lampOn = !lampOn;
+      // In fog the two inks can meet near 3:1, both of them dimmed by the veil in
+      // front of the numerals, and neither then holds. So the veil thins there, a
+      // step a second, until the better ink is clear of the line, and gathers
+      // again once it is well clear (the fog behind the numerals stays as it is).
+      const best = Math.max(Math.min(litC, 4), dayC);
+      const vS = haze <= 0.03 ? 1 : best < 3.45 ? Math.max(VEIL_MIN, veilS - 0.12) : best > 3.9 ? Math.min(1, veilS + 0.12) : veilS;
+      veilMoved = vS !== veilS;
+      veilS = vS;
       lampT = lampOn ? 1 : 0;
       // the ink of a zone: whichever of the two reads better against the worst of
       // what is behind it, switched in one step; a soft halo of the ground's own
@@ -924,7 +938,7 @@ export default {
 
       // fog between us and the structure, thicker toward the top
       setStyle("veil", veil, "background",
-        haze > 0.03 ? `linear-gradient(180deg, ${rgba(skyMid, 0)} 380px, ${rgba(skyMid, 0.24 * haze)} 470px, ${rgba(skyMid, 0.15 * haze)} ${MIN_BASE - 200}px, ${rgba(skyMid, 0.04 * haze)} ${DECK_BOT}px, ${rgba(skyMid, 0)} ${WL_HIGH}px)` : "none");
+        haze > 0.03 ? `linear-gradient(180deg, ${rgba(skyMid, 0)} 380px, ${rgba(skyMid, 0.24 * haze * veilS)} 470px, ${rgba(skyMid, 0.15 * haze * veilS)} ${MIN_BASE - 200}px, ${rgba(skyMid, 0.04 * haze * veilS)} ${DECK_BOT}px, ${rgba(skyMid, 0)} ${WL_HIGH}px)` : "none");
 
       const textChanged = [put("hh", hT, s.text.hh), put("mm", mT, s.text.mm), put("ap", aT, s.text.ampm)].some(Boolean);
       if (textChanged) layout(s);
@@ -947,7 +961,7 @@ export default {
       // push to the DOM. The structure's colours (and the offscreen copy the
       // reflection is cut from) follow the light only when it has changed
       // perceptibly, not every second: restyling the SVG costs paint time.
-      const palKey = `${Math.round(dl * 60)}|${Math.round(s.sun.alt * 1.5)}|${Math.round(s.sun.az / 4)}|${Math.round(cloud * 25)}|${Math.round(haze * 25)}|${wx.falling}|${Math.round(moonLight * 20)}|${sk.west}${sk.northWest}|${lampQ}`;
+      const palKey = `${Math.round(dl * 60)}|${Math.round(s.sun.alt * 1.5)}|${Math.round(s.sun.az / 4)}|${Math.round(cloud * 25)}|${Math.round(haze * 25)}|${wx.falling}|${Math.round(moonLight * 20)}|${sk.west}${sk.northWest}|${lampQ}|${Math.round(veilS * 50)}`;
       const palChanged = palKey !== shown.palKey;
       if (palChanged) {
         shown.palKey = palKey;
@@ -1008,8 +1022,18 @@ export default {
       if (sec !== lastSec || q !== lampQ || jump) {
         lampQ = q;
         lastSec = sec;
-        slow(s);
-        if (jump && lamp !== lampT) { lamp = lampT; lampQ = Math.round(lamp * 40); slow(s); }
+        if (!jump) slow(s);
+        else {
+          // a fresh start or a jumped clock goes straight to its state: the lamps
+          // at their level, the veil at its place (a few passes, each one a step)
+          veilS = 1;
+          for (let i = 0; i < 10; i++) {
+            slow(s);
+            const settled = !veilMoved && lamp === lampT;
+            if (lamp !== lampT) { lamp = lampT; lampQ = Math.round(lamp * 40); }
+            if (settled) break;
+          }
+        }
       }
       // (when the clock runs fast, at most five repaints a second)
       if (sceneDue >= 0 && t >= sceneDue && (t - lastPaint >= 0.2 || t < lastPaint)) { sceneDue = -1; lastPaint = t; paintScene(s); }
