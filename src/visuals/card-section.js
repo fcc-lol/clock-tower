@@ -1190,7 +1190,9 @@ export default {
           if (w === face[i]) continue;
           prev[i] = face[i];
           face[i] = w;
-          const slow = w === F_UMB || prev[i] === F_UMB ? 2.6 : w === F_SLEEP || prev[i] === F_SLEEP ? 5 : 0.5;
+          // the ring round the numerals keeps the numerals' own pace: when they light at dusk or go to ink at
+          // dawn, a ring that lagged left them for a couple of seconds against cards of their own tone
+          const slow = w === F_UMB || prev[i] === F_UMB ? 2.6 : role[i] === R_MOAT ? 0.5 : w === F_SLEEP || prev[i] === F_SLEEP ? 5 : 0.5;
           ap[i] = -hash(i, s.frame) * slow * TURN;
           stage[i] = 0;
           steps[i] = 3;

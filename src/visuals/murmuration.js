@@ -338,7 +338,7 @@ export default {
     const fields = [];
     const ghostSprites = [];
     const patchSprites = [];
-    const PM = 18; // a patch's margin round its glyph field, in field cells
+    const PM = 32; // a patch's margin round its glyph field, in field cells
     // Built on demand (only the digits on show), so mount stays quick.
     function buildField(d) {
       const m = mask(GC, GR, (c) => {
@@ -411,10 +411,10 @@ export default {
       p.width = GC + 2 * PM;
       p.height = GR + 2 * PM;
       const pc = p.getContext("2d");
-      pc.filter = "blur(3.5px)";
+      pc.filter = "blur(6px)";
       pc.fillStyle = pc.strokeStyle = "#fff";
       pc.lineJoin = "round";
-      pc.lineWidth = 96;
+      pc.lineWidth = 150;
       pc.scale(1 / CELL, 1 / CELL);
       pc.font = FONT;
       pc.textBaseline = "alphabetic";
@@ -840,17 +840,28 @@ export default {
     // (liftA) and the opacity of its unveiled silhouette (liftO), all blended in sRGB.
     let liftA = 0;
     let liftO = 0;
-    function liftNeed(dark, Lr, aw, op, Vc, Li) {
+    function liftNeed(dark, Lr, aw, op, Vc, Li, night, gl) {
       const Vr = srgb(Lr);
-      const Vg = Vr * (1 - aw) + cloudV * aw; // the ground
-      const V0 = (Vr + (Vc - Vr) * op) * (1 - aw) + cloudV * aw; // the silhouette below, veiled
+      let Vg = Vr * (1 - aw) + cloudV * aw; // the ground
+      let V0 = (Vr + (Vc - Vr) * op) * (1 - aw) + cloudV * aw; // the silhouette below, veiled
+      // a storm's glow lies over both: it washes out a dark silhouette below
+      // the lift, and brightens the ground behind a pale one
+      if (gl > 0) {
+        if (dark) V0 += (0.92 - V0) * gl;
+        else Vg += (0.92 - Vg) * gl;
+      }
       const Vi = srgb(Li);
       const Vp = dark ? vPL : vPD;
       const Lg = unsrgb(Vg);
       // a patch only where even a solid figure would fall short (with a margin,
-      // so the silhouette is not left at full strength)
+      // so the silhouette is not left at full strength: a "solid" figure is
+      // still a little thinner than its ink, toward its tips and between birds).
+      // Under a veiled night sky, the patch comes first: denser cloud behind
+      // the figure keeps the room dark, where a brighter figure would light it.
       const A2 = LIFT_AIM * 1.12;
-      const Gt = dark ? A2 * (Li + 0.05) - 0.05 : (Li + 0.05) / A2 - 0.05;
+      const Ls = dark ? Li + 0.012 : 0.85 * Li;
+      const Lf = lerp(Ls, unsrgb(V0), night);
+      const Gt = dark ? A2 * (Lf + 0.05) - 0.05 : (Lf + 0.05) / A2 - 0.05;
       let a = 0;
       if (dark ? Lg < Gt : Lg > Gt) {
         const d = Vp - Vg;
@@ -858,7 +869,10 @@ export default {
         a = Math.abs(d) < 0.01 ? 1 : clamp((1.25 * (srgb(clamp(Gt)) - Vg)) / d);
       }
       const G1 = unsrgb(Vg + (Vp - Vg) * a);
-      const V1 = V0 + (Vp - V0) * a; // the stroke under the patch
+      // the stroke under the patch: once there is a patch, the silhouette below
+      // it is not counted on (the patch and anything drifting over the sky,
+      // a storm's glow, can wash it out), and the lift's own silhouette holds it
+      const V1 = lerp(V0 + (Vp - V0) * a, Vg + (Vp - Vg) * a, Math.min(1, 4 * a));
       const Lw = dark ? (G1 + 0.05) / LIFT_AIM - 0.05 : LIFT_AIM * (G1 + 0.05) - 0.05;
       // (the birds are not counted on: between them, the silhouette alone must hold)
       const Vw = srgb(clamp(Lw));
@@ -1607,7 +1621,12 @@ export default {
       const aim = twilight;
       // the lift works through twilight and night, and by day under any cloud
       // (a clear full day keeps its look)
-      const liftAim = Math.max(twilight, smoothstep(0.02, 0.1, cloudCover));
+      const veiled = smoothstep(0.02, 0.1, cloudCover);
+      const liftAim = Math.max(twilight, veiled);
+      // and under a veiled night sky it would rather deepen the cloud behind a
+      // pale figure than brighten the figure (a clear night keeps its look)
+      const nightPref = veiled * (1 - smoothstep(0.1, 0.3, s.daylight));
+      const gl = glowAmt * (0.2 + 0.12 * s.daylight) * 0.9; // the glow's opacity, as drawn below
       for (let k = 0; k < 4; k++) {
         const S = slots[k];
         const g = ghosts[k];
@@ -1652,11 +1671,11 @@ export default {
           const Li = dk ? L_DAY : paleLum;
           const Vc = lerp(srgb(L_DAY), srgb(paleLum), S.inkT);
           const Lr = dk ? g.rLo : g.rHi;
-          liftNeed(dk, Lr, g.aMin, op, Vc, Li);
+          liftNeed(dk, Lr, g.aMin, op, Vc, Li, dk ? 0 : nightPref, gl);
           let a = liftA;
           let o = liftO;
           if (g.aMax !== g.aMin) {
-            liftNeed(dk, Lr, g.aMax, op, Vc, Li);
+            liftNeed(dk, Lr, g.aMax, op, Vc, Li, dk ? 0 : nightPref, gl);
             a = Math.max(a, liftA);
             o = Math.max(o, liftO);
           }

@@ -1771,6 +1771,7 @@ export default {
     // ---------------------------------------------------------------- frame
     let inkShown = "", hlShown = "";
     let ledgeStale = true, lastMs = null, lastJump = false, quietUntil = 0, lastPalT = -9, lastPaintT = -9, paintedKey = "", lastTime = "";
+    let wasFading = false, catchUp = 0; // after the scene has changed sides: the frames in which every bitmap is baked once more
     const setFlap = (i, cover) => {
       const f = flaps[i];
       const q = Math.round(cover * 200);
@@ -1799,12 +1800,18 @@ export default {
         // the scene going over to the other side of the sheet: a fade of about a second
         if (!jump && pol >= 0 && pf !== pol) pf = pol > pf ? Math.min(pol, pf + s.dt / FADE) : Math.max(pol, pf - s.dt / FADE);
         const fading = pol >= 0 && pf !== pol;
-        if (jump || fading || s.t - lastPalT > 0.4) {
+        // The fade has just ended: the bitmaps baked part of the way through it must not wait their usual
+        // few seconds for the final colors (the numerals sat at the sheet's own tone meanwhile), so the
+        // palette is taken again at once and every bitmap gets its turn over the next frames.
+        if (wasFading && !fading) catchUp = JOBS.length + 2;
+        wasFading = fading;
+        if (jump || fading || catchUp > 0 || s.t - lastPalT > 0.4) {
           lastPalT = s.t;
           computePalette(s, jump);
         }
-        const turning = pf !== pol; // still fading, or the side has just changed
+        const turning = pf !== pol || catchUp > 0; // still fading, the side has just changed, or catching up after it
         const baked = runJobs(jump && !streaming, s.t, streaming || turning ? 0 : 4);
+        if (catchUp > 0) catchUp--;
 
         // what is cut into the sheet
         const stamp = tx.time + tx.ampm;

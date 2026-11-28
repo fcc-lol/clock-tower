@@ -799,9 +799,11 @@ export default {
       lift = 0; // how far the faces were lifted: the amber fans would only dim a lifted face, so they give way
       const nightF = [liftTo("#dd8a24", 0), liftTo("#c8781a", 1), liftTo(mix("#b56a12", "#8ea4c4", 0.3 * moonLight), 2)];
       const litC = Math.min(...nightF.map((c, k) => { const v = veilK[k]; return ((1 - v) * luminance(c) + v * Lm + 0.05) / ((1 - v) * skyHi[k] + v * Lm + 0.05); }));
-      if (P.jump || lampOn === null) lampOn = dayC < 4 && litC > dayC;
+      // (the lit faces must read clearly better than the day ink before the lamps
+      // come on: the estimate of the sky is not exact)
+      if (P.jump || lampOn === null) lampOn = dayC < 4 && litC > 1.12 * dayC;
       else if (lampOn) { if (dayC > 4.3 || litC < 0.9 * dayC) lampOn = false; }
-      else if (dayC < 3.8 && litC > 1.05 * dayC) lampOn = true;
+      else if (dayC < 3.8 && litC > 1.18 * dayC) lampOn = true;
       lampT = lampOn ? 1 : 0;
       // the ink of a zone: whichever of the two reads better against the worst of
       // what is behind it, switched in one step; a soft halo of the ground's own
