@@ -84,6 +84,14 @@ const MORPH_S = 2.6; // seconds a changed numeral takes to melt into the next
 const SUMI = "#16130f";
 const BONE = "#e7e0ce";
 const NIGHT_WATER = "#05070a";
+// Day (sumi on paper) or night (bone on water) is chosen outright, never
+// blended with the light: a sumi-to-bone blend passes through the ground's own
+// grey in twilight. The choice is whichever ink stands further from the paper
+// as the figures see it (the vignette dims it by about a tenth there), with a
+// margin so it cannot flicker, and the change itself takes about a second.
+const INK_HYST = 1.08; // the other ink must beat the current one by this much (both hold 3.6:1 there)
+const INK_FADE = 1.0; // seconds
+const VIGNETTE_L = 0.9; // the paper's luminance behind the figures, against the ground's
 
 // ---------------------------------------------------------------------------
 // The shader: water, ink, and every disturbance as a closed-form warp of the
@@ -827,7 +835,7 @@ export default {
     let shimmer = 0;
 
     // ----- colour -----
-    const pal = { night: 0, fleck: "#fff", shade: "rgba(0,0,0,0)" };
+    const pal = { night: 0, fading: false, fleck: "#fff", shade: "rgba(0,0,0,0)" };
     const shown = {};
     const css = (name, value) => {
       if (shown[name] === value) return;
@@ -892,7 +900,11 @@ export default {
       return oklch(lerp(steepL.l, k.l, w), lerp(steepL.c, Math.max(k.c, steepL.c), w), lerpAngle(steepL.h, k.h, w));
     };
 
-    function palette(s) {
+    const lumSumi = luminance(SUMI), lumBone = luminance(BONE);
+    let inkLight = null; // the ink chosen (null until the first palette)
+    let inkK = 0; // 0 sumi on paper .. 1 bone on water: moves only during the one-second change
+    let palT = 0;
+    function palette(s, snap) {
       const wx = s.weather;
       const cloud = wx.cloud / 100;
       const mean = s.sky.mean;
@@ -903,18 +915,27 @@ export default {
       const t = smoothstep(0.02, 0.9, s.daylight);
       const water = mix(NIGHT_WATER, mean, 0.1);
       const ground = mix(water, mix(dusk, paperDay, smoothstep(0.35, 0.85, t)), t);
-      const lum = luminance(ground);
-      const night = 1 - smoothstep(0.169, 0.185, lum); // the ink flips while the ground is mid-grey, where both inks read alike
+      const lum = luminance(ground) * VIGNETTE_L + 0.05;
+      const cDark = lum / (lumSumi + 0.05), cLight = (lumBone + 0.05) / lum;
+      if (inkLight === null) inkLight = cLight > cDark;
+      else if (inkLight ? cDark > cLight * INK_HYST : cLight > cDark * INK_HYST) inkLight = !inkLight;
+      const want = inkLight ? 1 : 0;
+      // (a change starts with one frame's step, then runs a frame at a time)
+      const stepK = snap ? 1 : clamp((pal.fading ? s.t - palT : s.dt) / INK_FADE);
+      palT = s.t;
+      inkK = inkK < want ? Math.min(want, inkK + stepK) : Math.max(want, inkK - stepK);
+      const night = inkK * inkK * (3 - 2 * inkK);
       pal.night = night;
+      pal.fading = inkK !== want;
       const dark = night < 0.5;
       const groundL = toOklch(ground).l;
       const moonlight = s.moon.up ? s.moon.illumination : 0;
 
       css("--paper", ground);
-      css("--ink", dark ? SUMI : "#f1ebde");
-      css("--num", mix(SUMI, BONE, night));
-      css("--seal", mix(mix("#7a2217", "#a82e1a", smoothstep(0.1, 0.5, t)), ground, dark ? 0 : 0.04));
-      css("--sealtext", dark ? "#f6efdd" : "#e9e1cf");
+      css("--ink", night <= 0 ? SUMI : night >= 1 ? "#f1ebde" : mix(SUMI, "#f1ebde", night));
+      css("--num", night <= 0 ? SUMI : night >= 1 ? BONE : mix(SUMI, BONE, night));
+      css("--seal", mix(mix("#7a2217", "#a82e1a", smoothstep(0.1, 0.5, t)), ground, 0.04 * night));
+      css("--sealtext", night <= 0 ? "#f6efdd" : night >= 1 ? "#e9e1cf" : mix("#f6efdd", "#e9e1cf", night));
       ink.set("u_paper", vec3(ground));
       ink.set("u_num", vec3(shown["--num"]));
       ink.set("u_sumi", vec3(mix("#1b1814", ground, 0.04)));
@@ -1018,9 +1039,10 @@ export default {
         }
 
         // ----- colour (slow) -----
-        if (fast || s.frame - palAt >= 8) {
+        if (fast || pal.fading || s.frame - palAt >= 8) {
+          // (every frame while the ink is changing, so its one-second change is smooth)
           palAt = s.frame;
-          palette(s);
+          palette(s, fast);
         }
 
         // ----- the readouts -----
