@@ -563,10 +563,57 @@ export default {
     for (let i = 0; i < 4; i++) {
       fogBanks.push([Math.round(R.range(70, 95)), Math.round(R.range(16, 22)), Math.round(R.range(10, 90)), Math.round(8 + i * 26 + R.range(-6, 6))]);
     }
-    function fogCss(a) {
+    // A bank's white, as a share of its peak, at r (0 its centre, 1 its rim).
+    const bankRel = (r) => (r >= 1 ? 0 : r < 0.5 ? 1 - 1.2 * r : 0.8 * (1 - r));
+    // The foot of the time, in % of the height: the minutes row (bottom at 1174 px) with
+    // room for its sag and for the ground right beside it.
+    const TIME_FOOT = 66;
+    const fogPeak = [0, 0, 0, 0];
+    // The peak white of each bank, given the most white the fog may lay anywhere behind or
+    // beside the time (room): the banks over the time are held to it, overlaps included,
+    // and a bank lying below the time keeps as much as its tail allows.
+    function fogLimit(want, room) {
+      const peaks = (t) => {
+        for (let i = 0; i < fogBanks.length; i++) {
+          const [, h, , y] = fogBanks[i];
+          const rl = bankRel(Math.max(0, (y - TIME_FOOT) / h));
+          fogPeak[i] = rl > 0 ? Math.min(want, (t * want) / rl) : want;
+        }
+      };
+      const worst = () => {
+        let m = 0;
+        for (let yy = 0; yy <= TIME_FOOT; yy++) {
+          let clear = 1;
+          for (let i = 0; i < fogBanks.length; i++) clear *= 1 - fogPeak[i] * bankRel(Math.abs(yy - fogBanks[i][3]) / fogBanks[i][1]);
+          m = Math.max(m, 1 - clear);
+        }
+        return m;
+      };
+      peaks(1);
+      if (worst() <= room) return;
+      let lo = 0, hi = 1;
+      for (let k = 0; k < 14; k++) {
+        const mid = (lo + hi) / 2;
+        peaks(mid);
+        if (worst() <= room) lo = mid; else hi = mid;
+      }
+      peaks(lo);
+    }
+    // luminance of a ground colour with white laid over it at alpha a (as the browser
+    // composites the banks: in sRGB)
+    const linC = (v) => ((v /= 255) <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+    function fogLum(hex, a) {
+      const n = parseInt(hex.slice(1), 16);
+      const f = (v) => linC(v + a * (255 - v));
+      return 0.2126 * f((n >> 16) & 255) + 0.7152 * f((n >> 8) & 255) + 0.0722 * f(n & 255);
+    }
+    function fogCss() {
       let out = "";
-      for (const [w, h, x, y] of fogBanks) {
-        out += `radial-gradient(${w}% ${h}% at ${x}% ${y}%, rgba(255,255,255,${(0.55 * a).toFixed(3)}), rgba(255,255,255,${(0.22 * a).toFixed(3)}) 50%, rgba(255,255,255,0)),`;
+      for (let i = 0; i < fogBanks.length; i++) {
+        const [w, h, x, y] = fogBanks[i];
+        const p = fogPeak[i];
+        if (p < 0.002) continue;
+        out += `radial-gradient(${w}% ${h}% at ${x}% ${y}%, rgba(255,255,255,${p.toFixed(3)}), rgba(255,255,255,${(0.4 * p).toFixed(3)}) 50%, rgba(255,255,255,0)),`;
       }
       return out;
     }
@@ -682,10 +729,52 @@ export default {
         const l = Math.min(cap, c.l * lerp(0.32, 0.74, smoothstep(0.05, 0.6, s.daylight))) + dl;
         return oklch(clamp(l, 0.08, cap), c.c * lerp(0.6, 0.8, s.daylight) + 0.008, c.h);
       };
-      const gTop = tone(mix(s.sky.west, s.sky.northWest, 0.5), 0);
-      const gBot = tone(mix(s.sky.east, s.sky.northEast, 0.5), -0.04);
+      const skyTop = mix(s.sky.west, s.sky.northWest, 0.5);
+      const skyBot = mix(s.sky.east, s.sky.northEast, 0.5);
+      let gTop = tone(skyTop, 0);
+      let gBot = tone(skyBot, -0.04);
+      if (P.fog > 0.02) {
+        // fog veils the toy: every tone drifts toward the colour of the fog (at night the
+        // fog is lit by the city, a haze about as bright as the tubes, so the veil greys
+        // them without sinking them toward the ground)
+        const fogC = mix(gTop, "#f2f4f6", lerp(0.5, 0.6, day));
+        const v = 0.32 * P.fog;
+        pal.body = mix(pal.body, fogC, v); pal.light = mix(pal.light, fogC, v); pal.shade = mix(pal.shade, fogC, v);
+        pal.rim = mix(pal.rim, fogC, v); pal.spec = mix(pal.spec, fogC, v * 0.5);
+      }
       const fa = Math.round(P.fog * lerp(0.35, 1, 1 - P.night) * 0.85 * 50) / 50;
-      const g = `${fa > 0 ? fogCss(fa) : ""}linear-gradient(172deg, ${gTop} 8%, ${gBot} 92%)`;
+      if (fa > 0) {
+        // the cap must hold for the ground as it is seen, with the banks laid on it, and
+        // against the tubes as they are seen, veiled: the brightest the fogged ground may
+        // get behind or beside the time (lc) is set from the veiled body. To leave the fog
+        // room to show, the bare ground goes down first (at most as far as keeps a share of
+        // the banks' white), then the banks over the time take what room is left.
+        const want = 0.55 * fa;
+        const lc = Math.max(0, (luminance(pal.body) + 0.05) / 3.4 - 0.05);
+        const sc = lc <= 0.0031308 ? 12.92 * lc : 1.055 * lc ** (1 / 2.4) - 0.055;
+        const keep = Math.min(want, 0.4 * sc);
+        const over = (a) => Math.max(fogLum(gTop, a), fogLum(gBot, a));
+        if (over(keep) > lc) {
+          let lo = 0, hi = 0.4;
+          for (let k = 0; k < 14; k++) {
+            const m = (lo + hi) / 2;
+            gTop = tone(skyTop, -m); gBot = tone(skyBot, -0.04 - m);
+            if (over(keep) > lc) lo = m; else hi = m;
+          }
+          gTop = tone(skyTop, -hi); gBot = tone(skyBot, -0.04 - hi);
+        }
+        let room = 0;
+        if (over(0) < lc) {
+          let lo = 0, hi = want;
+          for (let k = 0; k < 14; k++) {
+            const m = (lo + hi) / 2;
+            if (over(m) > lc) hi = m; else lo = m;
+          }
+          room = lo;
+        }
+        fogLimit(want, room);
+      }
+      const g = `${fa > 0 ? fogCss() : ""}linear-gradient(172deg, ${gTop} 8%, ${gBot} 92%)`;
       if (shown.g !== g) { shown.g = g; ground.style.background = g; }
       const gl = toOklch(gTop);
       pal.shadowA = lerp(0.16, 0.6, clamp(P.direct * 1.2)) * (0.3 + 0.7 * day);
@@ -693,13 +782,6 @@ export default {
       const reach = lerp(12, 22 + 30 * P.lowSun, clamp(P.direct * 1.3));
       pal.shx = reach * 0.62;
       pal.shy = reach * 0.9;
-      if (P.fog > 0.02) {
-        // fog veils the toy: every tone drifts toward the colour of the fog
-        const fogC = mix(gTop, "#f2f4f6", lerp(0.35, 0.6, day));
-        const v = 0.32 * P.fog;
-        pal.body = mix(pal.body, fogC, v); pal.light = mix(pal.light, fogC, v); pal.shade = mix(pal.shade, fogC, v);
-        pal.rim = mix(pal.rim, fogC, v); pal.spec = mix(pal.spec, fogC, v * 0.5);
-      }
       pal.dimple = pal.shade;
       pal.ice = mix(body, lerp(0, 1, day) > 0.5 ? "#f4fbff" : "#b9c9d8", 0.62);
       pal.iceHi = mix(pal.spec, "#ffffff", 0.5 * day);

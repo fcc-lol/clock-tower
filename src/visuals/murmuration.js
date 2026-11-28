@@ -268,6 +268,8 @@ export default {
     const cloudImg = cloudMaskCtx.createImageData(CW, CH);
     let cloudRow = 0;
     const cloudRowCover = new Float32Array(CH);
+    const cloudRowMin = new Float32Array(CH);
+    const cloudRowMax = new Float32Array(CH);
     function buildCloudRows(rows) {
       const data = cloudImg.data;
       const end = Math.min(CH, cloudRow + rows);
@@ -289,10 +291,20 @@ export default {
         cloudKey = "";
         // the bands' mean cover along each row (they drift sideways and wrap, so
         // this is what a numeral has behind it on average)
+        // (and its densest and thinnest, for the worst a numeral can meet)
         for (let j = 0; j < CH; j++) {
           let sum = 0;
-          for (let i = 0; i < CW; i++) sum += data[(j * CW + i) * 4 + 3];
+          let lo = 255;
+          let hi = 0;
+          for (let i = 0; i < CW; i++) {
+            const v = data[(j * CW + i) * 4 + 3];
+            sum += v;
+            if (v < lo) lo = v;
+            if (v > hi) hi = v;
+          }
           cloudRowCover[j] = sum / (255 * CW);
+          cloudRowMin[j] = lo / 255;
+          cloudRowMax[j] = hi / 255;
         }
         skyKey = "";
       }
@@ -325,6 +337,8 @@ export default {
     const GHpx = GR * CELL;
     const fields = [];
     const ghostSprites = [];
+    const patchSprites = [];
+    const PM = 18; // a patch's margin round its glyph field, in field cells
     // Built on demand (only the digits on show), so mount stays quick.
     function buildField(d) {
       const m = mask(GC, GR, (c) => {
@@ -390,6 +404,23 @@ export default {
       gc.textBaseline = "alphabetic";
       gc.fillText(String(d), PAD, PAD + capH);
       ghostSprites[d] = g;
+
+      // a much softer, wider blot of the same figure: the denser (or thinner)
+      // patch of cloud laid behind a numeral when the sky alone cannot hold it
+      const p = document.createElement("canvas");
+      p.width = GC + 2 * PM;
+      p.height = GR + 2 * PM;
+      const pc = p.getContext("2d");
+      pc.filter = "blur(4px)";
+      pc.fillStyle = pc.strokeStyle = "#fff";
+      pc.lineJoin = "round";
+      pc.lineWidth = 84;
+      pc.scale(1 / CELL, 1 / CELL);
+      pc.font = FONT;
+      pc.textBaseline = "alphabetic";
+      pc.fillText(String(d), PAD + PM * CELL, PAD + PM * CELL + capH);
+      pc.strokeText(String(d), PAD + PM * CELL, PAD + PM * CELL + capH);
+      patchSprites[d] = p;
       return fields[d];
     }
     const field = (d) => fields[d] || buildField(d);
@@ -421,7 +452,20 @@ export default {
       const c = document.createElement("canvas");
       c.width = GC;
       c.height = GR;
-      return { c, ctx: c.getContext("2d"), key: "", on: false, sh: 0, x: 0, op: -1, dark: true, lum: 0.3, lo: 0.3, hi: 0.3, veil: 0 };
+      const pL = document.createElement("canvas");
+      const pD = document.createElement("canvas");
+      pL.width = pD.width = GC + 2 * PM;
+      pL.height = pD.height = GR + 2 * PM;
+      return {
+        c, ctx: c.getContext("2d"), key: "", on: false, sh: 0, x: 0, op: -1, dark: true, lum: 0.3, lo: 0.3, hi: 0.3, veil: 0,
+        // the worst of the sky and cloud behind it: raw sky at its darkest and
+        // brightest, and the cloud bands' thinnest and densest cover over its rows
+        rLo: 0.3, rHi: 0.3, aMin: 0, aMax: 0,
+        // the lift above the cloud: a light patch (behind dark birds), a dark one
+        // (behind pale birds) and the silhouette again, unveiled, as needed
+        pL, pLctx: pL.getContext("2d"), pD, pDctx: pD.getContext("2d"), pLkey: "", pDkey: "",
+        aL: 0, aD: 0, o2: 0, qL: -1, qD: -1, q2: -1, lx: NaN, lsh: NaN,
+      };
     });
 
     // ------------------------------------------------------------- birds
@@ -785,6 +829,44 @@ export default {
     let rainInk = "";
     let snowInk = "";
     let perchDark = true;
+    let patchLight = "#c8ccd2";
+    let patchDark = "#101216";
+    let vPL = 0.8;
+    let vPD = 0.06;
+    const LIFT_AIM = 3.6; // contrast the figure is held to against the worst of the ground behind it
+    const LIFT_FADE = 0.8; // s: how fast the lift may change (it follows the light far slower than this)
+    // What the lift must add for one numeral, given the raw sky Lr at its worst
+    // point and a cloud cover aw over it: the alpha of the patch behind it
+    // (liftA) and the opacity of its unveiled silhouette (liftO), all blended in sRGB.
+    let liftA = 0;
+    let liftO = 0;
+    function liftNeed(dark, Lr, aw, op, Vc, Li) {
+      const Vr = srgb(Lr);
+      const Vg = Vr * (1 - aw) + cloudV * aw; // the ground
+      const V0 = (Vr + (Vc - Vr) * op) * (1 - aw) + cloudV * aw; // the silhouette below, veiled
+      const Vi = srgb(Li);
+      const Vp = dark ? vPL : vPD;
+      const Lg = unsrgb(Vg);
+      // a patch only where even a solid figure would fall short (with a margin,
+      // so the silhouette is not left at full strength)
+      const A2 = LIFT_AIM * 1.12;
+      const Gt = dark ? A2 * (Li + 0.05) - 0.05 : (Li + 0.05) / A2 - 0.05;
+      let a = 0;
+      if (dark ? Lg < Gt : Lg > Gt) {
+        const d = Vp - Vg;
+        a = Math.abs(d) < 0.01 ? 1 : clamp((srgb(clamp(Gt)) - Vg) / d);
+      }
+      const G1 = unsrgb(Vg + (Vp - Vg) * a);
+      const V1 = V0 + (Vp - V0) * a; // the stroke under the patch
+      const Lw = dark ? (G1 + 0.05) / LIFT_AIM - 0.05 : LIFT_AIM * (G1 + 0.05) - 0.05;
+      // (the birds are not counted on: between them, the silhouette alone must hold)
+      const Vw = srgb(clamp(Lw));
+      const span = Vi - V1;
+      let o = 0;
+      if (dark ? Vw < V1 : Vw > V1) o = Math.abs(span) < 0.01 ? 1 : clamp((Vw - V1) / span);
+      liftA = a;
+      liftO = o;
+    }
 
     function syncLook(s) {
       const sk = s.sky;
@@ -822,6 +904,12 @@ export default {
         const heavy = s.weather.kind === "storm" || s.weather.kind === "rain";
         const tint = heavy ? mix(sk.mean, "#05060a", 0.35) : mix(sk.mean, s.daylight > 0.5 ? "#ffffff" : "#8a7d74", 0.2 + 0.4 * s.daylight);
         cloudTint = tint;
+        // the lift's patches: thinner cloud (the sky's own colour, paled) behind
+        // dark birds, denser cloud (the bands' tint, deepened) behind pale ones
+        patchLight = mix(sk.mean, "#e9ebee", 0.6);
+        patchDark = mix(tint, "#05060a", 0.7);
+        vPL = srgb(luminance(patchLight));
+        vPD = srgb(luminance(patchDark));
         // a halo of the sky's own colour behind the type, so a bird passing
         // behind a letter never merges with it (AM/PM sits where the cloud
         // bands thin out, so its halo takes a share of their tint)
@@ -848,15 +936,33 @@ export default {
       const x0 = s.ox + PAD, x1 = s.ox + GWpx - PAD, y0 = s.oy + PAD, y1 = s.oy + GHpx - PAD;
       let dark;
       let lum;
-      if (twilight > 0) {
-        // through twilight: the ink that holds more contrast against the worst
-        // of its own patch of sky (the darkest part for dark ink, the brightest
-        // for pale), leaning toward silhouettes as full day nears
+      // the worst the ground behind this numeral can be: the raw sky at its
+      // darkest and brightest, under the cloud bands at their thinnest and densest
+      lumSpread(x0, x1, y0, y1);
+      g.rLo = regionLo;
+      g.rHi = regionHi;
+      g.aMin = 0;
+      g.aMax = 0;
+      if (cloudCover > 0) {
+        let lo = 1;
+        let hi = 0;
+        for (let j = clamp(Math.floor(y0 / CS), 0, CH - 1); j <= clamp(Math.floor(y1 / CS), 0, CH - 1); j++) {
+          if (cloudRowMin[j] < lo) lo = cloudRowMin[j];
+          if (cloudRowMax[j] > hi) hi = cloudRowMax[j];
+        }
+        g.aMin = cloudCover * lo;
+        g.aMax = cloudCover * hi;
+      }
+      const under = (L, a) => (a > 0 ? unsrgb(srgb(L) * (1 - a) + cloudV * a) : L);
+      if (twilight > 0 || cloudCover > 0) {
+        // through twilight, and under any cloud by day: the ink that holds more
+        // contrast against the worst of its own patch of sky (the darkest part
+        // for dark ink, the brightest for pale), leaning toward silhouettes as
+        // full day nears
         const sky = lumRegion(x0, x1, y0, y1);
         lum = lerp(sky, groundLum(x0, x1, y0, y1), twilight);
-        lumSpread(x0, x1, y0, y1);
-        g.lo = lerp(regionLo, underCloud(regionLo), twilight);
-        g.hi = regionHi; // pale ink is weakest where the bands part
+        g.lo = Math.min(under(regionLo, g.aMin), under(regionLo, g.aMax));
+        g.hi = Math.max(under(regionHi, g.aMin), under(regionHi, g.aMax)); // pale ink is weakest where the bands part (or, under bright cloud, where they thicken)
         const dCr = ((g.lo + 0.05) / (L_DAY + 0.05)) * lerp(2.5, 1, twilight);
         const pCr = (paleLum + 0.05) / (g.hi + 0.05);
         dark = g.dark ? dCr * INK_HYST > pCr : dCr > pCr * INK_HYST;
@@ -885,6 +991,15 @@ export default {
     }
 
     // ------------------------------------------------------ the simulation
+    // The lift: above the cloud bands and below the birds. Where the sky (and
+    // the cloud over the silhouettes) leaves a numeral short of contrast, a
+    // soft patch of thinner or denser cloud behind it, and its silhouette again,
+    // clear of the veil. Empty, and hidden, wherever the sky alone holds it.
+    const lift = canvas2d(wrap, {});
+    lift.canvas.style.zIndex = "3";
+    lift.canvas.style.display = "none";
+    let liftDirty = false;
+    let liftOn = false;
     const birds = canvas2d(wrap, { maxScale: 2, adaptive: true });
     birds.canvas.style.zIndex = "4";
 
@@ -1422,6 +1537,64 @@ export default {
       c.fillRect(0, 0, W, H);
       c.globalAlpha = 1;
     }
+    function paintLift() {
+      liftDirty = false;
+      const c = lift.ctx;
+      let any = false;
+      for (let k = 0; k < 4; k++) if (slots[k].ch >= 0 && (ghosts[k].qL > 0 || ghosts[k].qD > 0 || ghosts[k].q2 > 0)) any = true;
+      if (!any) {
+        if (liftOn) {
+          liftOn = false;
+          lift.clear();
+          lift.canvas.style.display = "none";
+        }
+        return;
+      }
+      if (!liftOn) {
+        liftOn = true;
+        lift.canvas.style.display = "";
+      }
+      lift.clear();
+      c.imageSmoothingEnabled = true;
+      c.imageSmoothingQuality = "high";
+      const PWpx = (GC + 2 * PM) * CELL;
+      const PHpx = (GR + 2 * PM) * CELL;
+      // the patches first, all of them, then the silhouettes over them
+      for (let pass = 0; pass < 2; pass++) {
+        for (let k = 0; k < 4; k++) {
+          const S = slots[k];
+          const g = ghosts[k];
+          if (S.ch < 0) continue;
+          c.setTransform(1, 0, -g.lsh, 1, S.ox + g.lsh * (S.pivot - S.oy), S.oy);
+          if (pass === 0) {
+            for (let side = 0; side < 2; side++) {
+              const a = side ? g.qD : g.qL;
+              if (a <= 0) continue;
+              const col = side ? patchDark : patchLight;
+              const key = `${S.ch}${col}`;
+              const cv = side ? g.pD : g.pL;
+              if ((side ? g.pDkey : g.pLkey) !== key) {
+                const pc = side ? g.pDctx : g.pLctx;
+                pc.globalCompositeOperation = "copy";
+                pc.drawImage(patchSprites[S.ch], 0, 0);
+                pc.globalCompositeOperation = "source-in";
+                pc.fillStyle = col;
+                pc.fillRect(0, 0, cv.width, cv.height);
+                if (side) g.pDkey = key;
+                else g.pLkey = key;
+              }
+              c.globalAlpha = a;
+              c.drawImage(cv, 0, 0, cv.width, cv.height, -PM * CELL, -PM * CELL, PWpx, PHpx);
+            }
+          } else if (g.q2 > 0 && g.on) {
+            c.globalAlpha = g.q2;
+            c.drawImage(g.c, 0, 0, GC, GR, 0, 0, GWpx, GHpx);
+          }
+        }
+      }
+      c.resetTransform();
+      c.globalAlpha = 1;
+    }
     const swayShown = [NaN, NaN, NaN];
     function syncLayers(s, dt) {
       // ghosts lean with the numerals
@@ -1431,6 +1604,9 @@ export default {
       const qs = Math.round(baseShear * 250) / 250;
       // near the flip (only in twilight: full day and full night keep their look)
       const aim = twilight;
+      // the lift works through twilight and night, and by day under any cloud
+      // (a clear full day keeps its look)
+      const liftAim = Math.max(twilight, smoothstep(0.02, 0.1, cloudCover));
       for (let k = 0; k < 4; k++) {
         const S = slots[k];
         const g = ghosts[k];
@@ -1463,9 +1639,53 @@ export default {
           g.x = S.ox;
           groundDirty = true;
         }
+        // then make sure the figure really holds against the worst of the
+        // ground behind it, cloud included; if the silhouette under the veil
+        // cannot, lift it clear of the veil, and if no silhouette can, change
+        // the ground: a soft patch of thinner or denser cloud behind it
+        let tL = 0;
+        let tD = 0;
+        let t2 = 0;
+        if (liftAim > 0) {
+          const dk = S.light === 0;
+          const Li = dk ? L_DAY : paleLum;
+          const Vc = lerp(srgb(L_DAY), srgb(paleLum), S.inkT);
+          const Lr = dk ? g.rLo : g.rHi;
+          liftNeed(dk, Lr, g.aMin, op, Vc, Li);
+          let a = liftA;
+          let o = liftO;
+          if (g.aMax !== g.aMin) {
+            liftNeed(dk, Lr, g.aMax, op, Vc, Li);
+            a = Math.max(a, liftA);
+            o = Math.max(o, liftO);
+          }
+          if (dk) tL = a * liftAim;
+          else tD = a * liftAim;
+          t2 = o * liftAim * (1 - 0.45 * S.rel);
+        }
+        const step_ = dt / LIFT_FADE;
+        const toward = (v, t) => (inkSnap ? t : t > v ? Math.min(t, v + step_) : Math.max(t, v - step_));
+        g.aL = toward(g.aL, tL);
+        g.aD = toward(g.aD, tD);
+        g.o2 = toward(g.o2, t2);
+        const qL = Math.round(g.aL * 50) / 50;
+        const qD = Math.round(g.aD * 50) / 50;
+        const q2 = Math.round(g.o2 * 50) / 50;
+        if (qL !== g.qL || qD !== g.qD || q2 !== g.q2 || ((qL > 0 || qD > 0 || q2 > 0) && (qs !== g.lsh || S.ox !== g.lx))) {
+          g.qL = qL;
+          g.qD = qD;
+          g.q2 = q2;
+          g.lsh = qs;
+          g.lx = S.ox;
+          liftDirty = true;
+        }
       }
       inkSnap = false;
-      if (groundDirty) paintGround();
+      if (groundDirty) {
+        paintGround();
+        liftDirty = true; // the silhouettes may have changed ink
+      }
+      if (liftDirty) paintLift();
       if (shown.ampmTf !== qs) {
         shown.ampmTf = qs;
         ampmBox.style.transform = `skewX(${((-Math.atan(qs) * 180) / Math.PI).toFixed(2)}deg)`;
