@@ -577,10 +577,19 @@ export default {
     }
     let fontEpoch = 0;
     let fontsAsked = "";
+    // Printing a cloth (and uploading it) is the dearest thing a frame can do, so a frame prints at most two:
+    // when a whole bundle of data arrives the rest follow in the next frames, the time sheets first.
+    let printBudget = Infinity;
+    let printsPending = false;
     function refreshPrints(force) {
+      printsPending = false;
       for (const c of cloths) {
         const sig = signature(c);
         if (!force && sig === c.sig) continue;
+        if ((c.key !== "h1" || sig !== "") && printBudget <= 0) {
+          printsPending = true;
+          continue;
+        }
         c.sig = sig;
         if (c.key === "h1") c.visible = sig !== "";
         if (c.key === "fact") {
@@ -592,6 +601,7 @@ export default {
         if (c.visible || c.key !== "h1") {
           print(c);
           c.dirty = true;
+          printBudget--;
         }
       }
       // A fact may use letters outside the subset already loaded: ask for them, and print again when they arrive.
@@ -1337,8 +1347,9 @@ export default {
             prog = 2 * L.dist * p * p * (3 - 2 * p);
             if (L.phase === 1 && prog >= L.dist) {
               shiftLine(i, -2 * L.dist);
-              applyTime(i);
               L.phase = 2;
+              L.haul = prog - 2 * L.dist; // a sheet hung out now (a new first hour digit) goes up where the line now is
+              applyTime(i);
             }
             L.haul = L.phase === 2 ? prog - 2 * L.dist : prog;
           } else {
@@ -1882,11 +1893,14 @@ export default {
     return {
       frame(s) {
         const jumped = first || Math.abs(s.ms - lastMs) > 3000;
+        // when the clock jumps (a time-lapse) everything goes straight to the new state, or the time sheets,
+        // which change in every frame of a fast lapse, would keep the small linen waiting
+        printBudget = jumped && !first ? Infinity : 2;
         lastMs = s.ms;
         first = false;
         readWeather(s, s.dt, jumped);
         runPulleys(s, jumped);
-        if (s.clock.s !== lastSecond || jumped) {
+        if (s.clock.s !== lastSecond || jumped || printsPending) {
           lastSecond = s.clock.s;
           refreshPrints(false);
         }
