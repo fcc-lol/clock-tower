@@ -616,9 +616,9 @@ export default {
       const headHaze = haze * 0.16 + fog * 0.06;
       const dusk = 1 - dk;
       // What the time is seen against: the bare ground between its stalks and
-      // the blades standing round it (0.7: the understory, shadows and gaps make
+      // the blades standing round it (0.7, nearer 0.9 on snow: the understory, shadows and gaps make
       // the field read darker than its flat colours; measured on the frames).
-      const fieldL = 0.7 * (0.5 * luminance(g1) + 0.5 * luminance(fieldCol[NT + 1]));
+      const fieldL = (0.7 + 0.2 * snow) * (0.5 * luminance(g1) + 0.5 * luminance(fieldCol[NT + 1]));
       const crL = (la) => (Math.max(la, fieldL) + 0.05) / (Math.min(la, fieldL) + 0.05);
       const hd = [season.head, season.head2, mix(season.head2, season.pale, 0.22)].map((c) => adjust(c, { l: (v) => v * (1 - 0.06 * cloud) }));
       const dayHead = (c, k) => mix(mix(c, "#060606", k), hazeCol, headHaze);

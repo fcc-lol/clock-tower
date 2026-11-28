@@ -9,7 +9,7 @@
 // heat, interpuncts for dust. After a while the shape of the numerals says what
 // it is like outside before any number is read.
 
-import { W, H, TAU, clamp, lerp, remap, smoothstep, approach, mix, ramp, rgba, contrast, toOklch, oklch, rng, hash, createNoise, el, addStyle, canvas2d, grain, fitText } from "../lib/kit.js";
+import { W, H, TAU, clamp, lerp, remap, smoothstep, approach, mix, ramp, rgba, contrast, luminance, toOklch, oklch, rng, hash, createNoise, el, addStyle, canvas2d, grain, fitText } from "../lib/kit.js";
 
 const M = 96; // side margin
 const MEASURE = W - 2 * M;
@@ -26,6 +26,9 @@ const T = (f) => clamp((f - 5) / 100);
 const PAPER = ramp([[T(5), "#eef3f8"], [T(25), "#cfdae6"], [T(42), "#d8d5cc"], [T(58), "#efe6d1"], [T(72), "#f3cf46"], [T(86), "#f08b2d"], [T(100), "#e2452a"]]);
 const INK = ramp([[T(5), "#1b2fc2"], [T(25), "#11265f"], [T(42), "#1b1b1c"], [T(58), "#1d1a15"], [T(72), "#15120c"], [T(86), "#1c0e06"], [T(100), "#150705"]]);
 const NIGHT_INK = ramp([[T(5), "#b9ccff"], [T(25), "#b4c6e8"], [T(42), "#d5d2c8"], [T(58), "#eadfc6"], [T(72), "#f2d36a"], [T(86), "#ff9d57"], [T(100), "#ff7858"]]);
+const PALE_FLOOR = 4.6; // the least the pale ink may stand from the paper behind it (it is dimmed no further)
+const HALO = 0.21; // in fog: how far the halo takes the paper toward the ink at the edge of a figure (measured)
+const HALO_FLOOR = 3.15; // in fog: the least the ink may stand from that edge
 const NIGHT_PAPER = ramp([[T(5), "#070a14"], [T(42), "#0b0b0d"], [T(72), "#0e0c07"], [T(100), "#120806"]]);
 
 // The punctuation the air is set in.
@@ -397,19 +400,34 @@ export default {
           // night and full day keep their own inks exactly.
           const lift = smoothstep(0.02, 0.3, day);
           const sink = 1 - smoothstep(0.8, 1, day);
+          const veil = w.fog ? 0.2 * (1 - lift * sink) : 0; // the fog's veil over the ink lets go for the crossing
+          const veiled = (c) => (veil > 0 ? mix(c, paper, veil) : c);
+          // The night ink is dimmed only as far as the contrast it leaves allows:
+          // never below about 4.5:1 against the paper actually behind it, fog veil
+          // included (the hot inks, the reds and oranges, are dark for their
+          // brightness and a fixed dimming took them under 3:1). Only the
+          // lightness moves, so the hue of the temperature is kept.
           const dim = (1 - day) * (0.1 + 0.3 * smoothstep(0.4, 0.85, tt)) * (1 - lift);
           const pl = toOklch(NIGHT_INK(tt));
-          let pale = oklch(lerp(pl.l * (1 - 0.9 * dim), 0.985, lift), pl.c, pl.h);
+          const holds = (l) => contrast(paper, veiled(oklch(l, pl.c, pl.h))) >= PALE_FLOOR;
+          let paleL = lerp(pl.l * (1 - 0.9 * dim), 0.985, lift);
+          if (!holds(paleL)) {
+            let lo = paleL;
+            let hi = 0.985;
+            for (let i = 0; i < 14; i++) {
+              const mid = (lo + hi) / 2;
+              if (holds(mid)) hi = mid;
+              else lo = mid;
+            }
+            paleL = hi;
+          }
+          let pale = veiled(oklch(paleL, pl.c, pl.h));
           let dark = INK(tt);
           if (sink > 0) {
             const dl = toOklch(dark);
             dark = oklch(lerp(dl.l, Math.min(dl.l, 0.15), sink), dl.c, dl.h);
           }
-          if (w.fog) {
-            const veil = 0.2 * (1 - lift * sink); // the fog's veil over the ink lets go for the crossing
-            pale = mix(pale, paper, veil);
-            dark = mix(dark, paper, veil);
-          }
+          dark = veiled(dark);
           // Whichever stands further from the paper, chosen outright and then
           // kept until the other is clearly better, so it cannot flicker near the
           // crossing. At the ends (full night, full day) the choice is as it was.
@@ -430,7 +448,18 @@ export default {
           wrap.style.color = ink;
           flash.style.background = ink;
           // Fog: the figures go out of focus, soft copies of themselves behind the sharp ones.
-          const blur = w.fog ? `0 0 26px ${rgba(ink, 0.55)}, 0 -34px 60px ${rgba(ink, 0.3)}, 0 34px 60px ${rgba(ink, 0.3)}` : "none";
+          // The copies lift (or darken) the paper right at the edge of every figure,
+          // by about a fifth of the way to the ink: where the ink stands only just
+          // clear of the paper (the hot inks at night) they are set softer, so the
+          // edge itself still holds 3:1.
+          let k = 1;
+          if (w.fog) {
+            const li = luminance(ink);
+            const lp = luminance(paper);
+            const hMax = li > lp ? ((li + 0.05) / HALO_FLOOR - 0.05 - lp) / (li - lp) : (lp + 0.05 - HALO_FLOOR * (li + 0.05)) / (lp - li || 1);
+            k = Math.round(clamp(hMax / HALO) * 20) / 20;
+          }
+          const blur = w.fog ? `0 0 26px ${rgba(ink, 0.55 * k)}, 0 -34px 60px ${rgba(ink, 0.3 * k)}, 0 34px 60px ${rgba(ink, 0.3 * k)}` : "none";
           if (shown.blur !== blur) {
             shown.blur = blur;
             hh.style.textShadow = mm.style.textShadow = blur;

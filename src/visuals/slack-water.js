@@ -776,6 +776,15 @@ export default {
         mix(mix(inkD, skyMid, 0.05 * skyTint), sunCol, 0.22 * frontLit),
         mix(mix(inkD, skyMid, 0.13 * skyTint), sunCol, 0.26 * frontLit),
       ];
+      // ...and a low sun lighting the faces (front faces in the morning) never
+      // lifts them past 3.4:1 against the sky right behind them
+      [0, 1, 2].forEach((k) => {
+        const maxL = (Math.min(...behind.filter((b) => b[0] === k).map((b) => b[1])) + 0.05) / 3.4 - 0.05;
+        if (luminance(dayF[k]) <= maxL || luminance(inkD) >= maxL) return;
+        let lo = 0, hi = 1;
+        for (let q = 0; q < 14; q++) { const m = (lo + hi) / 2; if (luminance(mix(dayF[k], inkD, m)) <= maxL) hi = m; else lo = m; }
+        dayF[k] = mix(dayF[k], inkD, hi);
+      });
       const dayLs = dayF.map(luminance);
       let dayC = 99;
       for (const [k, Ls, v] of behind) dayC = Math.min(dayC, ((1 - v) * Ls + v * Lm + 0.05) / ((1 - v) * dayLs[k] + v * Lm + 0.05));
