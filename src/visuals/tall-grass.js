@@ -36,7 +36,7 @@
 // that are repainted only when the light or the weather moves; the frame blits
 // them and draws the blades in a few dozen batched fills. Only the type is DOM.
 
-import { W, H, clamp, lerp, smoothstep, rng, hash, createNoise, mix, adjust, rgba, luminance, readableOn, el, addStyle, canvas2d, mask } from "../lib/kit.js";
+import { W, H, clamp, lerp, smoothstep, rng, hash, createNoise, mix, adjust, rgba, luminance, contrast, el, addStyle, canvas2d, mask } from "../lib/kit.js";
 
 const KZ = 0.88; // how much of a blade's height shows in this oblique view
 const KY = 0.5; // how much the ground is foreshortened toward the top
@@ -541,9 +541,13 @@ export default {
     // Colour. Everything is recomputed only when the light or weather moves.
     // ---------------------------------------------------------------------
     const fieldCol = new Array(NBUCKET).fill("#000");
-    const pal = { head: new Array(7).fill("#000"), stalk: "#000", centre: "#000", accent: "#000", bead: "#000", rain: "#000", flake: "#000", flake2: "#000", hl: 4, hw: 13, groundLum: 0, bgLum: 0 };
+    const pal = { head: new Array(7).fill("#000"), bud: ["#000", "#000"], stalk: "#000", centreD: "#000", centreL: "#000", cDark: 1, cLumi: 1, inkPick: 0, ink2L: "#000", ink2D: "#000", accent: "#000", bead: "#000", rain: "#000", flake: "#000", flake2: "#000", hl: 4, hw: 13, groundLum: 0 };
     let season = null, seasonDay = -1;
     let sigA = -1, sigB = -1, sigSky = "";
+    // Which side each ink is on, chosen outright with hysteresis, and a short
+    // fade (about a second) when it changes: the flowers (dark or luminous)
+    // and the markers' type (burnt or cream).
+    let lumOn = null, lumT = 0, inkLight = null, inkT = 0, inkSig = "";
 
     const cond = { snow: 0, wet: 0, frost: 0, hot: 0, haze: 0, fog: 0, warm: 0, moon: 0, dew: 0, cloud: 0 };
 
@@ -594,10 +598,6 @@ export default {
       const g0 = mix(ground, hazeCol, hz(0)), g1 = mix(ground, hazeCol, hz(1.6)), g2 = mix(ground, hazeCol, hz(3.2));
       const g3 = mix(adjust(ground, { l: (v) => v * 0.94 }), hazeCol, hz(NB - 1));
       pal.groundLum = luminance(g2);
-      // how bright the field behind the flowers is: the flowers switch from
-      // dark to luminous where the two read equally well against it
-      pal.bgLum = 0.5 * pal.groundLum + 0.5 * luminance(fieldCol[2 * NT + 2]);
-      const lumi = smoothstep(0.2, 0.12, pal.bgLum);
       const gg = gctx.createLinearGradient(0, 0, 0, H);
       gg.addColorStop(0, g0); gg.addColorStop(0.28, g1); gg.addColorStop(0.58, g2); gg.addColorStop(1, g3);
       gctx.globalAlpha = 1;
@@ -615,18 +615,54 @@ export default {
       // the time's plants
       const headHaze = haze * 0.16 + fog * 0.06;
       const dusk = 1 - dk;
-      const dayHead = (c) => mix(mix(adjust(c, { l: (v) => v * (1 - 0.06 * cloud) }), "#060606", dusk * 0.45), hazeCol, headHaze);
-      pal.head[0] = dayHead(season.head);
-      pal.head[1] = dayHead(season.head2);
-      pal.head[2] = dayHead(mix(season.head2, season.pale, 0.22));
-      const headN = mix(adjust(season.night, { l: (v) => v * 0.94 }), season.pale, smoothstep(0.1, 0.45, d) * 0.85);
+      // What the time is seen against: the bare ground between its stalks and
+      // the blades standing round it (0.7: the understory, shadows and gaps make
+      // the field read darker than its flat colours; measured on the frames).
+      const fieldL = 0.7 * (0.5 * luminance(g1) + 0.5 * luminance(fieldCol[NT + 1]));
+      const crL = (la) => (Math.max(la, fieldL) + 0.05) / (Math.min(la, fieldL) + 0.05);
+      const hd = [season.head, season.head2, mix(season.head2, season.pale, 0.22)].map((c) => adjust(c, { l: (v) => v * (1 - 0.06 * cloud) }));
+      const dayHead = (c, k) => mix(mix(c, "#060606", k), hazeCol, headHaze);
+      // As the field darkens toward evening the dark flowers deepen toward
+      // black-red, as far as it takes (where it can) to keep 3.2:1 against the
+      // field, so they never sink into its tone. Full day is left as it was.
+      let deep = dusk * 0.45;
+      const gate = smoothstep(1, 0.88, d);
+      if (gate > 0) {
+        const want = (fieldL + 0.05) / 3.2 - 0.05;
+        const lumAt = (k) => luminance(dayHead(hd[2], k));
+        let k = deep;
+        if (lumAt(deep) > want) {
+          if (lumAt(0.985) >= want) k = 0.985;
+          else {
+            let lo = deep, hi = 0.985;
+            for (let it = 0; it < 14; it++) { const m = (lo + hi) / 2; if (lumAt(m) > want) lo = m; else hi = m; }
+            k = hi;
+          }
+        }
+        deep = lerp(deep, k, gate);
+      }
+      pal.head[0] = dayHead(hd[0], deep);
+      pal.head[1] = dayHead(hd[1], deep);
+      pal.head[2] = dayHead(hd[2], deep);
+      // in twilight the luminous heads are pale, palest where they first come on
+      const lift = smoothstep(0.1, 0.45, d);
+      const headN = mix(adjust(season.night, { l: (v) => v * 0.94 }), mix(season.pale, "#fff8f0", 0.35 * lift), lift * 0.85);
       pal.head[3] = headN;
-      pal.head[4] = mix(headN, "#0a0612", 0.2);
+      pal.head[4] = mix(headN, "#0a0612", 0.2 * (1 - lift));
       pal.head[5] = mix(mix(season.pale, "#f4ff8a", season.summer), "#ffffff", season.winter * 0.6);
       pal.stalk = mix(lit(season.stalk, mix("#07100c", season.night, 0.2), 0.03), hazeCol, headHaze);
-      pal.head[6] = mix(pal.stalk, lumi > 0.5 ? headN : pal.head[0], 0.5);
+      pal.bud[0] = mix(pal.stalk, pal.head[0], 0.5);
+      pal.bud[1] = mix(pal.stalk, headN, 0.5);
       // a luminous head has a pale heart, not a dark one: dark hearts mottle the numerals at night
-      pal.centre = mix(mix(season.centre, "#060606", dusk * 0.3), mix(headN, season.pale, 0.55), lumi);
+      pal.centreD = mix(season.centre, "#060606", dusk * 0.3);
+      pal.centreL = mix(headN, season.pale, 0.55);
+      // how well the dark heads and the luminous heads (each as planted, in
+      // their mix of shades) read against the field: the flowers take whichever
+      // side reads better, but only once the dark ones have deepened fully, so
+      // a dull day keeps its dark flowers
+      const lh = (k) => luminance(pal.head[k]);
+      pal.cDark = crL(0.5 * lh(0) + 0.32 * lh(1) + 0.18 * lh(2));
+      pal.cLumi = gate < 1 ? 0 : crL(0.68 * lh(3) + 0.32 * lh(4));
       pal.hl = season.hl;
       pal.hw = season.hw;
 
@@ -643,7 +679,8 @@ export default {
 
       // The markers: pale wood with burnt-in type by day, dark wood with cream
       // type by night. The wood moves quickly through mid-grey and the ink
-      // switches sides in one step there; it never fades.
+      // takes the better side outright there (with hysteresis, in the frame),
+      // changing over in under a second; it never blends with the light.
       const wk = smoothstep(0.3, 0.46, d);
       const woodDay = adjust(mix("#e3c69e", "#a07e55", 0.4 * wet), { l: (v) => v * (1 - 0.05 * cloud) });
       const woodNight = mix("#2e2219", "#2a2a33", 0.4 * snow);
@@ -656,10 +693,13 @@ export default {
       wood.cap = Math.round(smoothstep(0.15, 0.6, snow) * 20) / 20;
       wood.shadow = mix("#04180e", "#2c4468", snow);
       wood.shadowO = Math.round(dk * (1 - 0.7 * cloud) * 0.5 * 50) / 50;
-      const ink = readableOn(wood.face, INK_LIGHT, INK_DARK);
-      const light = ink === INK_LIGHT;
-      wrap.style.setProperty("--ink", ink);
-      wrap.style.setProperty("--ink2", light ? "#d9cba8" : mix("#4a3220", INK_DARK, 0.3 + 0.4 * wet));
+      // > 1 where the cream type reads better than the burnt type
+      pal.inkPick = contrast(wood.face, INK_LIGHT) / contrast(wood.face, INK_DARK);
+      // the quiet labels firm up to the full ink while the wood is mid-tone
+      const midWood = 1 - Math.abs(2 * wk - 1);
+      pal.ink2L = mix("#d9cba8", INK_LIGHT, midWood);
+      pal.ink2D = mix(mix("#4a3220", INK_DARK, 0.3 + 0.4 * wet), INK_DARK, midWood);
+      inkSig = "";
       if (allMarkers[0].w) paintMarkers();
     };
 
@@ -755,6 +795,23 @@ export default {
       if (a !== sigA || b !== sigB || s.sky.mean !== sigSky) {
         sigA = a; sigB = b; sigSky = s.sky.mean;
         recolour(s);
+      }
+      const toward1 = (v, to, rate) => (jumped ? to : v < to ? Math.min(to, v + dt / rate) : Math.max(to, v - dt / rate));
+      if (lumOn === null) lumOn = pal.cLumi >= pal.cDark;
+      else if (lumOn ? pal.cDark > pal.cLumi * 1.05 : pal.cLumi > pal.cDark * 1.05) lumOn = !lumOn;
+      lumT = toward1(lumT, lumOn ? 1 : 0, 1.1);
+      if (inkLight === null) inkLight = pal.inkPick >= 1;
+      else if (inkLight ? pal.inkPick < 1 / 1.06 : pal.inkPick > 1.06) inkLight = !inkLight;
+      inkT = toward1(inkT, inkLight ? 1 : 0, 0.8);
+      {
+        const e = smoothstep(0, 1, inkT);
+        const ink = inkT >= 1 ? INK_LIGHT : inkT <= 0 ? INK_DARK : mix(INK_DARK, INK_LIGHT, e);
+        const ink2 = inkT >= 1 ? pal.ink2L : inkT <= 0 ? pal.ink2D : mix(pal.ink2D, pal.ink2L, e);
+        if (ink + ink2 !== inkSig) {
+          inkSig = ink + ink2;
+          wrap.style.setProperty("--ink", ink);
+          wrap.style.setProperty("--ink2", ink2);
+        }
       }
 
       // ----- the wind -----
@@ -880,7 +937,10 @@ export default {
 
       // ----- the time: stiff stalks that lean a third as far, and their flowers -----
       const lean3 = 0.34;
-      const bgLum = pal.bgLum;
+      // the turn to luminous ripples through the heads in about a second, in
+      // each head's own order (PTH), never strung out over minutes of dusk
+      const lumCut = 1 - lumT;
+      pal.head[6] = lumT > 0.5 ? pal.bud[1] : pal.bud[0];
       const night = 1 - smoothstep(0.05, 0.2, d);
       const glints = night * season.winter * (1 - cond.wet) * 0.22; // frost glints on winter heads
       const flies = night * season.summer * smoothstep(58, 64, w.temp) * (1 - cond.wet) * (1 - smoothstep(10, 18, w.wind));
@@ -918,7 +978,7 @@ export default {
         let bk;
         if (g < 0.45) bk = 255;
         else if (g < 0.8) bk = 6;
-        else if (bgLum < PTH[i]) {
+        else if (lumT > 0 && (lumT >= 1 || 0.05 + 0.9 * (PTH[i] - 0.148) / 0.024 >= lumCut)) {
           bk = PVAR[i] === 1 ? 4 : 3;
           if (glints > 0.02 && PDL[i] < glints) {
             const pulse = Math.sin(t * PFQ[i] * 0.55 + PPH[i] * 3);
@@ -943,13 +1003,16 @@ export default {
         }
         ctx.stroke();
       }
-      ctx.fillStyle = pal.centre;
-      ctx.beginPath();
-      for (let i = 0; i < NP; i++) {
-        if (PBK[i] > 5) continue;
-        ctx.rect(PHX[i] - 2, PHY[i] - 2, 4, 4);
+      for (let pass = 0; pass < 2; pass++) {
+        ctx.fillStyle = pass ? pal.centreL : pal.centreD;
+        ctx.beginPath();
+        for (let i = 0; i < NP; i++) {
+          const bk = PBK[i];
+          if (bk > 5 || (bk >= 3) !== (pass === 1)) continue;
+          ctx.rect(PHX[i] - 2, PHY[i] - 2, 4, 4);
+        }
+        ctx.fill();
       }
-      ctx.fill();
 
       // ----- fireflies drifting low over the meadow, each glowing now and then -----
       if (flies > 0.05) {

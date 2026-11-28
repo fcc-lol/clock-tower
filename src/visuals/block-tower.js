@@ -183,10 +183,13 @@ const INK_MID = 0.179;
 const INK_LO = 0.165;
 const INK_HI = 0.195;
 const INK_FADE = 0.9; // seconds the letters take to cross-fade when the side changes
-function inkFor(bg, pair, ratio, darkSide) {
+// `lit` is the face as the light really paints it behind the letters (gloss and
+// scuffs make it a little paler than `bg`): pale ink is fitted against that,
+// dark ink against `bg` itself, so each holds its ratio against what it sits on.
+function inkFor(bg, pair, ratio, darkSide, lit = bg, darkRatio = ratio) {
   const lb = luminance(bg);
   const d = darkSide ?? lb >= INK_MID;
-  return d ? fitLum(pair[0], (lb + 0.05) / ratio - 0.05, -1) : fitLum(pair[1], ratio * (lb + 0.05) - 0.05, 1);
+  return d ? fitLum(pair[0], (lb + 0.05) / darkRatio - 0.05, -1) : fitLum(pair[1], ratio * (luminance(lit) + 0.05) - 0.05, 1);
 }
 
 // --- wood -------------------------------------------------------------------
@@ -867,13 +870,14 @@ export default {
     // been up all along would be on: in the afternoon and evening the faces are
     // darkening (it still has the dark ink), in the morning brightening.
     const INKS = {};
-    function inkOf(key, bg, pair, ratio, t, jump, darkening) {
-      const lb = luminance(bg);
+    function inkOf(key, bg, pair, ratio, t, jump, darkening, lit = bg, darkRatio = ratio) {
+      // the side is chosen on the face halfway between its paint and its lit look
+      const lb = (luminance(bg) + luminance(lit)) / 2;
       let st = INKS[key];
       const fresh = !st || jump;
       const wasDark = fresh ? darkening : st.dark;
       const want = wasDark ? lb > INK_LO : lb >= INK_HI;
-      const ink = inkFor(bg, pair, ratio, want);
+      const ink = inkFor(bg, pair, ratio, want, lit, darkRatio);
       if (!st) st = INKS[key] = { dark: want, t0: -1, from: ink, last: ink, k0: 0, k: 0 };
       if (fresh) st.t0 = -1;
       else if (want !== st.dark) {
@@ -1149,7 +1153,17 @@ export default {
         const fk = E.fog * FOGK[b.o.course] * (darkPaint ? 0.55 : 1);
         if (fk > 0.004) f = mix(f, fogCol, fk);
         const bi = blocks.indexOf(b);
-        const ink = inkOf(bi, f, INK[sc.ink], b.o.ratio || 4.7, s.t, jump, darkening);
+        // The time cubes run closest to their ratio (3.25), so their pale ink is
+        // fitted against the face as the sun's gloss and the scuffs lighten it
+        // (the wet gloss is left out: it is what keeps night untouched). Far
+        // from the crossover this changes nothing; near it, it keeps the pale
+        // numerals from sinking to the face's paler streaks.
+        const lit = b.o.ratio ? mix(f, "#ffffff", 0.3 * (sc.face ? 0.3 * sunK + 0.04 : 0.1 * sunK) + 0.012) : f;
+        // In fog the drifting banks pass in front of the cubes and lift dark ink
+        // toward the face; near the crossover (and only there: a face this dark
+        // is twilight, never day) the dark ink is taken a step deeper to allow for it.
+        const dr = b.o.ratio ? b.o.ratio * (1 + 0.12 * E.fog * (1 - smoothstep(0.22, 0.32, luminance(f)))) : 4.7;
+        const ink = inkOf(bi, f, INK[sc.ink], b.o.ratio || 4.7, s.t, jump, darkening, lit, dr);
         const dk = INKS[bi].k;
         b.ink = ink;
         setVar(b, "--f", f);

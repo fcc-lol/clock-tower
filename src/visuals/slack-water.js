@@ -44,7 +44,7 @@
 // The reflection is made from an offscreen copy of the structure, repainted
 // when the minute or the light changes.
 
-import { W, H, TAU, clamp, lerp, smoothstep, approach, rng, hash, createNoise, mix, adjust, rgba, luminance, contrast, el, svg, svgLayer, addStyle, canvas2d, grain, fitText } from "../lib/kit.js";
+import { W, H, TAU, clamp, lerp, smoothstep, rng, hash, createNoise, mix, adjust, rgba, luminance, contrast, el, svg, svgLayer, addStyle, canvas2d, grain, fitText, vec3 } from "../lib/kit.js";
 
 // ----- geometry (stage units) ---------------------------------------------
 const CX = 540;
@@ -90,6 +90,8 @@ const MIN_TOP = MIN_BASE - DIG_H;
 const SUN_PX = 74;
 const INK_L = "#f4ecdc"; // the two inks: warm paper white, and the structure's blue-black
 const INK_D = "#0a1018";
+const NUM_PALE = "#fff4e0"; // the numerals' lit faces are lifted toward this when amber alone would not read
+const LAMP_RAMP = 1.2; // seconds for the floodlights to come up or go down
 
 const NUM_FONT = `900 ${NUM_PX}px "Big Shoulders Display"`;
 const AMPM_FONT = `900 ${AMPM_PX}px "Big Shoulders Display"`;
@@ -123,6 +125,7 @@ const CSS = `
 .sw .c-snow { fill: var(--snow); }
 .sw .c-out { fill: none; stroke: var(--out); stroke-width: 2.5px; stroke-linejoin: round; }
 .sw-r { position: absolute; margin: 0; }
+.sw-flank, .sw-flank2, .sw-head { transition: color var(--fade, 0s), text-shadow var(--fade, 0s); }
 .sw-flank { color: var(--ink-b); text-shadow: 0 0 26px var(--halo-b); }
 .sw-flank2 { color: var(--ink-c); text-shadow: 0 0 26px var(--halo-c); }
 .sw-lb { font: 500 ${LB_PX}px/${LB_PX + 6}px "DM Mono", ui-monospace, monospace; text-transform: uppercase; letter-spacing: 0.16em; white-space: nowrap; }
@@ -516,7 +519,7 @@ export default {
     const P = { stk: ["", "", ""], gl: ["", "", ""] }; // palette: colours as strings, ready to use
     let first = true;
     let lastMs = 0, lastSec = -1;
-    let lamp = 0, lampT = 0, lampQ = -1;
+    let lamp = 0, lampT = 0, lampQ = -1, lampOn = null, lift = 0;
     let WL = (WL_HIGH + WL_LOW) / 2;
     let haze = 0, direct = 0, night = 0;
     let driftX = 0;
@@ -610,7 +613,7 @@ export default {
       text(s.text.ampm, ampmX, MIN_BASE, AMPM_FONT, "left", 8, AMPM_PX * CAP);
       if (lamp > 0.01) { // the fans of floodlight, only where there is something to light
         c.globalCompositeOperation = "source-atop";
-        c.globalAlpha = lamp;
+        c.globalAlpha = lamp * (1 - lift);
         for (let k = 0; k < NL; k++) {
           const up = k > N_LO, am = k === N_LO;
           const rx = am ? 90 : 114, ry = am ? 124 : 352;
@@ -705,8 +708,6 @@ export default {
       const skyHz = mix(skyMid, hzCol, hzA);
       const skyTop = mix(mix(skW, skN, 0.4), zen, zenA * 0.75);
       const lumTop = luminance(skyTop);
-      const lumBehind = luminance(mix(skyMid, skyHz, 0.35));
-      lampT = 1 - smoothstep(0.085, 0.14, lumBehind);
       // what is actually behind a point of the sky (the CSS layers below, in colour)
       const zenEnd = WL * 0.66, hzStart = WL * (0.6 - 0.3 * hot);
       const skyAt = (x, y) => {
@@ -716,6 +717,83 @@ export default {
         if (haze > 0.03) c = mix(c, skyMid, haze * (y < 380 ? 0 : y < 470 ? 0.24 * (y - 380) / 90 : 0.24 - 0.09 * clamp((y - 470) / (MIN_BASE - 670))));
         return c;
       };
+
+      // sun or moon glitter on the water, and the glow of a low sun over the river
+      const src = s.sun.alt > 0 ? s.sun : s.moon;
+      glitX = CX + ((((src.az - 270 + 540) % 360) - 180) / 45) * CX;
+      const inView = smoothstep(-260, 40, glitX) * smoothstep(W + 260, W - 40, glitX);
+      const sunGlow = s.sun.alt > -7 && s.sun.alt < 14 ? inView * (1 - cloud * 0.75) * (1 - haze) * Math.sin(((s.sun.alt + 7) / 21) * Math.PI) : 0;
+
+      // The floodlights: on or off outright, decided from the sky right behind the
+      // numerals. They come on as soon as the day ink can no longer hold about
+      // 3.8:1 against it (and the lit faces would do better), go off again only
+      // once the day ink is comfortably clear (hysteresis), and in between they
+      // never dwell half on: frame() ramps them over a second. The lit faces are
+      // lifted toward pale sodium wherever plain amber would not hold 3.8:1 (3.5:1
+      // at the tops) against the brightest sky behind them (a dark storm by day,
+      // early dusk); at night they are the amber they always were.
+      const inkD = mix("#0a1017", skyMid, 0.07);
+      const storm = wx.falling === "storm";
+      // the amber glow the floodlights throw on the air behind the numerals (.sw-halo)
+      const haloK = clamp(0.3 + 0.7 * haze + (wx.falling ? 0.25 : 0));
+      const ring = (r, a0, r1, a1, r2) => (r < r1 ? lerp(a0, a1, r / r1) : r < r2 ? lerp(a1, 0, (r - r1) / (r2 - r1)) : 0);
+      const haloAt = (x, y) => 1 - (1 - ring(Math.hypot((x - CX) / 470, (y - MIN_BASE - 10) / 330), 0.5, 0.48, 0.16, 0.74)) *
+        (1 - ring(Math.hypot((x - CX) / 380, (y - HOUR_BASE - 6) / 290), 0.36, 0.5, 0.1, 0.74));
+      // What is behind the feet, the middle and the tops of the numerals (the
+      // three stops of the faces' gradient), unlit and lit: the CSS sky layers
+      // composited the way the browser does (sRGB, back to front), then the
+      // floodlights' halo, a storm's brightening and the fog veil in front.
+      const rgb = (c) => vec3(c);
+      const over = (base, c, a) => [0, 1, 2].map((i) => base[i] + (c[i] - base[i]) * a);
+      const lin = (v) => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+      const lumOf = (c) => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
+      const cW = rgb(skW), cN = rgb(skN), cZ = rgb(zen), cH = rgb(hzCol), cS = rgb(sunCol), cM = rgb(skyMid);
+      const cHalo = [1, 0.63, 0.24], cSwell = [0.84, 0.87, 0.94];
+      const zenEndC = WL * 0.66, hzStartC = WL * (0.6 - 0.3 * hot);
+      const veilAt = (y) => haze <= 0.03 ? 0 : haze * (y < 380 ? 0 : y < 470 ? 0.24 * (y - 380) / 90 : y < MIN_BASE - 200 ? lerp(0.24, 0.15, (y - 470) / (MIN_BASE - 670)) : y < DECK_BOT ? lerp(0.15, 0.04, (y - MIN_BASE + 200) / (DECK_BOT - MIN_BASE + 200)) : 0.04);
+      const Lm = lumOf(cM);
+      const skyHi = [0, 0, 0], veilK = [0, 0, 0], behind = [];
+      const rows = [[HOUR_BASE - 10, MIN_BASE - 10, HOUR_BASE - 100, MIN_BASE - 100], [HOUR_TOP + 180, MIN_TOP + 180], [HOUR_TOP + 8, MIN_TOP + 8]];
+      rows.forEach((ys, k) => {
+        for (const y of ys) for (const x of [CX - 190, CX, CX + 190]) {
+          let c = over(cW, cN, clamp((x / W - 0.28) / 0.72));
+          c = over(c, cH, hzA * clamp((y - hzStartC) / (WL - hzStartC)));
+          c = over(c, cZ, zenA * clamp(1 - y / zenEndC));
+          if (sunGlow > 0.02) c = over(c, cS, 0.72 * sunGlow * clamp(1 - Math.hypot((x - glitX) / 820, (y - WL) / 470) / 0.72));
+          const v = veilAt(y);
+          const lit = over(c, cHalo, haloK * haloAt(x, y) * (k ? 1 : 0.75)); // (the feet stand in the fans' brightest light)
+          // a storm's cloud now and then brightens behind the numerals: allow for it
+          const hi = storm ? over(lit, cSwell, 0.153 * clamp(1 - Math.hypot((x - 660) / 900, (y - 300) / 520) / 0.7)) : lit;
+          behind.push([k, lumOf(c), v]);
+          if (lumOf(hi) >= skyHi[k]) { skyHi[k] = lumOf(hi); veilK[k] = v; }
+        }
+      });
+      // The day ink. By day the upper faces take a little of the sky's colour;
+      // as the light goes in twilight they keep to the plain ink, which reads longer.
+      const skyTint = smoothstep(0.25, 0.85, dl);
+      const dayF = [
+        mix(inkD, sunCol, 0.16 * frontLit),
+        mix(mix(inkD, skyMid, 0.05 * skyTint), sunCol, 0.22 * frontLit),
+        mix(mix(inkD, skyMid, 0.13 * skyTint), sunCol, 0.26 * frontLit),
+      ];
+      const dayLs = dayF.map(luminance);
+      let dayC = 99;
+      for (const [k, Ls, v] of behind) dayC = Math.min(dayC, ((1 - v) * Ls + v * Lm + 0.05) / ((1 - v) * dayLs[k] + v * Lm + 0.05));
+      const liftTo = (c, k) => { // the least step toward pale sodium that holds 3.8:1 (the tops 3.5:1) against the sky
+        const v = veilK[k], q = k === 2 ? 3.5 : 3.8, needL = (q * ((1 - v) * skyHi[k] + v * Lm + 0.05) - 0.05 - v * Lm) / (1 - v);
+        if (luminance(c) >= needL) return c;
+        let lo = 0, hi = 1;
+        for (let k = 0; k < 14; k++) { const m = (lo + hi) / 2; if (luminance(mix(c, NUM_PALE, m)) >= needL) hi = m; else lo = m; }
+        lift = Math.max(lift, hi);
+        return mix(c, NUM_PALE, hi);
+      };
+      lift = 0; // how far the faces were lifted: the amber fans would only dim a lifted face, so they give way
+      const nightF = [liftTo("#dd8a24", 0), liftTo("#c8781a", 1), liftTo(mix("#b56a12", "#8ea4c4", 0.3 * moonLight), 2)];
+      const litC = Math.min(...nightF.map((c, k) => { const v = veilK[k]; return ((1 - v) * luminance(c) + v * Lm + 0.05) / ((1 - v) * skyHi[k] + v * Lm + 0.05); }));
+      if (P.jump || lampOn === null) lampOn = dayC < 4 && litC > dayC;
+      else if (lampOn) { if (dayC > 4.3 || litC < 0.9 * dayC) lampOn = false; }
+      else if (dayC < 3.8 && litC > 1.05 * dayC) lampOn = true;
+      lampT = lampOn ? 1 : 0;
       // the ink of a zone: whichever of the two reads better against the worst of
       // what is behind it, switched in one step; a soft halo of the ground's own
       // colour pushed away from the ink keeps it clear in the half-light
@@ -726,10 +804,11 @@ export default {
           cl = Math.min(cl, contrast(c, INK_L)); cd = Math.min(cd, contrast(c, INK_D));
           avg = avg ? mix(avg, c, 1 / (k + 1)) : c;
         }
-        // the same choice a fresh start makes; a change only waits two seconds to
-        // be sure it holds (no flicker at the crossover, and no ink held for good
-        // that a fresh start would not choose)
-        const want = cl >= cd, prev = shown[key];
+        // a fresh start takes the better one; after that the ink in use is kept
+        // until the other reads clearly better (a 12% margin) for two seconds, so
+        // nothing flickers at the crossover; the change itself fades in 0.8 s
+        const prev = shown[key];
+        const want = prev === undefined || P.jump ? cl >= cd : prev === INK_L ? cl * 1.12 >= cd : cl >= cd * 1.12;
         let light = want;
         if (prev !== undefined && !P.jump && want !== (prev === INK_L)) {
           if (inkWait[key] < 0) inkWait[key] = s.t;
@@ -742,6 +821,7 @@ export default {
         const need = clamp((7 - (light ? cl : cd)) / 3.5); // only as much halo as the contrast needs
         setVar(`--halo-${key}`, light ? rgba(mix(avg, "#000000", 0.6), (0.75 * need).toFixed(2)) : rgba(mix(avg, "#ffffff", 0.55), (0.65 * need).toFixed(2)));
       };
+      setVar("--fade", P.jump ? "0s" : "0.8s"); // a change of ink takes under a second
       zoneInk("a", 110, HOUR_TOP - HEAD_GAP);
       zoneInk("b", HOUR_TOP, HOUR_BASE);
       zoneInk("c", MIN_TOP, MIN_TOP + 110);
@@ -751,13 +831,9 @@ export default {
       P.current = (s.tide.rising ? 1 : -1) * 2 * Math.sqrt(clamp(s.tide.norm) * (1 - clamp(s.tide.norm)));
 
       // sun or moon glitter on the water: only when the light is in the western half of the sky
-      const src = s.sun.alt > 0 ? s.sun : s.moon;
-      glitX = CX + ((((src.az - 270 + 540) % 360) - 180) / 45) * CX;
       glitDp = Math.max(0, src.alt) * 11;
-      const inView = smoothstep(-260, 40, glitX) * smoothstep(W + 260, W - 40, glitX);
       glitK = inView * (s.sun.alt > 0 ? direct * smoothstep(0, 4, s.sun.alt) * smoothstep(62, 40, s.sun.alt) : moonLight * 0.75);
       P.glit = s.sun.alt > 0 ? rgba(mix(sunCol, "#ffffff", 0.45), 0.92) : rgba("#dfe7f5", 0.25 + 0.5 * moonLight);
-      const sunGlow = s.sun.alt > -7 && s.sun.alt < 14 ? inView * (1 - cloud * 0.75) * (1 - haze) * Math.sin(((s.sun.alt + 7) / 21) * Math.PI) : 0;
       const sky =
         (sunGlow > 0.02 ? `radial-gradient(ellipse 820px 470px at ${glitX.toFixed(0)}px ${WL}px, ${rgba(sunCol, 0.72 * sunGlow)}, ${rgba(sunCol, 0)} 72%), ` : "") +
         `linear-gradient(180deg, ${rgba(zen, zenA)} 0px, ${rgba(zen, 0)} ${Math.round(zenEnd)}px), linear-gradient(180deg, ${rgba(hzCol, 0)} ${Math.round(hzStart)}px, ${rgba(hzCol, hzA)} ${WL}px), ` +
@@ -765,12 +841,10 @@ export default {
       setStyle("sky", skyDiv, "background", sky);
 
       // the structure
-      const inkD = mix("#0a1017", skyMid, 0.07);
       const lit = (day, nightCol) => mix(day, mix(nightCol, adjust(nightCol, { h: 25, c: (c) => c * 0.8 }), 1 - smoothstep(0.1, 0.8, lamp)), lamp);
-      const coolTop = mix("#b56a12", "#8ea4c4", 0.3 * moonLight);
-      P.f0 = lit(mix(inkD, sunCol, 0.16 * frontLit), "#dd8a24");
-      P.f1 = lit(mix(mix(inkD, skyMid, 0.05), sunCol, 0.22 * frontLit), "#c8781a");
-      P.f2 = lit(mix(mix(inkD, skyMid, 0.13), sunCol, 0.26 * frontLit), coolTop);
+      P.f0 = lit(dayF[0], nightF[0]);
+      P.f1 = lit(dayF[1], nightF[1]);
+      P.f2 = lit(dayF[2], nightF[2]);
       P.side = mix(mix(mix(inkD, skyMid, 0.36), mix(sunCol, "#ffffff", 0.25), 0.9 * sideLit), "#030508", lamp);
       P.top = mix(mix(mix(mix(inkD, skyMid, 0.55), mix(sunCol, "#ffffff", 0.5), 0.85 * sideLit), sunCol, clamp(1.4 * backLit)), "#1a1109", lamp);
       P.out = mix(mix(mix(inkD, "#000000", 0.4), mix(sunCol, "#ffffff", 0.25), clamp(1.6 * backLit)), "#030508", lamp);
@@ -843,8 +917,8 @@ export default {
         setVar("--side", P.side); setVar("--top", P.top); setVar("--fasc", P.fasc); setVar("--out", P.out);
         setVar("--pile", P.pile); setVar("--wet", P.wet); setVar("--snow", P.snow); setVar("--shore", P.shore);
       }
-      const lampS = lamp.toFixed(3);
-      setAttr("fanM", minFans, "opacity", lampS); setAttr("fanH", hourFans, "opacity", lampS);
+      const lampS = lamp.toFixed(3), fanS = (lamp * (1 - lift)).toFixed(3);
+      setAttr("fanM", minFans, "opacity", fanS); setAttr("fanH", hourFans, "opacity", fanS);
       setAttr("dots", lampDots, "opacity", lampS); setAttr("dlit", deckLit, "opacity", lampS);
       setStyle("halo", halo, "opacity", (lamp * clamp(0.3 + 0.7 * haze + (wx.falling ? 0.25 : 0))).toFixed(3));
       setAttr("slights", shoreLights, "opacity", (night * (1 - clamp(haze * 1.5))).toFixed(2));
@@ -888,14 +962,16 @@ export default {
       const jump = first || Math.abs(s.ms - lastMs - dt * 1000) > 3000;
       lastMs = s.ms;
       P.jump = jump;
-      lamp = jump ? lampT : approach(lamp, lampT, dt, 7);
+      // the floodlights ramp in time (never with the sky's tone), and go
+      // straight to their state when the clock jumps
+      if (!jump) lamp = clamp(lamp + clamp(lampT - lamp, -dt / LAMP_RAMP, dt / LAMP_RAMP));
       const q = Math.round(lamp * 40);
       const sec = Math.floor(s.ms / 1000);
-      if (sec !== lastSec || q !== lampQ || first) {
+      if (sec !== lastSec || q !== lampQ || jump) {
         lampQ = q;
         lastSec = sec;
         slow(s);
-        if (first) { lamp = lampT; lampQ = Math.round(lamp * 40); slow(s); }
+        if (jump && lamp !== lampT) { lamp = lampT; lampQ = Math.round(lamp * 40); slow(s); }
       }
       // (when the clock runs fast, at most five repaints a second)
       if (sceneDue >= 0 && t >= sceneDue && (t - lastPaint >= 0.2 || t < lastPaint)) { sceneDue = -1; lastPaint = t; paintScene(s); }

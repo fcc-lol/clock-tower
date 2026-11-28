@@ -316,6 +316,15 @@ export default {
       rank[i * 3 + 1] = r();
       rank[i * 3 + 2] = r();
     }
+    // Each room's lamp is either on or off (with a little hysteresis) and
+    // fades over about a second when it switches, never over minutes of
+    // light. A room also switches its lamp on, at its own moment, once the
+    // daylit blind would stop standing clear of the brick (lampCR is the
+    // contrast at which this room gives up on daylight), so no digit is ever
+    // a blind sinking into the wall.
+    const lampOn = new Uint8Array(NWIN), lampV = new Float32Array(NWIN), lampCR = new Float32Array(NWIN);
+    for (let i = 0; i < NWIN; i++) lampCR[i] = 3.8 + 0.8 * hash(i, 7919);
+    let lampMoving = false;
     const rooms = [];
     for (let k = 0; k < 16; k++) rooms.push(roomSprite(LAMPS[k % 4], k < 4 ? 0 : k < 8 ? 1 : k < 12 ? 2 : r.chance(0.5) ? 3 : 0, r));
 
@@ -733,6 +742,8 @@ export default {
       PAL.blind = under("#5a4a40");
       PAL.blindDay = fogged(under(mix("#e4e0d8", "#fff7e6", env.sunS)), 0.3);
       PAL.blindBar = fogged(under("#b8ab96"), 0.3);
+      // how far the daylit blind stands off the brick (lamps take over below each room's mark)
+      PAL.dayCR = contrast(PAL.blindDay, brickNow);
       PAL.tower = fogged(blend("#3a2a22", VEIL, va * 0.9), 1.5);
       PAL.towerHi = fogged(blend("#5a4436", VEIL, va * 0.9), 1.5);
       PAL.lattice = PAL.tower;
@@ -966,7 +977,8 @@ export default {
       if (sunS > 0.01) paintShadows(shDx, shDy, sunS);
       for (let i = 0; i < NWIN; i++) {
         if (awake[i] !== 1 || target[i] !== 1) continue;
-        const lamp = 1 - smoothstep(lampAt[i] - 0.04, lampAt[i] + 0.04, env.lampL);
+        if (lampV[i] > 0 && lampV[i] < 1) continue; // fading: on the moving layer
+        const lamp = lampV[i];
         if (lamp < 0.995) drawGlass(wctx, patWg, patDg, i, 1);
         drawWin(wctx, i, 1, lamp);
       }
@@ -984,7 +996,7 @@ export default {
       for (let i = 0; i < NWIN; i++) {
         const a = awake[i];
         if (a <= 0.02) continue;
-        const lamp = a * (1 - smoothstep(lampAt[i] - 0.04, lampAt[i] + 0.04, env.lampL));
+        const lamp = a * lampV[i];
         if (lamp < 0.02) continue;
         gctx.globalAlpha = lamp * (0.42 + 0.3 * env.murk) * dayGlow;
         gctx.drawImage(warmGlow, colX(i % 9) + WW / 2 - size / 2, rowY((i / 9) | 0) + WH / 2 - size / 2, size, size);
@@ -993,7 +1005,7 @@ export default {
       for (let i = 0; i < NWIN; i++) {
         const a = awake[i];
         if (a < 1) continue;
-        const lamp = 1 - smoothstep(lampAt[i] - 0.04, lampAt[i] + 0.04, env.lampL);
+        const lamp = lampV[i];
         if (lamp < 0.05) continue;
         gctx.globalAlpha = lamp * 0.55;
         gctx.fillStyle = "#c98548";
@@ -1124,6 +1136,27 @@ export default {
           palChanged = true;
         }
         if (palChanged) paintFronts();
+
+        // ---- lamps: on or off outright, with hysteresis, and a one-second fade ----
+        {
+          const L = env.lampL, cr = PAL.dayCR;
+          let fading = false, settled = false;
+          for (let i = 0; i < NWIN; i++) {
+            if (lampOn[i]) {
+              if (L > lampAt[i] + 0.03 && (L >= 0.82 || cr > lampCR[i] + 0.35)) lampOn[i] = 0;
+            } else if (L < lampAt[i] - 0.03 || (L < 0.8 && cr < lampCR[i])) lampOn[i] = 1;
+            const tg = lampOn[i];
+            let v = lampV[i];
+            if (v === tg) continue;
+            v = jumped ? tg : tg ? Math.min(1, v + dt / 0.9) : Math.max(0, v - dt / 0.9);
+            lampV[i] = v;
+            if (v === tg) settled = true; else fading = true;
+          }
+          // the wall bakes the settled rooms (and the light they throw), so it follows the fades
+          if (settled) winDirty = true;
+          if (fading) palPending = true;
+          lampMoving = fading;
+        }
         const flashO = Math.round(flash * 34);
         if (shown.flashO !== flashO) { shown.flashO = flashO; flashDiv.style.opacity = String(flashO / 100); }
 
@@ -1154,10 +1187,11 @@ export default {
         fctx.globalAlpha = 1;
         paintRoof(fctx);
         // windows that are switching on or off, drawn here until they settle
-        if (moving) {
+        if (moving || lampMoving) {
           for (let i = 0; i < NWIN; i++) {
-            if (awake[i] === target[i] || awake[i] <= 0) continue;
-            const lamp = 1 - smoothstep(lampAt[i] - 0.04, lampAt[i] + 0.04, env.lampL);
+            if (awake[i] <= 0) continue;
+            if (awake[i] === target[i] && !(lampV[i] > 0 && lampV[i] < 1)) continue;
+            const lamp = lampV[i];
             if (lamp < 0.995) drawGlass(fctx, patWf, patDf, i, awake[i]);
             drawWin(fctx, i, awake[i], lamp);
           }
@@ -1183,7 +1217,7 @@ export default {
         // the small lives in three of the lit rooms
         for (let i = 0; i < NWIN; i++) {
           if (!vig[i] || awake[i] < 1) continue;
-          const lamp = 1 - smoothstep(lampAt[i] - 0.04, lampAt[i] + 0.04, env.lampL);
+          const lamp = lampV[i];
           if (lamp > 0.4) drawVig(i, lamp, t);
         }
 
@@ -1216,7 +1250,7 @@ export default {
             fctx.beginPath();
             for (let i = 0; i < NWIN; i++) {
               if (!isOpen[i] || awake[i] < 1) continue;
-              if ((1 - smoothstep(lampAt[i] - 0.04, lampAt[i] + 0.04, env.lampL) > 0.5 ? 1 : 0) !== g) continue;
+              if ((lampV[i] > 0.5 ? 1 : 0) !== g) continue;
               const gx = colX(i % 9) + FR, gy = rowY((i / 9) | 0) + FR;
               const y0 = gy + gh * 0.5 + 1.5, y1 = gy + gh, h = y1 - y0;
               const xe = dir > 0 ? gx + gw : gx, xi = dir > 0 ? gx : gx + gw;

@@ -735,7 +735,10 @@ export default {
       const stk = e <= 0 ? flip.stkL : e >= 1 ? flip.stkD : mix(flip.stkL, flip.stkD, e);
       const ink = readableOn(paper, "#efe5d0", "#1b2030");
       const stkInk = readableOn(stk, "#f6eedd", "#1b2030");
-      const css = `--paper:${paper};--ink:${ink};--ink2:${mix(ink, paper, 0.24)};--stk:${stk};--stkink:${stkInk};` +
+      // the quiet labels are the ink let toward the paper, less so where the paper is mid-grey
+      // (as it is through twilight), so that they never sink into it
+      const quiet = 0.24 * smoothstep(4.7, 7, contrast(paper, ink));
+      const css = `--paper:${paper};--ink:${ink};--ink2:${mix(ink, paper, quiet)};--stk:${stk};--stkink:${stkInk};` +
         `--stkrim:${rgba(stkInk, 0.16)};--fold:${mix(paper, stk, 0.85)};--rule:${mix(paper, ink, 0.16)}${flip.rest}`;
       if (shown.css !== css) { shown.css = css; wrap.style.cssText = css; }
     }

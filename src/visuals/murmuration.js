@@ -856,7 +856,7 @@ export default {
         lum = lerp(sky, groundLum(x0, x1, y0, y1), twilight);
         lumSpread(x0, x1, y0, y1);
         g.lo = lerp(regionLo, underCloud(regionLo), twilight);
-        g.hi = lerp(regionHi, underCloud(regionHi), twilight);
+        g.hi = regionHi; // pale ink is weakest where the bands part
         const dCr = ((g.lo + 0.05) / (L_DAY + 0.05)) * lerp(2.5, 1, twilight);
         const pCr = (paleLum + 0.05) / (g.hi + 0.05);
         dark = g.dark ? dCr * INK_HYST > pCr : dCr > pCr * INK_HYST;

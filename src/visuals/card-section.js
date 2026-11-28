@@ -258,7 +258,7 @@ export default {
       stand: "#05060a", eye: "#17181c", snow: "#f5f7fb", flake: "#f5f7fb", rain: "#dfe7f5", loose: "#e9e3d4", loose2: "#9fb6d6", straw: "#e6cd8a",
       sky: new Array(COLS * 3), alt: new Array(COLS * 3), cloud: new Array(COLS * 3), core: new Array(COLS * 3), lap: new Array(COLS),
       lit: new Array(4), litSeam: "#000", ink: new Array(4), inkSeam: "#000", umbHi: new Array(6), skin: new Array(6), skinLit: new Array(6), skinMoat: new Array(6), hair: new Array(8), shirt: new Array(8),
-      beanie: new Array(6), umb: new Array(6), umbDark: new Array(6), veil: new Array(ROWS), veilNum: new Array(ROWS),
+      beanie: new Array(6), umb: new Array(6), umbDark: new Array(6), veil: new Array(ROWS), veilNum: new Array(ROWS), veilHalo: new Array(ROWS),
     };
     const env = {
       cloud: 0, thrCloud: 9, thrCore: 9, lit: false, umb: 0, sleep: 0, snow: 0, beanie: 0, sunhat: 0, fog: 0,
@@ -373,6 +373,9 @@ export default {
         const a = thick * 0.92 * Math.pow(1 - row / ROWS, 1.15);
         P.veil[row] = a > 0.012 ? rgba(fogCol, +a.toFixed(3)) : "";
         P.veilNum[row] = a > 0.08 ? rgba(fogCol, +(a * 0.15).toFixed(3)) : "";
+        // The dark halo round lit numerals takes less of the fog than the crowd,
+        // or in thick fog after dark it greys up to the deep amber of the figures.
+        P.veilHalo[row] = a > 0.012 ? rgba(fogCol, +(a * 0.45).toFixed(3)) : "";
       }
 
       // The cloth and its paint are set every frame in updateCloth().
@@ -843,7 +846,7 @@ export default {
       const lv = lift[i]; // the stadium wave: 0 seated .. 3 card held high, other face out
       const up = face[i] >= F_INK && face[i] <= F_LIT ? 0 : lv * 3; // numeral holders hold still, so the figure stays whole
       const cx = 15 + jx[i];
-      const veil = f === F_INK || f === F_LIT ? "" : P.veil[row];
+      const veil = f === F_INK || f === F_LIT ? "" : env.lit && role[i] === R_MOAT ? P.veilHalo[row] : P.veil[row];
 
       if ((f === F_INK || f === F_LIT) && open >= 0.97) {
         // A numeral card, settled: it fills the seat, so the cards close up into
