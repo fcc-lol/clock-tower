@@ -1033,7 +1033,9 @@ export default {
 
       // ----- the patch the time stands in: shade round the light flowers, a
       // pale clearing round winter's dark seed heads (crossing over with them) -----
-      const shA = pal.shadeA * lumT, liA = pal.liftA * (1 - lumT);
+      // (in step with the heads as they turn, one by one, in the change of side)
+      const turned = clamp((lumT - 0.05) / 0.9);
+      const shA = pal.shadeA * turned, liA = pal.liftA * (1 - turned);
       if (shA > 0.004 || liA > 0.004) {
         const xo = Math.min(1, smoothstep(0.3, 2.6, sinceChange));
         if (xo.toFixed(3) !== shadeSig) {

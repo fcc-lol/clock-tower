@@ -90,7 +90,7 @@ const MIN_TOP = MIN_BASE - DIG_H;
 const SUN_PX = 74;
 const INK_L = "#f4ecdc"; // the two inks: warm paper white, and the structure's blue-black
 const INK_D = "#0a1018";
-const NUM_PALE = "#fff4e0"; // the numerals' lit faces are lifted toward this when amber alone would not read
+const NUM_PALE = "#fffaf2"; // the numerals' lit faces are lifted toward this when amber alone would not read
 const LAMP_RAMP = 1.2; // seconds for the floodlights to come up or go down
 
 const NUM_FONT = `900 ${NUM_PX}px "Big Shoulders Display"`;
@@ -520,6 +520,9 @@ export default {
     let first = true;
     let lastMs = 0, lastSec = -1;
     let lamp = 0, lampT = 0, lampQ = -1, lampOn = null, lift = 0;
+    // the amber fans only dim (and mottle) a face lifted toward pale sodium: they
+    // give way as soon as the faces are lifted at all, and are gone by lift 0.4
+    const fanK = () => Math.max(0, 1 - 2.5 * lift);
     let WL = (WL_HIGH + WL_LOW) / 2;
     let haze = 0, direct = 0, night = 0;
     let driftX = 0;
@@ -613,7 +616,7 @@ export default {
       text(s.text.ampm, ampmX, MIN_BASE, AMPM_FONT, "left", 8, AMPM_PX * CAP);
       if (lamp > 0.01) { // the fans of floodlight, only where there is something to light
         c.globalCompositeOperation = "source-atop";
-        c.globalAlpha = lamp * (1 - lift);
+        c.globalAlpha = lamp * fanK();
         for (let k = 0; k < NL; k++) {
           const up = k > N_LO, am = k === N_LO;
           const rx = am ? 90 : 114, ry = am ? 124 : 352;
@@ -694,7 +697,12 @@ export default {
 
       // sky: the measured west and north-west colours, nudged out of the mid-grey
       // band so that dusk and dawn pass through it quickly (there, no ink reads)
-      const skW = unGrey(sk.west), skN = unGrey(sk.northWest);
+      // As the light goes the sky is held under a ceiling that comes down with
+      // daylight, so by 0.15 it is at night tone (and the room stays dark);
+      // in full day nothing is touched, and a night sky is darker than it anyway.
+      const skyCap = lerp(0.27, 1.01, smoothstep(0.12, 0.42, dl));
+      const dim = (c) => (skyCap > 1 || Math.cbrt(luminance(c)) < skyCap - 0.04 ? c : adjust(c, { l: (L) => Math.min(L, skyCap) }));
+      const skW = unGrey(dim(sk.west)), skN = unGrey(dim(sk.northWest));
       const skyMid = mix(skW, skN, 0.5);
       const zen = mix("#01030a", adjust(skyMid, { l: (l) => l * 0.74, c: (c) => c * 1.3 }), smoothstep(0, 0.6, dl));
       const zenA = lerp(0.5, 0.62, dl) * (1 - 0.6 * haze) * (1 - 0.45 * hot);
@@ -751,11 +759,17 @@ export default {
       const cHalo = [1, 0.63, 0.24], cSwell = [0.84, 0.87, 0.94];
       const zenEndC = WL * 0.66, hzStartC = WL * (0.6 - 0.3 * hot);
       const veilAt = (y) => haze <= 0.03 ? 0 : haze * (y < 380 ? 0 : y < 470 ? 0.24 * (y - 380) / 90 : y < MIN_BASE - 200 ? lerp(0.24, 0.15, (y - 470) / (MIN_BASE - 670)) : y < DECK_BOT ? lerp(0.15, 0.04, (y - MIN_BASE + 200) / (DECK_BOT - MIN_BASE + 200)) : 0.04);
-      const Lm = lumOf(cM);
+      // (the fog veil is composited over sky and faces alike, in sRGB as the browser does)
+      const seenL = (col, v) => lumOf(over(Array.isArray(col) ? col : rgb(col), cM, v));
       const skyHi = [0, 0, 0], veilK = [0, 0, 0], behind = [];
-      const rows = [[HOUR_BASE - 10, MIN_BASE - 10, HOUR_BASE - 100, MIN_BASE - 100], [HOUR_TOP + 180, MIN_TOP + 180], [HOUR_TOP + 8, MIN_TOP + 8]];
+      // (AM/PM carries the same three stops in a quarter of the height, so its
+      // middle and top sit low, in the horizon's glow: they are sampled beside it)
+      const AH = AMPM_PX * CAP, xs = [CX - 190, CX, CX + 190], xa = [ampmX + 40];
+      const rows = [[[HOUR_BASE - 10, xs], [MIN_BASE - 10, xs], [HOUR_BASE - 100, xs], [MIN_BASE - 100, xs]],
+        [[HOUR_TOP + 180, xs], [MIN_TOP + 180, xs], [MIN_BASE - 0.45 * AH, xa]],
+        [[HOUR_TOP + 8, xs], [MIN_TOP + 8, xs], [MIN_BASE - AH + 8, xa]]];
       rows.forEach((ys, k) => {
-        for (const y of ys) for (const x of [CX - 190, CX, CX + 190]) {
+        for (const [y, xr] of ys) for (const x of xr) {
           let c = over(cW, cN, clamp((x / W - 0.28) / 0.72));
           c = over(c, cH, hzA * clamp((y - hzStartC) / (WL - hzStartC)));
           c = over(c, cZ, zenA * clamp(1 - y / zenEndC));
@@ -764,8 +778,9 @@ export default {
           const lit = over(c, cHalo, haloK * haloAt(x, y) * (k ? 1 : 0.75)); // (the feet stand in the fans' brightest light)
           // a storm's cloud now and then brightens behind the numerals: allow for it
           const hi = storm ? over(lit, cSwell, 0.153 * clamp(1 - Math.hypot((x - 660) / 900, (y - 300) / 520) / 0.7)) : lit;
-          behind.push([k, lumOf(c), v]);
-          if (lumOf(hi) >= skyHi[k]) { skyHi[k] = lumOf(hi); veilK[k] = v; }
+          behind.push([k, lumOf(c), v, seenL(c, v)]);
+          const Lh = seenL(hi, v);
+          if (Lh >= skyHi[k]) { skyHi[k] = Lh; veilK[k] = v; }
         }
       });
       // The day ink. By day the upper faces take a little of the sky's colour;
@@ -785,27 +800,30 @@ export default {
         for (let q = 0; q < 14; q++) { const m = (lo + hi) / 2; if (luminance(mix(dayF[k], inkD, m)) <= maxL) hi = m; else lo = m; }
         dayF[k] = mix(dayF[k], inkD, hi);
       });
-      const dayLs = dayF.map(luminance);
       let dayC = 99;
-      for (const [k, Ls, v] of behind) dayC = Math.min(dayC, ((1 - v) * Ls + v * Lm + 0.05) / ((1 - v) * dayLs[k] + v * Lm + 0.05));
-      const liftTo = (c, k) => { // the least step toward pale sodium that holds 3.8:1 (the tops 3.5:1; more in fog, which the estimate reads less well) against the sky
-        const v = veilK[k], q = (k === 2 ? 3.5 : 3.8) + 0.5 * haze, needL = (q * ((1 - v) * skyHi[k] + v * Lm + 0.05) - 0.05 - v * Lm) / (1 - v);
-        if (luminance(c) >= needL) return c;
+      for (const [k, , v, Ls] of behind) dayC = Math.min(dayC, (Ls + 0.05) / (seenL(dayF[k], v) + 0.05));
+      const liftTo = (c, k) => { // the least step toward pale sodium that holds 3.8:1 (the tops 3.5:1; a little more in fog) against the brightest sky behind
+        const v = veilK[k], q = (k === 2 ? 3.5 : 3.8) + 0.5 * haze, needL = q * (skyHi[k] + 0.05) - 0.05;
+        if (seenL(c, v) >= needL) return c;
         let lo = 0, hi = 1;
-        for (let k = 0; k < 14; k++) { const m = (lo + hi) / 2; if (luminance(mix(c, NUM_PALE, m)) >= needL) hi = m; else lo = m; }
+        for (let j = 0; j < 14; j++) { const m = (lo + hi) / 2; if (seenL(mix(c, NUM_PALE, m), v) >= needL) hi = m; else lo = m; }
         lift = Math.max(lift, hi);
         return mix(c, NUM_PALE, hi);
       };
       lift = 0; // how far the faces were lifted: the amber fans would only dim a lifted face, so they give way
       const nightF = [liftTo("#dd8a24", 0), liftTo("#c8781a", 1), liftTo(mix("#b56a12", "#8ea4c4", 0.3 * moonLight), 2)];
-      const litC = Math.min(...nightF.map((c, k) => { const v = veilK[k]; return ((1 - v) * luminance(c) + v * Lm + 0.05) / ((1 - v) * skyHi[k] + v * Lm + 0.05); }));
-      // (the lit faces must read clearly better than the day ink before the lamps
-      // come on: the estimate of the sky is not exact, and least so in fog)
-      const margin = wx.fog ? 0.4 : 0;
-      if (P.jump || lampOn === null) lampOn = dayC < 4 && litC > (1.12 + margin) * dayC;
-      else if (lampOn) { if (dayC > 4.3 || litC < 0.9 * dayC) lampOn = false; }
-      else if (dayC < 3.8 && litC > (1.18 + margin) * dayC) lampOn = true;
+      const litC = Math.min(...nightF.map((c, k) => (seenL(c, veilK[k]) + 0.05) / (skyHi[k] + 0.05)));
+      // One decision, the same for a fresh start and a running piece: lit when the
+      // lit faces read better against the sky behind them than the day ink does
+      // (and the day ink is under 4:1, so a bright day never lights them), unlit
+      // when the day ink reads better. A running piece changes only once the other
+      // side is ahead by 3.5%: a narrow, symmetric dead band against flicker, so it
+      // is never more than a few seconds behind what a fresh start would choose.
+      const lampScore = Math.min(litC, 4) / dayC;
+      if (P.jump || lampOn === null) lampOn = lampScore > 1;
+      else if (lampOn ? lampScore < 0.965 : lampScore > 1.035) lampOn = !lampOn;
       lampT = lampOn ? 1 : 0;
+      wrap.dataset.dbg = `${dayC.toFixed(2)},${litC.toFixed(2)},${lampScore.toFixed(3)},${lampOn ? 1 : 0},${lift.toFixed(2)}|${skyHi.map((v) => v.toFixed(3))}|${nightF.map((c, k) => seenL(c, veilK[k]).toFixed(3))}|${behind.map((b) => b[3].toFixed(3))}`; // DEBUG
       // the ink of a zone: whichever of the two reads better against the worst of
       // what is behind it, switched in one step; a soft halo of the ground's own
       // colour pushed away from the ink keeps it clear in the half-light
@@ -931,7 +949,7 @@ export default {
         setVar("--side", P.side); setVar("--top", P.top); setVar("--fasc", P.fasc); setVar("--out", P.out);
         setVar("--pile", P.pile); setVar("--wet", P.wet); setVar("--snow", P.snow); setVar("--shore", P.shore);
       }
-      const lampS = lamp.toFixed(3), fanS = (lamp * (1 - lift)).toFixed(3);
+      const lampS = lamp.toFixed(3), fanS = (lamp * fanK()).toFixed(3);
       setAttr("fanM", minFans, "opacity", fanS); setAttr("fanH", hourFans, "opacity", fanS);
       setAttr("dots", lampDots, "opacity", lampS); setAttr("dlit", deckLit, "opacity", lampS);
       setStyle("halo", halo, "opacity", (lamp * clamp(0.3 + 0.7 * haze + (wx.falling ? 0.25 : 0))).toFixed(3));

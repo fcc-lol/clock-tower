@@ -920,7 +920,8 @@ export default {
       if (inkLight === null) inkLight = cLight > cDark;
       else if (inkLight ? cDark > cLight * INK_HYST : cLight > cDark * INK_HYST) inkLight = !inkLight;
       const want = inkLight ? 1 : 0;
-      const stepK = snap ? 1 : clamp((s.t - palT) / INK_FADE);
+      // (a change starts with one frame's step, then runs a frame at a time)
+      const stepK = snap ? 1 : clamp((pal.fading ? s.t - palT : s.dt) / INK_FADE);
       palT = s.t;
       inkK = inkK < want ? Math.min(want, inkK + stepK) : Math.max(want, inkK - stepK);
       const night = inkK * inkK * (3 - 2 * inkK);

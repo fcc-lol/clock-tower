@@ -1296,6 +1296,9 @@ export default {
         if (put("moon", moonIt.vl, t.moon) || shown.moonFact !== hasFact) {
           shown.moonFact = hasFact;
           moonIt.vl.style.fontSize = "";
+          // fit from the stylesheet's size, which the fact's presence changes (48 or 56 px), not
+          // the one fitText remembered the first time
+          delete moonIt.vl.dataset.baseSize;
           if (fitText(moonIt.vl, moonIt.node.offsetWidth || 380) < 40) moonIt.vl.style.fontSize = "40px";
         }
         put("aqi", aqiIt.vl, t.aqi);
