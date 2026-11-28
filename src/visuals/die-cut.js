@@ -38,7 +38,7 @@
 
 import {
   W, H, TAU, clamp, lerp, smoothstep, norm, lerpAngle, ease, rng, hash, createNoise,
-  mix, oklch, toOklch, rgba, el, addStyle, canvas2d, mask, fitText,
+  mix, adjust, oklch, toOklch, rgba, el, addStyle, canvas2d, mask, fitText,
 } from "../lib/kit.js";
 
 const MX = 64; // side margin for type
@@ -92,14 +92,16 @@ export default {
 
     addStyle(root, `
       .dc { position: absolute; inset: 0; overflow: hidden; background: #0b0d1c; font-family: "Cormorant Garamond", Georgia, serif;
-            --ink: #1b1e36; --hl: rgba(255,255,255,.7); --sheet: #f3efe6; color: var(--ink); font-variant-numeric: lining-nums; }
+            --ink: #1b1e36; --hl: rgba(255,255,255,.7); --sheet: #f3efe6; color: var(--ink); font-variant-numeric: lining-nums;
+            transition: color 1s linear; }
+      .dc.snap, .dc.snap .txt { transition: none; }
       .dc .blob { position: absolute; left: 0; top: 0; width: 1300px; height: 900px; border-radius: 50%; will-change: transform, opacity;
                   background: radial-gradient(closest-side, rgba(22,26,60,.2), rgba(22,26,60,.12) 45%, rgba(22,26,60,0) 100%); }
       .dc .flap { position: absolute; background: var(--sheet); display: none; will-change: transform; }
       .dc .flap.t { transform-origin: 50% 0; box-shadow: 0 3px 5px rgba(5,8,30,.28); }
       .dc .flap.b { transform-origin: 50% 100%; box-shadow: 0 -2px 4px rgba(5,8,30,.2); }
       .dc .flap i { position: absolute; inset: 0; background: #070a20; opacity: 0; }
-      .dc .txt { position: absolute; inset: 0; text-shadow: 0 1.2px 0 var(--hl); }
+      .dc .txt { position: absolute; inset: 0; text-shadow: 0 1.2px 0 var(--hl); transition: text-shadow 1s linear; }
       .dc .strip { position: absolute; left: ${MX}px; top: ${R1B}px; width: ${W - 2 * MX}px; height: ${STRIP}px; display: flex; align-items: center; }
       .dc .date { font-size: 52px; font-weight: 700; letter-spacing: .01em; white-space: nowrap; line-height: 1; padding-bottom: 6px; }
       .dc .rule { flex: 1; height: 2px; background: currentColor; opacity: .55; margin: 0 30px; box-shadow: 0 1.2px 0 var(--hl); }
@@ -866,13 +868,21 @@ export default {
     };
     const NIGHT_SHEET = oklch(0.125, 0.036, 272);
     const FLOOR = Math.cbrt(3.3 * (0.125 ** 3 + 0.05) - 0.05); // the darkest the scene may be behind the night sheet
+    // The scene seen through the cuts is the time's ink, and the sheet is its ground. The sheet glides
+    // from white to indigo with the light, so the scene never blends between its day and night tones
+    // (that would pass through the sheet's own tone): it is either darker than the sheet (pol 0) or
+    // lighter (pol 1), each kept 3.3:1 from the sheet as it is now, and it changes side once, where
+    // the sheet's lightness crosses FLIP (with a little hysteresis), in a fade of about a second.
+    // The letterpress ink changes side at the same moment.
+    const FLIP = 0.555, HYST = 0.015, FADE = 1;
+    let pol = -1, pf = 0;
     const hueOf = (k, fallback) => (k.c < 0.012 ? fallback : k.h);
     // fog over each city layer, at its top and at the waterline (far, mid, bridge, near)
     const FOG_TOP = [0.8, 0.6, 0.42, 0.08];
     const FOG_BOT = [0.97, 0.92, 0.84, 0.45];
     const q2s = (v) => Math.round(v * 50); // a coarse step, for bitmap keys
 
-    const computePalette = (s) => {
+    const computePalette = (s, snap) => {
       const w = s.weather, d = s.daylight;
       const n = 1 - smoothstep(0.15, 0.28, d);
       const day = 1 - n;
@@ -892,12 +902,28 @@ export default {
       daySheet = mix(daySheet, oklch(dayL - 0.01, 0.05, 66), gold * 0.55);
       P.n = n;
       P.sheet = mix(daySheet, NIGHT_SHEET, n);
-      const lit = toOklch(P.sheet).l > 0.56;
+      const sheetL = toOklch(P.sheet).l;
+      if (snap || pol < 0) pol = sheetL < FLIP ? 1 : 0;
+      else if (pol === 0 && sheetL < FLIP - HYST) pol = 1;
+      else if (pol === 1 && sheetL > FLIP + HYST) pol = 0;
+      if (snap) pf = pol;
+      const pm = smoothstep(0, 1, pf); // how far the scene has gone over to its night side
+      const lit = pol === 0;
       P.ink = lit ? "#1a1c33" : "#e6dfcf";
       P.hl = lit ? "rgba(255,255,255,.75)" : "rgba(0,0,0,.6)";
 
       // how light the scene may be behind the day sheet, for 3:1 and a little more
       const cap = Math.cbrt((dayL ** 3 + 0.05) / 3.3 - 0.05);
+      // ... and behind the sheet as it is now: the day scene darkens in step with the sheet (scaled, so its
+      // layers keep their steps), the night scene is lifted toward white while the sheet is still light
+      const dSL = toOklch(daySheet).l;
+      const sY = lerp(dSL, toOklch(NIGHT_SHEET).l, n) ** 3 + 0.05;
+      const capRef = Math.cbrt(Math.max(1e-6, (dSL ** 3 + 0.05) / 3.3 - 0.05));
+      const kD = n > 0 ? clamp(Math.cbrt(Math.max(0, sY / 3.3 - 0.05)) / capRef) : 1;
+      const kN = n < 1 ? clamp((1 - Math.cbrt(Math.min(1, 3.3 * sY - 0.05))) / (1 - FLOOR)) : 1;
+      const fitD = (c) => (kD === 1 ? c : adjust(c, { l: (v) => v * kD }));
+      const fitN = (c) => (kN === 1 ? c : adjust(c, { l: (v) => 1 - (1 - v) * kN }));
+      const side = (dc, nc) => mix(fitD(dc), fitN(nc), pm);
       const bright = clamp((km.l - 0.36) / 0.36);
       const v = clamp(Math.log2(1 + w.visibility) / Math.log2(11)) * (w.fog ? 0.6 : 1);
       const vS = 0.4 + 0.6 * v; // the step between layers never quite collapses: fog does the washing out
@@ -905,7 +931,7 @@ export default {
         const h = hueOf(k, 255);
         const dc = oklch(cap + dL, clamp(k.c * 1.35 * cK, 0.014, 0.17), h);
         const nc = oklch(FLOOR + nL, clamp((k.c * 2 + 0.05) * cK, 0.05, 0.16), lerpAngle(h, 264, 0.45));
-        return mix(dc, nc, n);
+        return side(dc, nc);
       };
       const dTop = -0.17 - 0.07 * (1 - bright), dHor = -0.015 - 0.09 * (1 - bright);
       P.skyTop = sky(km, dTop, 0.012);
@@ -918,7 +944,7 @@ export default {
       const layer = (stepD, stepN, cK, hShift) => {
         const dc = oklch(Math.max(0.17, cap + dHor - stepD * vS), clamp(km.c * 1.25 * cK, 0.012, 0.15), lerpAngle(hm, 272, hShift));
         const nc = oklch(Math.max(FLOOR + 0.002, FLOOR + 0.15 - stepN * vS), clamp((km.c * 2 + 0.05) * cK, 0.05, 0.15), lerpAngle(hm, 266, 0.5));
-        return mix(dc, nc, n);
+        return side(dc, nc);
       };
       P.far = layer(0.1, 0.05, 0.95, 0.15);
       P.mid = layer(0.2, 0.09, 0.9, 0.25);
@@ -930,9 +956,10 @@ export default {
       const fogK = clamp(1 - v);
       const haze = clamp((w.aqi - 55) / 130) * 0.55 + clamp((w.temp - 86) / 12) * 0.2;
       P.fogK = Math.max(fogK, haze * 0.75);
-      P.hazeC = oklch(cap + 0.01, 0.09, 72);
-      P.haze = Math.round(clamp(haze) * day * (1 - fogK) * 20) / 20;
-      P.fog = mix(P.skyHor, P.hazeC, clamp(haze * 1.4) * day * (1 - fogK));
+      P.hazeC = fitD(oklch(cap + 0.01, 0.09, 72));
+      const hazeDay = day * (1 - pm); // the warm haze is a day-side tone
+      P.haze = Math.round(clamp(haze) * hazeDay * (1 - fogK) * 20) / 20;
+      P.fog = mix(P.skyHor, P.hazeC, clamp(haze * 1.4) * hazeDay * (1 - fogK));
       for (let k = 0; k < 4; k++) {
         P.fogTop[k] = FOG_TOP[k] * P.fogK;
         P.fogBot[k] = FOG_BOT[k] * P.fogK;
@@ -940,8 +967,9 @@ export default {
       P.riverFog = 0.62 * fogK;
       for (let i = 0; i < 3; i++) P.river[i] = mix(riv[i], P.fog, P.riverFog * (1 - i * 0.12));
       P.vellumA = Math.round(smoothstep(0.55, 0.88, fogK) * 50) / 50;
-      P.ghost = oklch(cap + 0.11, 0.065, 72); // the sun through fog: a pale apricot glow (as light as the clear-day sun may be)
-      P.vellum = mix(oklch(cap + 0.005, Math.min(0.03, km.c), hm), oklch(FLOOR + 0.2, 0.04, 262), n);
+      P.vellum = side(oklch(cap + 0.005, Math.min(0.03, km.c), hm), oklch(FLOOR + 0.2, 0.04, 262));
+      // the sun through fog: a pale apricot glow (as light as the clear-day sun may be); a day-side tone
+      P.ghost = pm > 0 ? mix(fitD(oklch(cap + 0.11, 0.065, 72)), P.vellum, pm) : fitD(oklch(cap + 0.11, 0.065, 72));
 
       // clouds: pale on a fair day, slate when it is closing in
       for (let i = 0; i < 3; i++) {
@@ -949,13 +977,13 @@ export default {
         const dullD = oklch(cap - 0.2 - 0.05 * i, clamp(km.c * 0.8, 0.012, 0.06), lerpAngle(hm, 270, 0.3));
         const fairN = oklch(FLOOR + 0.12 - 0.03 * (2 - i), 0.05, 272);
         const dullN = oklch(FLOOR + 0.015 + 0.02 * (2 - i), 0.03, 280);
-        P.cloud[i] = mix(mix(fairD, dullD, dull), mix(fairN, dullN, dull), n);
+        P.cloud[i] = side(mix(fairD, dullD, dull), mix(fairN, dullN, dull));
         P.cloudLow[i] = mix(P.cloud[i], P.fog, P.fogTop[0]);
         const vD = oklch(cap - 0.045 - 0.075 * i - 0.1 * dull, clamp(km.c * 0.7, 0.012, 0.06), lerpAngle(hm, 268, 0.25));
         const vN = oklch(FLOOR + 0.095 - 0.04 * i - 0.01 * dull, 0.04, 276);
-        P.val[i] = mix(vD, vN, n);
+        P.val[i] = side(vD, vN);
       }
-      P.thread = mix(oklch(cap - 0.34, 0.03, hm), oklch(FLOOR + 0.3, 0.03, 260), n);
+      P.thread = side(oklch(cap - 0.34, 0.03, hm), oklch(FLOOR + 0.3, 0.03, 260));
       P.shadow = n > 0.5 ? "rgba(6,8,32,0.12)" : "rgba(10,14,48,0.2)";
       P.window = mix("#ffe2ae", "#ffd492", n);
       for (let k = 0; k < 4; k++) P.winC[k] = mix(P.window, P.fog, (P.fogTop[k] + P.fogBot[k]) * 0.5);
@@ -964,7 +992,7 @@ export default {
       P.pennantC = mix(P.near, P.fog, P.fogTop[3]);
       P.sun = oklch(cap + 0.15, 0.13, 82);
       P.moon = "#f1ead6";
-      P.moonDark = oklch(FLOOR + 0.07, 0.05, 268);
+      P.moonDark = fitN(oklch(FLOOR + 0.07, 0.05, 268));
       P.rain = mix(oklch(0.9, 0.02, 235), oklch(0.86, 0.035, 240), n);
       P.bit = mix("#fbfcff", oklch(0.9, 0.02, 250), n);
       P.snow = mix("#ffffff", oklch(0.86, 0.03, 250), n);
@@ -978,13 +1006,13 @@ export default {
       // the cut edges: a pale paper edge and a cast shadow by day, a warm rim at night
       const cross = 1 - Math.abs(n - 0.5) * 2;
       P.rimA = lerp(0.9, 0.0, n);
-      P.glowA = n * 0.6;
-      P.shadowA = lerp(0.5, 0.2, n) + 0.3 * cross;
+      P.glowA = n * 0.6 * pm; // a light glow at the cut edges only once the scene is the lighter side
+      P.shadowA = lerp(0.5, 0.2, pm) + 0.3 * cross * (1 - pm);
       P.wet = wet;
       P.dull = dull;
       P.cap = cap;
       P.damp = Math.round((wet ? clamp(0.3 + w.intensity * 0.6) : 0) * lerp(1, 0.3, n) * 10) / 10;
-      P.paintKey = `${P.sheet}${Math.round(P.rimA * 16)}${Math.round(P.shadowA * 16)}${P.damp}`;
+      P.paintKey = `${P.sheet}${Math.round(P.rimA * 16)}${Math.round(P.shadowA * 16)}${Math.round(P.glowA * 16)}${P.damp}`;
 
       // what each bitmap depends on
       const fk = q2s(P.fogK);
@@ -1231,16 +1259,25 @@ export default {
     const JOBS = Object.values(job);
     // Rebakes are spread out: at most one bitmap a frame, and each at most every few seconds
     // (colors drift slowly through twilight), unless the clock has jumped.
+    // When several are due, the one baked longest ago goes first, so none waits behind the others.
     const runJobs = (all, t, gap) => {
+      let pick = null;
       for (const j of JOBS) {
         if (j.have === j.want) continue;
-        if (!all && t - (j.at ?? -99) < gap) continue;
-        j.have = j.want;
-        j.at = t;
-        j.bake();
-        if (!all) return true;
+        if (all) {
+          j.have = j.want;
+          j.at = t;
+          j.bake();
+          continue;
+        }
+        if (t - (j.at ?? -99) < gap) continue;
+        if (!pick || (j.at ?? -99) < (pick.at ?? -99)) pick = j;
       }
-      return false;
+      if (!pick) return false;
+      pick.have = pick.want;
+      pick.at = t;
+      pick.bake();
+      return true;
     };
 
     // ---------------------------------------------------------------- painting the sheet
@@ -1729,6 +1766,7 @@ export default {
     };
 
     // ---------------------------------------------------------------- frame
+    let inkShown = "", inkSnap = false;
     let ledgeStale = true, lastMs = null, lastJump = false, quietUntil = 0, lastPalT = -9, lastPaintT = -9, paintedKey = "", lastTime = "";
     const setFlap = (i, cover) => {
       const f = flaps[i];
@@ -1755,11 +1793,15 @@ export default {
         if (jump) quietUntil = s.ms + 1500;
         const tx = s.text, w = s.weather;
 
-        if (jump || s.t - lastPalT > 0.4) {
+        // the scene going over to the other side of the sheet: a fade of about a second
+        if (!jump && pol >= 0 && pf !== pol) pf = pol > pf ? Math.min(pol, pf + s.dt / FADE) : Math.max(pol, pf - s.dt / FADE);
+        const fading = pol >= 0 && pf !== pol;
+        if (jump || fading || s.t - lastPalT > 0.4) {
           lastPalT = s.t;
-          computePalette(s);
+          computePalette(s, jump);
         }
-        const baked = runJobs(jump && !streaming, s.t, streaming ? 0 : 4);
+        const turning = pf !== pol; // still fading, or the side has just changed
+        const baked = runJobs(jump && !streaming, s.t, streaming || turning ? 0 : 4);
 
         // what is cut into the sheet
         const stamp = tx.time + tx.ampm;
@@ -1797,14 +1839,22 @@ export default {
           buildLedges(depth, cold);
           repaint = true;
         }
-        if (repaint || (P.paintKey !== paintedKey && (jump || (!baked && s.t - lastPaintT > 2)))) {
+        if (repaint || (P.paintKey !== paintedKey && (jump || (turning ? s.t - lastPaintT > 0.25 : !baked && s.t - lastPaintT > 2)))) {
           if (P.paintKey !== paintedKey) dirty.full = true;
           paintedKey = P.paintKey;
           lastPaintT = s.t;
           paintSheet();
           wrap.style.setProperty("--sheet", P.sheet);
-          wrap.style.setProperty("--ink", P.ink);
-          wrap.style.setProperty("--hl", P.hl);
+        }
+        // the letterpress ink changes side with the scene, in a one-second fade (at once when the clock jumps)
+        if (P.ink !== inkShown || jump !== inkSnap) {
+          if (jump !== inkSnap) wrap.classList.toggle("snap", jump);
+          inkSnap = jump;
+          if (P.ink !== inkShown) {
+            inkShown = P.ink;
+            wrap.style.setProperty("--ink", P.ink);
+            wrap.style.setProperty("--hl", P.hl);
+          }
         }
 
         drawScene(s);

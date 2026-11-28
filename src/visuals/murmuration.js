@@ -37,7 +37,7 @@
 //            the air; it settles again over a few seconds
 import {
   W, H, TAU, clamp, lerp, smoothstep, rng, hash, createNoise,
-  mix, rgba, toOklab, el, svg, addStyle, canvas2d, mask,
+  mix, rgba, toOklab, el, svg, addStyle, canvas2d, mask, luminance,
 } from "../lib/kit.js";
 
 const DISPLAY = '"Big Shoulders Display", "Anton", "Arial Narrow", sans-serif';
@@ -407,12 +407,12 @@ export default {
     };
 
     // Four places a digit can stand: hour (one or two), minute tens, minute ones.
-    const slots = [0, 1, 2, 3].map((id) => ({ id, ch: -1, ox: 0, oy: 0, pivot: 0, rel: 0, dir: id % 2 ? -1 : 1, k: Math.floor(R.range(0, 5000)), cx: 0, cy: 0, changed: false, light: 0 }));
+    const slots = [0, 1, 2, 3].map((id) => ({ id, ch: -1, ox: 0, oy: 0, pivot: 0, rel: 0, dir: id % 2 ? -1 : 1, k: Math.floor(R.range(0, 5000)), cx: 0, cy: 0, changed: false, light: 0, inkT: 0 }));
     const ghosts = slots.map(() => {
       const c = document.createElement("canvas");
       c.width = GC;
       c.height = GR;
-      return { c, ctx: c.getContext("2d"), key: "", on: false, sh: 0, x: 0, op: -1, dark: true, lumGap: 0 };
+      return { c, ctx: c.getContext("2d"), key: "", on: false, sh: 0, x: 0, op: -1, dark: true, lum: 0.3 };
     });
 
     // ------------------------------------------------------------- birds
@@ -715,7 +715,23 @@ export default {
     const TYPE_DAY = "#050608";
     const TYPE_NIGHT = "#f5f1e8"; // near-white: at the switch even this only just reads
     const FLIP = 0.168; // sky luminance where dark and pale type read equally well
+    const TYPE_HYST = 0.01; // a dead band either side of the type's flip, so its ink cannot flicker
     let birdFlip = 0.1; // the same for birds, which stay silhouettes for as long as there is daylight
+    // Each numeral takes the dark or the pale ink outright (never a blend that
+    // passes through the tone of the sky behind it), with a dead band either
+    // side of the flip so it cannot flicker, and the change itself is a short
+    // fade. Near the flip neither ink has much to push against, so the soft
+    // silhouette under the birds thickens until the figure holds its contrast.
+    const BIRD_HYST = 0.015;
+    const INK_FADE = 0.8; // s
+    const GHOST_AIM = 3.4; // contrast the figure aims for while the sky is near the flip
+    const BIRD_COVER = 0.6; // share of a stroke the birds themselves cover, over the silhouette
+    const L_DAY = luminance(INK_DAY);
+    let paleLum = luminance(INK_NIGHT);
+    let inkSnap = true;
+    let fading = false;
+    const slotInk = new Uint8Array(4);
+    const slotCol = ["", "", "", ""];
     const ALPHA = [0.86, 0.95, 1];
     const FLY_ALPHA = 0.6; // the ribbon in flight, against the numerals' full ink
     const WIDTH = [1.8, 2.2, 2.6];
@@ -736,14 +752,16 @@ export default {
         skyKey = key;
         paintSky(s);
         const low = lumRegion(MARGIN, W - MARGIN, 1380, 1820);
-        const ink = low > FLIP ? TYPE_DAY : TYPE_NIGHT;
+        const typeDark = low > FLIP + (typeInk === "" ? 0 : typeInk === TYPE_DAY ? -TYPE_HYST : TYPE_HYST);
+        const ink = typeDark ? TYPE_DAY : TYPE_NIGHT;
         if (ink !== typeInk) {
           typeInk = ink;
           for (const b of bands) b.style.color = ink;
           fact.style.color = ink;
         }
-        perchDark = low > FLIP;
-        const side = lumRegion(880, 1020, MIN_BASE - 110, MIN_BASE) > FLIP ? TYPE_DAY : TYPE_NIGHT;
+        perchDark = typeDark;
+        const sideLum = lumRegion(880, 1020, MIN_BASE - 110, MIN_BASE);
+        const side = sideLum > FLIP + (ampmInk === "" ? 0 : ampmInk === TYPE_DAY ? -TYPE_HYST : TYPE_HYST) ? TYPE_DAY : TYPE_NIGHT;
         if (side !== ampmInk) {
           ampmInk = side;
           ampmBox.style.color = side;
@@ -753,6 +771,7 @@ export default {
         const mean = lumRegion(60, 1020, 100, 1400);
         birdFlip = lerp(0.155, 0.085, s.daylight);
         pale = mix(INK_NIGHT, INK_DUSK, smoothstep(0.012, 0.08, mean));
+        paleLum = luminance(pale);
         rainInk = mean > 0.3 ? rgba("#1d2733", 0.4) : rgba("#c9d2de", 0.42 - 0.12 * (1 - s.daylight));
         snowInk = rgba(mix("#8f959c", "#ffffff", 0.35 + 0.65 * s.daylight), 0.9);
         // cloud tint: lit from above by day, from the city below at night; heavy weather is darker than its sky
@@ -781,9 +800,11 @@ export default {
         return;
       }
       const lum = lumRegion(s.ox + PAD, s.ox + GWpx - PAD, s.oy + PAD, s.oy + GHpx - PAD);
-      const dark = lum > birdFlip;
+      const dark = lum > birdFlip + (g.dark ? -BIRD_HYST : BIRD_HYST);
       s.light = dark ? 0 : 1;
-      const key = `${s.ch}${dark}${dark ? "" : pale}`;
+      if (inkSnap) s.inkT = s.light;
+      const col = s.inkT <= 0 ? INK_DAY : s.inkT >= 1 ? pale : mix(INK_DAY, pale, s.inkT);
+      const key = `${s.ch}${col}`;
       if (g.key !== key) {
         g.key = key;
         g.on = true;
@@ -791,10 +812,10 @@ export default {
         g.ctx.globalCompositeOperation = "copy";
         g.ctx.drawImage(ghostSprites[s.ch], 0, 0);
         g.ctx.globalCompositeOperation = "source-in";
-        g.ctx.fillStyle = dark ? INK_DAY : pale;
+        g.ctx.fillStyle = col;
         g.ctx.fillRect(0, 0, g.c.width, g.c.height);
       }
-      g.lumGap = Math.abs(lum - birdFlip);
+      g.lum = lum;
       g.dark = dark;
     }
 
@@ -1122,11 +1143,21 @@ export default {
         dotStyles[2] = rgba(INK_DAY, +(0.55 * (1 - 0.9 * fog)).toFixed(3));
         dotStyles[3] = rgba(pale, +(0.55 * (1 - 0.9 * fog)).toFixed(3));
       }
+      // each numeral's ink (a blend only for the moment of a change)
+      fading = false;
+      for (let k = 0; k < 4; k++) {
+        const sT = slots[k].inkT;
+        slotInk[k] = sT <= 0 ? 0 : sT >= 1 ? 1 : 5 + k;
+        if (slotInk[k] > 4) {
+          fading = true;
+          slotCol[k] = mix(INK_DAY, pale, sT);
+        }
+      }
       // far birds first: specks
-      for (let i = 0; i < NDG; i++) dbk[i] = slots[dsl[i]].light;
+      for (let i = 0; i < NDG; i++) dbk[i] = slots[dsl[i]].inkT < 0.5 ? 0 : 1;
       for (let i = NDG; i < ND; i++) {
         if (dm[i - NDG] < 0.5) {
-          dbk[i] = slots[dsl[i]].light;
+          dbk[i] = slots[dsl[i]].inkT < 0.5 ? 0 : 1;
           continue;
         }
         let ci = (dX[i] * (SC / W)) | 0;
@@ -1150,7 +1181,7 @@ export default {
       // is, and in flight it is drawn a shade lighter (the ribbon is the farther
       // flock), so where it crosses a numeral the figure still reads through it.
       for (let i = 0; i < N; i++) {
-        if (md[i] === 0) bk[i] = slots[sl[i]].light;
+        if (md[i] === 0) bk[i] = slotInk[sl[i]];
         else if (md[i] === 1 && perched[i - NG]) bk[i] = 4;
         else {
           let ci = (px[i] * (SC / W)) | 0;
@@ -1164,9 +1195,11 @@ export default {
         const run = runs[r];
         const z = run.z;
         const wd = WIDTH[z];
-        for (let ink = 0; ink < (run.free ? 4 : 2); ink++) {
-          ctx.globalAlpha = runAlpha[r] * (ink > 1 ? FLY_ALPHA : 1);
-          ctx.fillStyle = ink & 1 ? pale : INK_DAY;
+        const inks = fading ? 9 : run.free ? 4 : 2;
+        for (let ink = 0; ink < inks; ink++) {
+          if (ink === 4 || (!run.free && ink > 1 && ink < 4)) continue;
+          ctx.globalAlpha = runAlpha[r] * (ink > 1 && ink < 4 ? FLY_ALPHA : 1);
+          ctx.fillStyle = ink > 4 ? slotCol[ink - 5] : ink & 1 ? pale : INK_DAY;
           ctx.beginPath();
           for (let o = run.from; o < run.to; o++) {
             const i = drawOrder[o];
@@ -1331,14 +1364,26 @@ export default {
       const night = 1 - s.daylight;
       // (in coarse steps, so the ground is repainted only now and then)
       const qs = Math.round(baseShear * 250) / 250;
+      // near the flip (only in twilight: full day and full night keep their look)
+      const aim = 1 - smoothstep(0.9, 1, s.daylight);
       for (let k = 0; k < 4; k++) {
         const S = slots[k];
         const g = ghosts[k];
         if (S.ch < 0) continue;
+        // a change of ink is a short fade
+        if (S.inkT !== S.light) {
+          S.inkT = inkSnap ? S.light : S.light > S.inkT ? Math.min(S.light, S.inkT + dt / INK_FADE) : Math.max(S.light, S.inkT - dt / INK_FADE);
+          drawGhost(k);
+        }
         // strong enough that the figure reads on its own, even where birds
-        // peel away or the ribbon crosses it; a little softer right at the
-        // ink switch, where neither ink has much to push against
-        const op = Math.round((g.dark ? 0.68 : 0.46) * (0.72 + 0.28 * smoothstep(0, 0.035, g.lumGap)) * (1 - 0.45 * S.rel) * 40) / 40;
+        // peel away or the ribbon crosses it; thicker near the ink switch,
+        // where neither ink has much to push against
+        const Lg = g.lum;
+        const need = S.light === 0
+          ? (Lg - ((Lg + 0.05) / GHOST_AIM - 0.05)) / Math.max(0.01, Lg - L_DAY)
+          : (GHOST_AIM * (Lg + 0.05) - 0.05 - Lg) / Math.max(0.01, paleLum - Lg);
+        const opNeed = clamp(1 - (1 - need) / (1 - BIRD_COVER), 0, 0.94) * aim;
+        const op = Math.round(Math.max(lerp(0.68, 0.46, S.inkT), opNeed) * (1 - 0.45 * S.rel) * 40) / 40;
         if (op !== g.op || qs !== g.sh || S.ox !== g.x) {
           g.op = op;
           g.sh = qs;
@@ -1346,6 +1391,7 @@ export default {
           groundDirty = true;
         }
       }
+      inkSnap = false;
       if (groundDirty) paintGround();
       if (shown.ampmTf !== qs) {
         shown.ampmTf = qs;
@@ -1429,6 +1475,7 @@ export default {
         lastMs = s.ms;
         if (jumped) {
           snap = true;
+          inkSnap = true;
           for (let k = 0; k < 4; k++) slots[k].rel = 0;
         }
         syncText(s, jumped);

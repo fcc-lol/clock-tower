@@ -315,9 +315,12 @@ export default {
     // The widths of the numerals set the slab, the lamps and where AM/PM stands.
     let slabX0 = CX - 250, slabX1 = CX + 250, ampmX = 800, flankL = 260, flankR = 260, airW = 240;
     const meter = document.createElement("canvas").getContext("2d");
+    let wmMax = 0; // the widest minutes any hour shows: the flanks are set for these, so they hold all hour
     function layout(s) {
       meter.font = NUM_FONT;
       const wh = meter.measureText(s.text.hh).width, wm = meter.measureText(s.text.mm).width;
+      if (!wmMax) for (let m = 0; m < 60; m++) wmMax = Math.max(wmMax, meter.measureText(String(m).padStart(2, "0")).width);
+      const fl0 = flankL, fr0 = flankR, aw0 = airW, mw0 = nMoon.style.width;
       const half = Math.max(wh, wm) / 2 + 20;
       slabX0 = Math.round(CX - half); slabX1 = Math.round(CX + half);
       setSlab(slabX0, slabX1);
@@ -327,11 +330,13 @@ export default {
       flankR = Math.floor(W - 64 - (CX + wh / 2 + 48));
       for (const n of [nTemp, nCond]) n.style.width = `${flankL}px`;
       nSun.style.width = `${flankR}px`;
-      // the moon stands level with the slab, so it keeps clear of the slab's end;
-      // AQI and UV hang in the lower storey's left flank, clear of the minutes
-      nMoon.style.width = `${Math.min(flankR, Math.floor(W - 64 - (slabX1 + 48)))}px`;
-      airW = Math.floor(CX - wm / 2 - EX - 48 - 64);
-      shown.temp = shown.sunV = shown.aqi = shown.moon = null; // refit on the next write
+      // the moon stands level with the slab, so it keeps clear of the slab's end
+      // at its longest this hour; AQI and UV hang in the lower storey's left
+      // flank, clear of the widest minutes (neither moves as the minutes change)
+      nMoon.style.width = `${Math.min(flankR, Math.floor(W - 64 - (Math.round(CX + Math.max(wh, wmMax) / 2 + 20) + 48)))}px`;
+      airW = Math.floor(CX - wmMax / 2 - EX - 48 - 64);
+      if (flankL !== fl0 || flankR !== fr0 || airW !== aw0 || nMoon.style.width !== mw0)
+        shown.temp = shown.sunV = shown.aqi = shown.moon = null; // refit on the next write
       aT.setAttribute("x", ampmX);
       meter.font = AMPM_FONT;
       const wa = meter.measureText(s.text.ampm).width;
@@ -518,6 +523,7 @@ export default {
     let sceneKey = "", sceneDue = -1, lastPaint = -1, snowDepth = 0, snowKey = "", capsKey = "";
     let glitX = -999, glitK = 0, glitDp = 0;
     let cold = 0, hot = 0, swLast = -1;
+    const inkWait = { a: -1, b: -1, c: -1 }; // since when a zone's ink has wanted to change
     const caps = []; // snow caps on the numerals: flat arrays [x, yTop, thickness, ...] per run
 
     // ----- snow caps: where the numerals' upward-facing edges are -----------------
@@ -720,8 +726,16 @@ export default {
           cl = Math.min(cl, contrast(c, INK_L)); cd = Math.min(cd, contrast(c, INK_D));
           avg = avg ? mix(avg, c, 1 / (k + 1)) : c;
         }
-        const prev = shown[key];
-        const light = prev === INK_D ? cl > cd + 0.4 : prev === INK_L ? cl + 0.4 > cd : cl >= cd;
+        // the same choice a fresh start makes; a change only waits two seconds to
+        // be sure it holds (no flicker at the crossover, and no ink held for good
+        // that a fresh start would not choose)
+        const want = cl >= cd, prev = shown[key];
+        let light = want;
+        if (prev !== undefined && !P.jump && want !== (prev === INK_L)) {
+          if (inkWait[key] < 0) inkWait[key] = s.t;
+          if (s.t - inkWait[key] < 2) light = !want;
+          else inkWait[key] = -1;
+        } else inkWait[key] = -1;
         const ink = light ? INK_L : INK_D;
         setVar(`--ink-${key}`, light ? mix(INK_L, "#ffcf94", 0.3 * lamp) : INK_D);
         shown[key] = ink;
