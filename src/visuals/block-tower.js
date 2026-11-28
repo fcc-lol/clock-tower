@@ -174,12 +174,19 @@ function fitLum(c, target, dir) {
 }
 // Paint for letters on a face: the hue's deep version on light faces, its
 // pale version on dark ones, each pushed as far as needed to hold `ratio`.
-function inkFor(bg, pair, ratio) {
+// One or the other outright, never a blend of the two: a blend passes through
+// the face's own luminance and the letters vanish. Black and white reach the
+// same ratio (4.58:1) on a face of luminance 0.179; around that point the side
+// changes with hysteresis (dark ink above INK_HI, light below INK_LO), where
+// either ink still holds 4.29:1 or better.
+const INK_MID = 0.179;
+const INK_LO = 0.165;
+const INK_HI = 0.195;
+const INK_FADE = 0.9; // seconds the letters take to cross-fade when the side changes
+function inkFor(bg, pair, ratio, darkSide) {
   const lb = luminance(bg);
-  const k = smoothstep(0.172, 0.204, lb);
-  const dark = k > 0 ? fitLum(pair[0], (lb + 0.05) / ratio - 0.05, -1) : null;
-  const light = k < 1 ? fitLum(pair[1], ratio * (lb + 0.05) - 0.05, 1) : null;
-  return k >= 1 ? dark : k <= 0 ? light : mix(light, dark, k);
+  const d = darkSide ?? lb >= INK_MID;
+  return d ? fitLum(pair[0], (lb + 0.05) / ratio - 0.05, -1) : fitLum(pair[1], ratio * (lb + 0.05) - 0.05, 1);
 }
 
 // --- wood -------------------------------------------------------------------
@@ -765,10 +772,10 @@ export default {
     }
 
     let hourDigits = 0;
-    function layoutHours(n) {
+    function layoutHours(n, keepL = false) {
       hourDigits = n;
       const single = n === 1;
-      hL.node.style.display = single ? "none" : "";
+      if (!keepL) hL.node.style.display = single ? "none" : "";
       hR.o.x = single ? hourX[2] : hourX[1];
       hR.node.style.left = `${hR.o.x}px`;
       const l = single ? hR.o.x : hL.o.x;
@@ -853,6 +860,43 @@ export default {
       gvars[name] = value;
       wrap.style.setProperty(name, value);
     };
+    // The ink of one face, with its side (dark or light) kept between calls for
+    // hysteresis and a short cross-fade in time when the side changes. `k` is
+    // how dark-side the shown ink is (1 dark, 0 light), for the text shadows.
+    // A fresh start inside the hysteresis band takes the side a piece that had
+    // been up all along would be on: in the afternoon and evening the faces are
+    // darkening (it still has the dark ink), in the morning brightening.
+    const INKS = {};
+    function inkOf(key, bg, pair, ratio, t, jump, darkening) {
+      const lb = luminance(bg);
+      let st = INKS[key];
+      const fresh = !st || jump;
+      const wasDark = fresh ? darkening : st.dark;
+      const want = wasDark ? lb > INK_LO : lb >= INK_HI;
+      const ink = inkFor(bg, pair, ratio, want);
+      if (!st) st = INKS[key] = { dark: want, t0: -1, from: ink, last: ink, k0: 0, k: 0 };
+      if (fresh) st.t0 = -1;
+      else if (want !== st.dark) {
+        st.from = st.last;
+        st.k0 = st.k;
+        st.t0 = t;
+      }
+      st.dark = want;
+      let out = ink;
+      st.k = want ? 1 : 0;
+      if (st.t0 >= 0) {
+        const u = (t - st.t0) / INK_FADE;
+        if (u >= 1 || u < 0) st.t0 = -1;
+        else {
+          const a = ease.cubicInOut(u);
+          out = mix(st.from, ink, a);
+          st.k = lerp(st.k0, st.k, a);
+          E.inkFade = true;
+        }
+      }
+      st.last = out;
+      return out;
+    }
     const styleIf = (key, node, prop, value) => {
       if (shown[key] === value) return;
       shown[key] = value;
@@ -875,19 +919,52 @@ export default {
       sl.sh.style.opacity = "0";
       sl.ed.style.opacity = "0";
     }
+    // The hour cubes sliding to their places when the hour gains or loses a
+    // digit: offsets from where layoutHours has put them, eased out over SLIDE.
+    const SLIDE = 0.8;
+    const slide = { t0: -1 };
+    function slideStep(s, end) {
+      if (slide.t0 < 0) return;
+      const u = end ? 1 : clamp((s.t - slide.t0) / SLIDE);
+      const a = ease.cubicInOut(u);
+      if (hourDigits === 2) {
+        // both start in the middle slot; the left one comes out from behind
+        hL.node.style.transform = u >= 1 ? "" : `translateX(${((hourX[2] - hourX[0]) * (1 - a)).toFixed(1)}px)`;
+        hR.node.style.transform = u >= 1 ? "" : `translateX(${((hourX[2] - hourX[1]) * (1 - a)).toFixed(1)}px)`;
+      } else {
+        // the right one comes in to the middle, the left one goes in behind it
+        hR.node.style.transform = u >= 1 ? "" : `translateX(${((hourX[1] - hourX[2]) * (1 - a)).toFixed(1)}px)`;
+        hL.node.style.transform = u >= 1 ? "" : `translateX(${((hourX[2] - hourX[0]) * a).toFixed(1)}px)`;
+        if (u >= 1) {
+          hL.node.style.display = "none";
+          setDigit(slots[0], "");
+        }
+      }
+      if (u >= 1) slide.t0 = -1;
+    }
     function texts(s, jump) {
       const tx = s.text;
       const hh = tx.hh;
       const mm = tx.mm;
       if (hh.length !== hourDigits) {
-        layoutHours(hh.length);
-        jump = true;
+        // 9 -> 10 the hour cube splits in two, 12 -> 1 the two slide together
+        // (while the right one rolls to its new numeral); on a fresh start or a
+        // clock jump they are simply put in place
+        const slideIt = !jump && hourDigits !== 0;
+        slideStep(s, true);
+        layoutHours(hh.length, slideIt);
+        if (slideIt) {
+          hL.node.style.display = "";
+          slide.t0 = s.t;
+          slideStep(s, false);
+        } else jump = true;
       }
       const want = [hh.length === 2 ? hh[0] : "", hh[hh.length - 1], mm[0], mm[1]];
       for (let i = 0; i < 4; i++) {
         const sl = slots[i];
         const target = sl.to ?? sl.val;
         if (target === want[i]) continue;
+        if (i === 0 && want[0] === "" && slide.t0 >= 0) continue; // keeps its numeral while it slides in behind
         if (jump || sl.val === null || want[i] === "" || sl.val === "") setDigit(sl, want[i]);
         else {
           if (sl.to !== null) setDigit(sl, sl.to);
@@ -896,8 +973,9 @@ export default {
           sl.nxt.textContent = want[i];
         }
       }
-      put("ampm", T.ampm, tx.ampm);
-      if (put("date", T.date, tx.date)) fit(T.date, 900 - 44 - 36 - T.ampm.offsetWidth - 52, 58, 44);
+      // the date is fitted to the room the chip leaves, so it refits when either changes
+      const ap = put("ampm", T.ampm, tx.ampm);
+      if (put("date", T.date, tx.date) || ap) fit(T.date, 900 - 44 - 36 - T.ampm.offsetWidth - 52, 58, 44);
       if (put("temp", T.temp, tx.temp)) fit(T.temp, 244 - 44, 138, 90);
       if (shown.cond !== tx.condition) {
         shown.cond = tx.condition;
@@ -957,7 +1035,7 @@ export default {
 
     // ----- color ----------------------------------------------------------------
     const FOGK = [0, 0.12, 0.26, 0.44, 0.58, 0.68, 0.78];
-    function palette(s) {
+    function palette(s, jump) {
       const wx = s.weather;
       const day = s.daylight;
       const nightK = 1 - smoothstep(0.05, 0.62, day);
@@ -965,8 +1043,10 @@ export default {
       const sunK = day * (1 - 0.85 * smoothstep(0.2, 0.95, cloud)) * (1 - 0.7 * E.fog);
       const moonK = (s.moon.up ? s.moon.illumination : 0) * (1 - cloud) * nightK;
       const key = `${Math.round(day * 300)}|${Math.round(E.wet * 50)}|${Math.round(E.fog * 40)}|${Math.round(sunK * 40)}|${Math.round(moonK * 20)}|${Math.round(E.snow * 30)}|${Math.round(E.heat * 20)}|${Math.round(E.frost * 20)}|${Math.round(E.puddle * 20)}|${s.sky.west}${s.sky.east}${s.sky.northWest}${s.sky.northEast}`;
-      if (key === E.palKey) return;
+      // (while an ink cross-fade runs, every frame)
+      if (key === E.palKey && !E.inkFade) return;
       E.palKey = key;
+      E.inkFade = false;
 
       const dim = (c) => mix(c, "#04050a", 0.42 * (1 - day));
       const cw = dim(s.sky.west);
@@ -1054,7 +1134,8 @@ export default {
       setG("--rim", rgba(rimCol, clamp(0.24 * nightK + 0.45 * moonK + 0.75 * E.frost)));
       setG("--rimw", `${(1.6 + 2.2 * E.frost).toFixed(1)}px`);
       setG("--chip", faceCol.red);
-      setG("--chipink", inkFor(faceCol.red, INK.ink, 4.6));
+      const darkening = s.text.ampm === "PM";
+      setG("--chipink", inkOf("chip", faceCol.red, INK.ink, 4.6, s.t, jump, darkening));
       setG("--scorch", rgba("#3a1c08", 0.5 * (1 - nightK) * (1 - wetK)));
       setG("--m1", mix("#2c8fd6", "#0c1a2c", nightK * 0.85));
       setG("--m2", mix("#bfe6ff", "#1d2c44", nightK * 0.85));
@@ -1067,8 +1148,9 @@ export default {
         let f = sc.face ? faceCol[sc.face] : wood;
         const fk = E.fog * FOGK[b.o.course] * (darkPaint ? 0.55 : 1);
         if (fk > 0.004) f = mix(f, fogCol, fk);
-        const ink = mix(inkFor(f, INK[sc.ink], b.o.ratio || 4.7), "#000000", 0);
-        const dark = luminance(ink) < luminance(f);
+        const bi = blocks.indexOf(b);
+        const ink = inkOf(bi, f, INK[sc.ink], b.o.ratio || 4.7, s.t, jump, darkening);
+        const dk = INKS[bi].k;
         b.ink = ink;
         setVar(b, "--f", f);
         setVar(b, "--t", mix(f, lightCol, tk));
@@ -1078,9 +1160,9 @@ export default {
         setVar(b, "--g", rgba(mix(f, "#2a1508", 0.82), sc.face ? 0.4 : 0.62 * (1 - 0.5 * nightK)));
         setVar(b, "--bev", rgba("#ffffff", (0.16 + 0.26 * sunK) * (1 - nightK) + 0.03));
         setVar(b, "--raw", sc.face ? rgba(rawWood, 0.9) : rgba("#fff1d2", 0.3 * (1 - nightK) * (1 - wetK)));
-        setVar(b, "--hi", rgba("#ffffff", dark ? 0.3 * (1 - nightK) : 0));
-        setVar(b, "--lo", rgba("#000000", dark ? 0.22 : 0.4));
-        setVar(b, "--halo", rgba(ink, dark ? 0 : 0.5 * nightK));
+        setVar(b, "--hi", rgba("#ffffff", dk * 0.3 * (1 - nightK)));
+        setVar(b, "--lo", rgba("#000000", lerp(0.4, 0.22, dk)));
+        setVar(b, "--halo", rgba(ink, (1 - dk) * 0.5 * nightK));
       }
       if (shown.flag !== faceCol.yellow) {
         shown.flag = faceCol.yellow;
@@ -1756,7 +1838,8 @@ export default {
           wrap.dataset.fall = fallK;
         }
         texts(s, jump);
-        palette(s);
+        slideStep(s, jump);
+        palette(s, jump);
 
         physics(s.t, dt, wx, false);
         tips(s);

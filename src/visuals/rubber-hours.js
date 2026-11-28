@@ -286,7 +286,7 @@ export default {
       hx: f32(NN), hy: f32(NN), ax: f32(NN), ay: f32(NN), bx: f32(NN), by: f32(NN),
       ux: f32(NN), uy: f32(NN), vx: f32(NN), vy: f32(NN), fx: f32(NN), fy: f32(NN),
       comp: f32(NN), compA: f32(NN), compB: f32(NN), px: f32(NP), py: f32(NP),
-      morph: 1, twist: 1, cx: 0, cy: 0, wax: 0, way: 0,
+      morph: 1, twist: 1, cx: 0, cy: 0, wax: 0, way: 0, leaving: false,
       tie: 0, low: 0, ice: new Int16Array(3), iceLen: f32(3), iceN: 0, iceGrow: 1,
       dripJ: 0, dripW: 34, tieAX: 0, tieAY: 0, glint: R.range(0, 30), frostF: f32(72), frostL: f32(72), frostS: f32(72),
     });
@@ -329,7 +329,7 @@ export default {
       sl.morph = snap ? 1 : 0;
       sl.twist = (sl.index + d) % 2 ? 1 : -1;
       sl.cx = cx; sl.cy = cy;
-      sl.def = def; sl.digit = d; sl.x0 = x0; sl.xs = xs; sl.vis = true;
+      sl.def = def; sl.digit = d; sl.x0 = x0; sl.xs = xs; sl.vis = true; sl.leaving = false;
 
       // Where things attach, from the numeral at rest.
       spline(sl.bx, sl.by, def.strokes, def.corner, tmpX, tmpY);
@@ -422,37 +422,70 @@ export default {
       return { def, bx, by, px: f32(MP), py: f32(MP), ox: 0, glint: R.range(0, 30) };
     }
     const miniCache = { A: buildMini("A"), P: buildMini("P"), M: buildMini("M") };
-    function setMini(ampm, zoneL) {
+    // When the hours change width (9 -> 10, 12 -> 1, 11 -> 12) AM/PM and its tag slide to
+    // their new place with the twist of the numerals, instead of jumping there in one frame.
+    let glide = null;
+    function setMini(ampm, zoneL, snap) {
+      const c0 = mini.tieX0 + tagTemp.shift; // where the card hangs now
       mini.letters = [miniCache[ampm[0]], miniCache.M];
       const w0 = mini.letters[0].def.w + MINI;
       const w1 = mini.letters[1].def.w + MINI;
       mini.width = w0 + 12 + w1;
       const cxm = Math.min((zoneL + 1016) / 2, 846);
-      mini.x = Math.round(cxm - mini.width / 2);
+      const x1 = Math.round(cxm - mini.width / 2);
       mini.letters[0].ox = MINI / 2;
       mini.letters[1].ox = w0 + 12 + MINI / 2;
       mini.key = ampm;
       // the temperature tag hangs from whichever foot leaves it the most room
       const mid = (zoneL + 1016) / 2;
       const feet = [[0, 0], [1, 0], [1, (MINIS.M.p.length - 1) * SUB]];
-      let best = 1e9;
+      let best = 1e9, tieX0 = 0;
       for (const [li, j] of feet) {
         const L = mini.letters[li];
-        const fx = mini.x + L.ox + L.bx[j];
-        if (Math.abs(fx - mid) < best) { best = Math.abs(fx - mid); mini.tieL = li; mini.tieJ = j; mini.tieX0 = fx; }
+        const fx = x1 + L.ox + L.bx[j];
+        if (Math.abs(fx - mid) < best) { best = Math.abs(fx - mid); mini.tieL = li; mini.tieJ = j; tieX0 = fx; }
       }
       // the card fills the room between the hours and the frame, its hole off centre if need be
       const w = Math.round(clamp(1018 - zoneL, 236, 360));
-      const centre = clamp(mini.tieX0, zoneL + w / 2, 1018 - w / 2);
-      tagTemp.shift = Math.round(clamp(centre - mini.tieX0, -w / 2 + 50, w / 2 - 50));
-      tagTemp.ss = "";
-      if (w !== tagTemp.w || shown.tw === undefined) {
+      const centre = clamp(tieX0, zoneL + w / 2, 1018 - w / 2);
+      const c1 = tieX0 + Math.round(clamp(centre - tieX0, -w / 2 + 50, w / 2 - 50));
+      const first = shown.tw === undefined;
+      if (snap || first || (Math.abs(x1 - mini.x) < 0.5 && w === tagTemp.w && Math.abs(c1 - c0) < 1)) {
+        glide = null;
+        mini.x = x1;
+        const resize = first || w !== tagTemp.w;
+        if (first) { shown.tw = w; tagTemp.w = -1; }
+        placeTemp(c1, w);
+        if (resize) fitTemp();
+        return;
+      }
+      glide = { t: 0, x0: mini.x, x1, c0, c1, w0: tagTemp.w, w1: w };
+      // the type is fitted to the narrower of the two cards, so it fits all the way across
+      const wm = Math.min(tagTemp.w, w);
+      if (wm < tagTemp.w) {
+        const keep = tagTemp.w;
+        tagTemp.w = wm; tagTemp.card.style.width = `${wm}px`;
+        fitTemp();
+        tagTemp.w = keep; tagTemp.card.style.width = `${keep}px`;
+      }
+    }
+    function placeTemp(c, w) {
+      if (w !== tagTemp.w) {
         tagTemp.w = w;
-        shown.tw = w;
         tagTemp.card.style.width = `${w}px`;
         tagTemp.ss = ""; // re-centre card and hole on the next placement
-        fitTemp();
       }
+      const L = mini.letters[mini.tieL];
+      mini.tieX0 = mini.x + L.ox + L.bx[mini.tieJ];
+      tagTemp.shift = Math.round(clamp(c - mini.tieX0, -w / 2 + 50, w / 2 - 50));
+    }
+    function glideMini(dt) {
+      if (!glide) return;
+      const t = (glide.t = Math.min(1, glide.t + dt / lerp(0.95, 1.5, P.heat)));
+      const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; // the numerals' own easing
+      mini.x = lerp(glide.x0, glide.x1, e);
+      placeTemp(lerp(glide.c0, glide.c1, e), Math.round(lerp(glide.w0, glide.w1, e)));
+      if (t >= 1) { glide = null; fitTemp(); }
     }
     function fitTemp() {
       if (shown.temp === undefined) return;
@@ -487,7 +520,18 @@ export default {
         const d = +hh[0];
         if (h1.digit !== d || !h1.vis) setDigit(h1, d, x, 1, false, snap);
         x += DIGITS[d].w * SK_W + TUBE + 6;
-      } else h1.vis = false;
+      } else if (snap) { h1.vis = false; h1.leaving = false; }
+      else if (h1.vis && !h1.leaving) {
+        // the first hour numeral is drawn in toward its top and let go: the reverse of how
+        // one appears, rather than vanishing from one frame to the next
+        for (let i = 0; i < NN; i++) {
+          h1.ax[i] = h1.hx[i]; h1.ay[i] = h1.hy[i];
+          h1.bx[i] = h1.hx[2]; h1.by[i] = h1.hy[2];
+          h1.compA[i] = h1.comp[i];
+        }
+        h1.morph = 0;
+        h1.leaving = true;
+      }
       const dh = +hh[hh.length - 1];
       const xs = two ? 0.82 : 1;
       if (h2.digit !== dh || h2.x0 !== x || h2.xs !== xs || !h2.vis) setDigit(h2, dh, x, xs, false, snap);
@@ -497,7 +541,7 @@ export default {
         const d = +mm[k];
         if (sl.digit !== d || !sl.vis) setDigit(sl, d, LEFT + k * (CELL + CELL_GAP), 1, true, snap);
       }
-      setMini(s.text.ampm, zoneL);
+      setMini(s.text.ampm, zoneL, snap);
       if (hourChanged && !snap) for (const sl of slots) for (let i = 0; i < NN; i++) sl.vy[i] -= 260 * sl.comp[i];
     }
 
@@ -738,8 +782,11 @@ export default {
           sl.hx[i] = nx; sl.hy[i] = ny;
           sl.comp[i] = lerp(sl.compA[i], sl.compB[i], e);
         }
+        if (sl.morph >= 1 && sl.leaving) { sl.vis = false; sl.leaving = false; }
       }
     }
+    // a numeral being let go thins out to nothing as it is drawn in
+    const thick = (sl) => (sl.leaving ? 1 - smoothstep(0.45, 1, sl.morph) : 1);
     function shape() {
       for (const sl of slots) {
         if (!sl.vis) continue;
@@ -935,10 +982,17 @@ export default {
         ctx.lineWidth = TUBE;
         ctx.beginPath();
         for (const sl of slots) {
-          if (!sl.vis) continue;
+          if (!sl.vis || sl.leaving) continue;
           for (const st of sl.def.strokes) trace(sl.px, sl.py, st[0] * SUB, st[1] * SUB, pal.shx, pal.shy);
         }
         ctx.stroke();
+        for (const sl of slots) {
+          if (!sl.vis || !sl.leaving || thick(sl) < 0.02) continue;
+          ctx.lineWidth = TUBE * thick(sl);
+          ctx.beginPath();
+          for (const st of sl.def.strokes) trace(sl.px, sl.py, st[0] * SUB, st[1] * SUB, pal.shx, pal.shy);
+          ctx.stroke();
+        }
         ctx.lineWidth = MINI;
         ctx.beginPath();
         for (const L of mini.letters) for (const st of L.def.s) trace(L.px, L.py, st[0] * SUB, st[1] * SUB, pal.shx * 0.5, pal.shy * 0.5);
@@ -947,7 +1001,7 @@ export default {
     }
 
     function drawIcicles(sl) {
-      const grow = P.cold * sl.iceGrow;
+      const grow = P.cold * sl.iceGrow * thick(sl);
       if (grow < 0.03) return;
       const n = P.feels < 21 ? sl.iceN : Math.min(sl.iceN, 2);
       for (let k = 0; k < n; k++) {
@@ -978,7 +1032,7 @@ export default {
       ctx.fillStyle = pal.frost;
       for (let pass = 0; pass < 2; pass++) {
         // two interleaved sets that brighten and fade against each other: a slow glitter
-        ctx.globalAlpha = P.frost * (0.62 + 0.3 * Math.sin(t * 0.7 + pass * Math.PI + sl.index));
+        ctx.globalAlpha = P.frost * thick(sl) * (0.62 + 0.3 * Math.sin(t * 0.7 + pass * Math.PI + sl.index));
         ctx.beginPath();
         for (let i = pass; i < 72; i += 2) {
           const st = strokes[i % strokes.length];
@@ -1223,10 +1277,11 @@ export default {
       drawShadows();
       for (let row = 1; row >= 0; row--) {
         for (const sl of slots) {
-          if (sl.row !== row || !sl.vis) continue;
+          if (sl.row !== row || !sl.vis || thick(sl) < 0.02) continue;
+          const k = thick(sl);
           drawIcicles(sl);
           const ph = (sl.glint + s.t * 0.22) % 30;
-          for (const st of sl.def.strokes) tube(sl.px, sl.py, st[0] * SUB, st[1] * SUB, TUBE, ph, sl.def.piece);
+          for (const st of sl.def.strokes) tube(sl.px, sl.py, st[0] * SUB, st[1] * SUB, TUBE * k, ph, sl.def.piece);
           drawFrost(sl, s.t);
         }
       }
@@ -1247,6 +1302,7 @@ export default {
       morphs(dt);
       for (let i = 0; i < n; i++) stepSlots(h);
       shape();
+      glideMini(dt);
       stepMini(s, dt);
       shapeMini();
       stepTags(s, dt, snap);
@@ -1260,7 +1316,8 @@ export default {
       put("aqi", x.aqi);
       put("uv", x.uv);
       put("sunLabel", x.sunLabel);
-      if (put("sunValue", x.sunValue)) fitText(T.sunValue, SUN_COL, 80);
+      // a value fitted smaller (or back to full size) changes the tag's height: measure again
+      if (put("sunValue", x.sunValue)) { fitText(T.sunValue, SUN_COL, 80); measure = true; }
       if (put("moon", x.moon)) {
         measure = true;
         // the moon's name on one line; a name too long even at 44 px wraps, lines well apart
@@ -1270,7 +1327,8 @@ export default {
         while (fs > 44 && T.moon.scrollWidth > T.moon.clientWidth + 1) { fs -= 2; T.moon.style.fontSize = `${fs}px`; }
         if (T.moon.scrollWidth > T.moon.clientWidth + 1) T.moon.classList.add("wrap");
       }
-      if (put("date", x.date)) fitText(T.date, 952 - 72, 62);
+      // (a date fitted to another size changes the label's height, and so where the tags may hang)
+      if (put("date", x.date)) { fitText(T.date, 952 - 72, 62); measure = true; }
       const has = x.factValue !== "";
       if (shown.has !== has) { shown.has = has; T.fact.style.display = has ? "" : "none"; }
       if (has) {

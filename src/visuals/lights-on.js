@@ -1105,7 +1105,8 @@ export default {
         const sh = s.sun;
         const k1 = Math.round(dl * 400) + 1000 * Math.round(w.cloud) + 2e5 * Math.round(murk * 60) + 2e7 * Math.round(wetness * 40);
         const k2 = Math.round(sh.alt * 2) + 1000 * Math.round(sh.az / 2) + 1e6 * Math.round(w.aqi / 4) + 1e8 * Math.round(snowDepth * 30) + 1e10 * Math.round(sunS * 50) + 1e12 * Math.round(light * 200);
-        const k3 = Math.round(env.lampL * 100);
+        // (frost and open sashes are baked into the wall's windows, so they key a rebuild too)
+        const k3 = Math.round(env.lampL * 100) + 1000 * Math.round(frostK * 50) + 1e5 * Math.round(env.openK * 50);
         let palChanged = false;
         // sun shadows: length and lean follow the sun
         if (sunS > 0.01) {

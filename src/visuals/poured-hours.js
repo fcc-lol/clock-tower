@@ -632,6 +632,9 @@ export default {
     const shown = [["", ""], ["", ""]];
     const slotX = [[SLOT_X[0], SLOT_X[1]], [SLOT_X[0], SLOT_X[1]]];
     const rowY = (r) => (r ? MIN_Y : HOUR_Y);
+    // The hours stop two rows short of their mould (60 px clear above the minutes), on a
+    // fresh start and after a pour alike.
+    const rowH = (r) => (r ? DH : DH - 2);
 
     // Each pour lays down wavy strata, peaked like heaps, in the pigment's four tones.
     const NB = 16;
@@ -729,6 +732,7 @@ export default {
           } else if (type[i] === T_GLUE || type[i] === T_SAND) type[i] = 0;
         }
       }
+      for (let cy = rowH(r); cy < DH; cy++) for (let cx = 0; cx < DW; cx++) if (type[(y0 + cy) * COLS + x0 + cx] === T_GLUE) type[(y0 + cy) * COLS + x0 + cx] = 0;
       wake(y0 - 2, y0 + DH + 1);
     }
 
@@ -797,7 +801,7 @@ export default {
         if (!job.chg[sl] || !want[sl]) continue;
         const m = GLYPH[want[sl]];
         const sx = slotX[r][sl];
-        for (let cy = 0; cy < DH; cy++) {
+        for (let cy = 0; cy < rowH(r); cy++) {
           for (let cx = 0; cx < DW; cx++) {
             const v = m[cy * DW + cx];
             if (!v) continue;
@@ -1674,7 +1678,10 @@ export default {
 
     return {
       frame(s) {
-        const jumped = Math.abs(s.ms - lastMs) > 4000;
+        // a jump, or a clock running many times faster than the animation (a time-lapse):
+        // go straight to the new numerals rather than catch every pour mid-way
+        const dms = s.ms - lastMs;
+        const jumped = Math.abs(dms) > 4000 || (dms > 400 && dms > 6000 * s.dt);
         lastMs = s.ms;
         readWeather(s);
         readSky(s);
