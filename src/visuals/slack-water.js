@@ -815,15 +815,17 @@ export default {
           cl = Math.min(cl, contrast(c, INK_L)); cd = Math.min(cd, contrast(c, INK_D));
           avg = avg ? mix(avg, c, 1 / (k + 1)) : c;
         }
-        // a fresh start takes the better one; after that the ink in use is kept
-        // until the other reads clearly better (a 12% margin) for two seconds, so
-        // nothing flickers at the crossover; the change itself fades in 0.8 s
-        const prev = shown[key];
-        const want = prev === undefined || P.jump ? cl >= cd : prev === INK_L ? cl * 1.12 >= cd : cl >= cd * 1.12;
-        let light = want;
-        if (prev !== undefined && !P.jump && want !== (prev === INK_L)) {
+        // a fresh start takes the better one. After that the ink in use is kept
+        // until the other reads clearly better (by 12%) for two seconds, or
+        // better at all for twenty (so no ink is held for good that a fresh start
+        // would not choose); nothing flickers at the crossover, and the change
+        // itself fades in 0.8 s
+        const prev = shown[key], best = cl >= cd;
+        let light = best;
+        if (prev !== undefined && !P.jump && best !== (prev === INK_L)) {
           if (inkWait[key] < 0) inkWait[key] = s.t;
-          if (s.t - inkWait[key] < 2) light = !want;
+          const clear = best ? cl >= cd * 1.12 : cd >= cl * 1.12, held = s.t - inkWait[key];
+          if (held < 20 && !(clear && held >= 2)) light = !best;
           else inkWait[key] = -1;
         } else inkWait[key] = -1;
         const ink = light ? INK_L : INK_D;
