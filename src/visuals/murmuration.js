@@ -19,7 +19,11 @@
 // How the conditions drive it:
 //   sky      the whole backdrop is the four measured sky colours, west at the
 //            left to east at the right; cloud cover is the opacity of the
-//            drifting cloud bands
+//            drifting cloud bands. Where a heavy sky (or its veil over the
+//            silhouettes) would leave a numeral short of contrast, the
+//            silhouette is lifted clear of the veil and, if that is not
+//            enough, a soft patch of thinner cloud (behind dark birds) or
+//            denser cloud (behind pale ones) gathers behind it
 //   wind     a literal force on every bird: the numerals lean downwind, the
 //            looser birds trail off them as streamers, and gusts (travelling
 //            across the frame in the wind's direction) peel sheets of birds off

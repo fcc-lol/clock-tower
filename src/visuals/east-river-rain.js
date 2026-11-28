@@ -775,7 +775,9 @@ export default {
       const flatL = toOklch(flat).l;
       // the ground is light: print in sumi; else leave the type as bare paper.
       // Chosen outright, with a little hysteresis so it cannot flicker.
-      const onLight = (skyLight = skyLight === null || jump ? flatL > 0.553 : flatL > (skyLight ? 0.545 : 0.561));
+      // (The dead band lies wholly on the dark-ink side of the crossover: the cream ink is weakest on a
+      // lightening sky, so at dawn it is never held past 0.553; the sumi still stands well off a sky of 0.537.)
+      const onLight = (skyLight = skyLight === null || jump ? flatL > 0.553 : flatL > (skyLight ? 0.537 : 0.553));
       // the horizon band climbs higher in heat haze
       // and in the low sun, as a broad warm bokashi rather than a thin line
       const warm = sunLow * dd * (1 - 0.7 * cl);
