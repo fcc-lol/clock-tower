@@ -40,7 +40,8 @@
 //   storm         a heavy pour and, now and then, a slow two-second lift of light
 //   cloud, sun    the tone of the paper and the hard little shadows of sunlight
 //   day / night   warm paper by day, charcoal at night; inks and pigment switch
-//                 in one step while the ground is mid-grey
+//                 outright while the ground is mid-grey (with a margin, so they
+//                 cannot flicker, and a fade of about a second)
 // The fact is set in Space Grotesk, engraved into the bedrock.
 
 import { clamp, lerp, smoothstep, rng, toOklab, mix, el, addStyle, pixelCanvas, grain } from "../lib/kit.js";
@@ -388,6 +389,8 @@ export default {
     let veilA = 0;
     const veilPx = new Uint32Array(32);
     let bolt = 0; // 0..1 soft lift of the ground in a thunderstorm
+    let inkT = 1; // the inks wanted: 1 the day's dark ones, 0 the night's pale ones
+    let inkK = -1; // where the inks are now, fading to inkT over about a second (-1: not yet set)
     let nextBolt = 9;
     let boltAt = -99;
     let skyMeanKey = "";
@@ -407,15 +410,25 @@ export default {
       const warm = clamp((E.temp - 78) / 20) - clamp((36 - E.temp) / 30);
       const pa = CREAM[1] * (1 - k) + skyMean[1] * k * 0.6 + 0.004 * Math.max(0, warm) + 0.006 * E.haze;
       const pb = CREAM[2] * (1 - k) + skyMean[2] * k * 0.6 + 0.014 * warm + 0.014 * E.haze;
-      ground[0] = lerp(0.175, Lp, g) + bolt * 0.07;
+      const Lbase = lerp(0.175, Lp, g); // the ground without a storm's lift
+      ground[0] = Lbase + bolt * 0.07;
       ground[1] = lerp(0.002 + skyMean[1] * 0.14, pa, g);
       ground[2] = lerp(0.004 + skyMean[2] * 0.14, pb, g);
       const Lg = ground[0];
       const gp = pack(Lg, ground[1], ground[2]);
-      const fl = Lg >= 0.575 ? 1 : 0; // inks: dark on a light ground, light on a dark one, switched in one step
+      // Inks: dark on a light ground, pale on a dark one, chosen outright (never a blend tied to the
+      // light) from the ground without a storm's lift, with a margin either side of the crossover so
+      // they cannot flip back and forth; the change itself is a fade of about a second.
+      if (inkK < 0) inkT = Lbase >= 0.55 ? 1 : 0;
+      else if (inkT === 1 && Lbase < 0.535) inkT = 0;
+      else if (inkT === 0 && Lbase > 0.565) inkT = 1;
+      const fd = clamp(s.dt || 0, 0, 0.25) / 0.9;
+      inkK = inkK < 0 ? inkT : inkT ? Math.min(1, inkK + fd) : Math.max(0, inkK - fd);
+      const fl = inkK * inkK * (3 - 2 * inkK);
+      const fx = (night, day) => (fl >= 1 ? day : fl <= 0 ? night : night + (day - night) * fl);
       // recolour only when something that shows has changed
       const kT = Math.round(E.temp * 2);
-      const kF = Math.round(E.fog * 20) * 4096 + Math.round(E.sun * 40) * 64 + Math.round(E.haze * 10) * 2 + fl;
+      const kF = ((Math.round(E.fog * 20) * 41 + Math.round(E.sun * 40)) * 11 + Math.round(E.haze * 10)) * 61 + Math.round(fl * 60);
       if (gp === sig[0] && kT === sig[1] && skyVer === sig[2] && kF === sig[3]) return;
       sig[0] = gp;
       sig[1] = kT;
@@ -439,22 +452,22 @@ export default {
         }
       }
       // the thread: the mean sky, but always well apart from the ground
-      const thL = fl ? Math.min(skyMean[0] - 0.25, Lg - 0.42) : Math.max(skyMean[0] + 0.2, Lg + 0.34);
+      const thL = fx(Math.max(skyMean[0] + 0.2, Lg + 0.34), Math.min(skyMean[0] - 0.25, Lg - 0.42));
       const thC = Math.hypot(skyMean[1], skyMean[2]);
       const thK = thC > 0.11 ? 0.11 / thC : thC < 0.04 ? 0.04 / Math.max(0.005, thC) : 1;
       lut[P_THREAD] = pack(thL, skyMean[1] * thK, skyMean[2] * thK - (thC < 0.005 ? 0.04 : 0));
-      lut[P_THREAD + 1] = pack(thL + (fl ? 0.05 : -0.05), skyMean[1] * thK, skyMean[2] * thK - (thC < 0.005 ? 0.04 : 0));
+      lut[P_THREAD + 1] = pack(thL + fx(-0.05, 0.05), skyMean[1] * thK, skyMean[2] * thK - (thC < 0.005 ? 0.04 : 0));
       const sMid = lerp(Lg + 0.16, Lg - 0.25, fs);
       lut[P_SSPK] = pack(sMid - lerp(0.1, 0.2, fs), 0.004, 0.01);
       lut[P_SSPK + 1] = pack(sMid + 0.12, 0.002, 0.012);
 
       // the numerals' pigment, in four strata tones
       pigmentAt(E.temp, pig);
-      const baseL = fl ? Math.min(pig[0], Lg - 0.43) : Math.max(0.6, Lg + 0.42);
-      const baseC = (fl ? pig[1] : Math.max(0.07, pig[1] * 0.58)) * (1 - 0.45 * E.fog); // fog greys it
+      const baseL = fx(Math.max(0.6, Lg + 0.42), Math.min(pig[0], Lg - 0.43));
+      const baseC = fx(Math.max(0.07, pig[1] * 0.58), pig[1]) * (1 - 0.45 * E.fog); // fog greys it
       for (let b = 0; b < 4; b++) {
         const T = TONES[b];
-        const L = baseL + T[0] * (fl ? 1 : 0.8);
+        const L = baseL + T[0] * fx(0.8, 1);
         const C = Math.max(0.02, baseC + T[1]);
         const h = ((pig[2] + T[2]) * Math.PI) / 180;
         const A = C * Math.cos(h);
@@ -470,27 +483,27 @@ export default {
       lut[P_LOOSE + 1] = pack(lerp(baseL, Lg, 0.5), lerp(pA, ground[1], 0.5), lerp(pB, ground[2], 0.5));
       ghostFill = pack(baseL, pA, pB, 46);
       ghostEdge = pack(baseL, pA, pB, 130);
-      spoutPx = pack(baseL - (fl ? 0.08 : -0.06), pA, pB);
+      spoutPx = pack(baseL - fx(-0.06, 0.08), pA, pB);
 
-      const inkL = fl ? Math.min(0.24, Lg - 0.5) : Math.max(0.93, Lg + 0.5);
+      const inkL = fx(Math.max(0.93, Lg + 0.5), Math.min(0.24, Lg - 0.5));
       lut[P_INK] = pack(inkL, 0.003, 0.012);
-      lut[P_INK + 1] = pack(inkL + (fl ? 0.03 : -0.03), 0.003, 0.012);
+      lut[P_INK + 1] = pack(inkL + fx(-0.03, 0.03), 0.003, 0.012);
       inkPx = lut[P_INK];
       // labels: a quieter ink, but never closer than 0.45 to the ground
-      lut[P_DIM] = pack(fl ? Math.min(0.42, Lg - 0.45) : Math.max(0.74, Lg + 0.45), 0.004, 0.014);
+      lut[P_DIM] = pack(fx(Math.max(0.74, Lg + 0.45), Math.min(0.42, Lg - 0.45)), 0.004, 0.014);
 
       const wHue = (240 * Math.PI) / 180;
-      const wL = fl ? Lg - 0.27 : Lg + 0.3;
-      const wC = fl ? 0.11 : 0.08;
-      const wOff = [0, -0.03, 0.03, fl ? 0.12 : 0.16];
+      const wL = fx(Lg + 0.3, Lg - 0.27);
+      const wC = fx(0.08, 0.11);
+      const wOff = [0, -0.03, 0.03, fx(0.16, 0.12)];
       for (let j = 0; j < 4; j++) lut[P_WATER + j] = pack(wL + wOff[j], wC * Math.cos(wHue), wC * Math.sin(wHue));
       streakPx = pack(wL, wC * Math.cos(wHue), wC * Math.sin(wHue), 150);
       streakPx2 = pack(wL, wC * Math.cos(wHue), wC * Math.sin(wHue), 70);
-      const sL = fl ? Math.max(0.99, Lg) : lerp(0.7, 0.76, g); // a little dimmer at night
+      const sL = fx(lerp(0.7, 0.76, g), Math.max(0.99, Lg)); // a little dimmer at night
       for (let j = 0; j < 4; j++) lut[P_SNOW + j] = pack(sL - j * 0.016, -0.002, -0.01 - 0.004 * (1 - g));
 
       shadowPx = E.sun * fl > 0.02 ? pack(0.22, 0.012, 0.025, Math.round(52 * E.sun * fl)) : 0;
-      const mL = fl ? Lg - 0.14 : Lg + 0.17;
+      const mL = fx(Lg + 0.17, Lg - 0.14);
       motePx = pack(mL, ground[1] + 0.01 * E.haze, ground[2] + 0.035 * E.haze, 170);
       // the veil of fog (or brown haze) hanging in banks: 32 strengths of one tint
       veilA = Math.max(E.fog * 0.6, E.haze * 0.24) * lerp(0.55, 1, g); // thinner at night, so it does not light the room
@@ -505,7 +518,7 @@ export default {
         bedCol[b + 8] = pack(rL + BAND[b] + 0.06, 0.006, 0.016);
         bedCol[b + 16] = pack(rL + BAND[b] - 0.045, 0.004, 0.008);
       }
-      bedCol[5] = pack(rL + (fl ? 0.1 : 0.13), 0.006, 0.016); // the lip the dune rests on
+      bedCol[5] = pack(rL + fx(0.13, 0.1), 0.006, 0.016); // the lip the dune rests on
       bedCol[24] = pack(0.885, 0.004, 0.014); // engraved values
       bedCol[25] = pack(0.67, 0.006, 0.018); // engraved labels
       bedCol[26] = pack(rL - 0.075, 0.003, 0.006); // the shadow inside the cut
