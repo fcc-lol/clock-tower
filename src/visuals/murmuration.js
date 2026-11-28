@@ -852,7 +852,7 @@ export default {
     let vPD = 0.06;
     const LIFT_AIM = 3.6; // contrast the figure is held to against the worst of the ground behind it
     const LIFT_FADE = 0.8; // s: how fast the lift may change (it follows the light far slower than this)
-    const CLEAR_AIM = 3.25; // what a clear sky asks of the silhouette alone (no patch there: the look stays)
+    const CLEAR_AIM = 3.33; // what a clear sky asks of the silhouette alone (no patch there: the look stays)
     // What the lift must add for one numeral, given the raw sky Lr at its worst
     // point and a cloud cover aw over it: the alpha of the patch behind it
     // (liftA) and the opacity of its unveiled silhouette (liftO), all blended in sRGB.
@@ -1710,7 +1710,11 @@ export default {
         }
         // a clear full day keeps its look and gets no patch, but the figure
         // must still hold: a July noon is too deep a blue for a soft dark
-        // silhouette, so there the silhouette alone is firmed up
+        // silhouette, so there the silhouette alone is firmed up, and only as
+        // far as the bare sky asks (firmer than that and the birds no longer
+        // show inside the strokes; while the flock gathers round a digit that
+        // has just changed it darkens the sky beside it for a few seconds, and
+        // that is left alone)
         if (liftAim < 1) {
           const dk = S.light === 0;
           liftNeed(dk, dk ? g.rLo : g.rHi, 0, op, lerp(srgb(L_DAY), srgb(paleLum), S.inkT), dk ? L_DAY : paleLum, 0, 0, false, CLEAR_AIM);
