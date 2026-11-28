@@ -160,6 +160,7 @@ export default {
     const labMean = new Float32Array(3);
     const srgb = (c) => (c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055);
 
+    const DAY_FLOOR = 0.185; // luminance a clear full-day sky is drawn up toward
     function paintSky(s) {
       const sk = s.sky;
       const dirs = [sk.west, sk.northWest, sk.northEast, sk.east];
@@ -178,6 +179,10 @@ export default {
       // the room is dark once the day has gone (and the ground spends as little
       // of dusk in mid-grey as it can); an already dark sky is left alone
       const nightDim = 0.5 * smoothstep(0.3, 0.08, day);
+      // a clear full day: the sky is never left so deep that a dark flock
+      // cannot stand against it (a July noon comes in very deep at the top);
+      // what lies under the floor is drawn up toward it, still a gradient
+      const dayFloor = DAY_FLOOR * smoothstep(0.9, 1, day) * (1 - smoothstep(0.1, 0.35, s.weather.cloud / 100));
       const px = skyImg.data;
       for (let j = 0; j < SR; j++) {
         const v = j / (SR - 1);
@@ -224,15 +229,23 @@ export default {
           const l3 = l_ * l_ * l_;
           const m3 = m_ * m_ * m_;
           const s3 = s_ * s_ * s_;
-          const r = clamp(4.0767416621 * l3 - 3.3077115913 * m3 + 0.2309699292 * s3);
-          const g = clamp(-1.2684380046 * l3 + 2.6097574011 * m3 - 0.3413193965 * s3);
-          const b = clamp(-0.0041960863 * l3 - 0.7034186147 * m3 + 1.707614701 * s3);
+          let r = clamp(4.0767416621 * l3 - 3.3077115913 * m3 + 0.2309699292 * s3);
+          let g = clamp(-1.2684380046 * l3 + 2.6097574011 * m3 - 0.3413193965 * s3);
+          let b = clamp(-0.0041960863 * l3 - 0.7034186147 * m3 + 1.707614701 * s3);
+          let Y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+          if (Y < dayFloor) {
+            const up = (dayFloor - (dayFloor - Y) * 0.25) / Math.max(Y, 0.01);
+            r = Math.min(1, r * up);
+            g = Math.min(1, g * up);
+            b = Math.min(1, b * up);
+            Y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+          }
           const o = (j * SC + i) * 4;
           px[o] = Math.round(srgb(r) * 255);
           px[o + 1] = Math.round(srgb(g) * 255);
           px[o + 2] = Math.round(srgb(b) * 255);
           px[o + 3] = 255;
-          skyLum[j * SC + i] = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+          skyLum[j * SC + i] = Y;
         }
       }
       skyTinyCtx.putImageData(skyImg, 0, 0);
@@ -839,12 +852,13 @@ export default {
     let vPD = 0.06;
     const LIFT_AIM = 3.6; // contrast the figure is held to against the worst of the ground behind it
     const LIFT_FADE = 0.8; // s: how fast the lift may change (it follows the light far slower than this)
+    const CLEAR_AIM = 3.33; // what a clear sky asks of the silhouette alone (no patch there: the look stays)
     // What the lift must add for one numeral, given the raw sky Lr at its worst
     // point and a cloud cover aw over it: the alpha of the patch behind it
     // (liftA) and the opacity of its unveiled silhouette (liftO), all blended in sRGB.
     let liftA = 0;
     let liftO = 0;
-    function liftNeed(dark, Lr, aw, op, Vc, Li, night, gl, patch) {
+    function liftNeed(dark, Lr, aw, op, Vc, Li, night, gl, patch, aimC = LIFT_AIM) {
       const Vr = srgb(Lr);
       let Vg = Vr * (1 - aw) + cloudV * aw; // the ground
       let V0 = (Vr + (Vc - Vr) * op) * (1 - aw) + cloudV * aw; // the silhouette below, veiled
@@ -862,7 +876,7 @@ export default {
       // still a little thinner than its ink, toward its tips and between birds).
       // Under a veiled night sky, the patch comes first: denser cloud behind
       // the figure keeps the room dark, where a brighter figure would light it.
-      const A2 = LIFT_AIM * 1.12;
+      const A2 = aimC * 1.12;
       const Ls = dark ? Li + 0.012 : 0.85 * Li;
       const Lf = lerp(Ls, unsrgb(V0), night);
       const Gt = dark ? A2 * (Lf + 0.05) - 0.05 : (Lf + 0.05) / A2 - 0.05;
@@ -877,7 +891,7 @@ export default {
       // it is not counted on (the patch and anything drifting over the sky,
       // a storm's glow, can wash it out), and the lift's own silhouette holds it
       const V1 = lerp(V0 + (Vp - V0) * a, Vg + (Vp - Vg) * a, Math.min(1, 4 * a));
-      const Lw = dark ? (G1 + 0.05) / LIFT_AIM - 0.05 : LIFT_AIM * (G1 + 0.05) - 0.05;
+      const Lw = dark ? (G1 + 0.05) / aimC - 0.05 : aimC * (G1 + 0.05) - 0.05;
       // (the birds are not counted on: between them, the silhouette alone must hold)
       const Vw = srgb(clamp(Lw));
       const span = Vi - V1;
@@ -1693,6 +1707,18 @@ export default {
           if (dk) tL = a * liftAim;
           else tD = a * liftAim;
           t2 = o * liftAim;
+        }
+        // a clear full day keeps its look and gets no patch, but the figure
+        // must still hold: a July noon is too deep a blue for a soft dark
+        // silhouette, so there the silhouette alone is firmed up, and only as
+        // far as the bare sky asks (firmer than that and the birds no longer
+        // show inside the strokes; while the flock gathers round a digit that
+        // has just changed it darkens the sky beside it for a few seconds, and
+        // that is left alone)
+        if (liftAim < 1) {
+          const dk = S.light === 0;
+          liftNeed(dk, dk ? g.rLo : g.rHi, 0, op, lerp(srgb(L_DAY), srgb(paleLum), S.inkT), dk ? L_DAY : paleLum, 0, 0, false, CLEAR_AIM);
+          t2 += liftO * (1 - liftAim);
         }
         const step_ = dt / LIFT_FADE;
         const toward = (v, t) => (inkSnap ? t : t > v ? Math.min(t, v + step_) : Math.max(t, v - step_));
