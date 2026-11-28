@@ -887,12 +887,14 @@ export default {
         mix3(tmp, COL.fNight, skyMean, 0.1);
         mix3(f, tmp, f, dw);
         const F = lum(f);
-        const flip = smoothstep(0.215, 0.165, F);
+        // (the tiles turn over where a solid dark and a solid pale tile read equally well against the field)
+        const flip = smoothstep(0.195, 0.16, F);
         // dark tiles: cobalt, deepened until it holds against the field
         const wantA = Math.max(0.002, (F + 0.05) / 4.4 - 0.05);
         mul3(U.inkA, COL.cobalt, Math.min(1, Math.pow(wantA / 0.043, 1 / 2.2)));
         // pale tiles: glaze, lifted until it holds against the field
-        const wantB = 3.9 * (F + 0.05) - 0.05;
+        // (aimed well past 3:1: ripples, grout and the sky on the water take about a fifth of it back)
+        const wantB = 4.8 * (F + 0.05) - 0.05;
         let k = 0;
         if (lum(COL.glaze) < wantB) {
           let lo = 0, hi = 1;
