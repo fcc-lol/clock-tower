@@ -6,18 +6,21 @@
 // blade shows its pale underside, so a gust reads as a silver band running
 // downwind. The time is planted in the field as a taller, stiffer species in
 // flower (hours above, minutes below): dark stalks that lean a third as far as
-// the grass, carrying a flower colour that belongs to the season. When the
-// minute changes the old plants wilt and the new ones grow.
+// the grass, carrying a flower that belongs to the season. The time is told in
+// light and dark, not in hue: pale flowers standing in the patch of shade the
+// tall plants cast (winter: near-black seed heads on a pale clearing), so it
+// reads in greyscale too. When the minute changes the old plants wilt and the
+// new ones grow.
 //
 // What drives it:
 //   wind, gust, windDir   lean, size and sharpness of the silver gust bands,
 //                         their speed and heading; a gale lays the field flat
 //   day of year           the field's colour family and the flower species
-//                         (spring lime + magenta, summer green + poppy red,
-//                         autumn straw + aster violet, winter bleached + seed heads)
+//                         (spring lime + blush pink, summer green + pale poppy,
+//                         autumn straw + pale aster, winter bleached + seed heads)
 //   daylight, sky colour  light level and tint; at night the field is near
-//                         black-green (blue-black on snow) and the flowers turn
-//                         luminous one by one; summer nights have fireflies
+//                         black-green (blue-black on snow) and the flowers glow;
+//                         summer nights have fireflies
 //   cloud                 flatter, greyer light; drifting cloud shadows when broken
 //   rain                  streaks, blades bowed and nodding under drops, beads,
 //                         darker wet wood
@@ -36,7 +39,7 @@
 // that are repainted only when the light or the weather moves; the frame blits
 // them and draws the blades in a few dozen batched fills. Only the type is DOM.
 
-import { W, H, clamp, lerp, smoothstep, rng, hash, createNoise, mix, adjust, rgba, luminance, contrast, el, addStyle, canvas2d, mask } from "../lib/kit.js";
+import { W, H, clamp, lerp, smoothstep, rng, hash, createNoise, mix, adjust, parse, rgba, luminance, contrast, el, addStyle, canvas2d, mask } from "../lib/kit.js";
 
 const KZ = 0.88; // how much of a blade's height shows in this oblique view
 const KY = 0.5; // how much the ground is foreshortened toward the top
@@ -52,11 +55,14 @@ const INK_LIGHT = "#f6ecd2";
 
 // One field family (dark to pale underside) and one flower per season, as they
 // look in full sun. `night` is the flower once it has turned luminous.
+// `petal` and `petal2` are the pale flowers of the light side by day (the time is
+// set in light flowers on a shaded patch); `head`, `head2`, `head3` are winter's
+// dark seed heads, standing on the bleached field when it is bright enough.
 const SEASONS = {
-  winter: { tones: ["#93876a", "#b0a27e", "#c8ba96", "#ddd2b2", "#f1ead6"], ground: "#a39672", stalk: "#7d6045", head: "#22150d", head2: "#3a2617", night: "#b2c9de", pale: "#e4eef7", centre: "#6b5037", hl: 11, hw: 9.5 },
-  spring: { tones: ["#4c9c37", "#72bb3c", "#95d247", "#b8e35f", "#e3f5ba"], ground: "#62ab3a", stalk: "#15432b", head: "#b30d6e", head2: "#d2318a", night: "#ff5fae", pale: "#ffb7d8", centre: "#ffe7a0", hl: 7, hw: 13 },
-  summer: { tones: ["#439534", "#64b035", "#88c83f", "#aedd57", "#ddf0b0"], ground: "#55a235", stalk: "#103821", head: "#a50f19", head2: "#c4221d", night: "#f0452e", pale: "#ffa089", centre: "#1a0c0c", hl: 2, hw: 14.5 },
-  autumn: { tones: ["#a67a2e", "#c59a40", "#dab455", "#ebcf7c", "#f7e9bd"], ground: "#b58c38", stalk: "#4a3a22", head: "#4a27b4", head2: "#6843d8", night: "#9a7dff", pale: "#d0c1ff", centre: "#ffc93a", hl: 2, hw: 13.5 },
+  winter: { tones: ["#93876a", "#b0a27e", "#c8ba96", "#ddd2b2", "#f1ead6"], ground: "#a39672", stalk: "#3b2c1e", head: "#22150d", head2: "#2e1c11", head3: "#1a120c", petal: "#eef3f8", petal2: "#f8fafc", night: "#b2c9de", pale: "#e4eef7", centre: "#6b5037", hl: 11, hw: 9.5 },
+  spring: { tones: ["#4c9c37", "#72bb3c", "#95d247", "#b8e35f", "#e3f5ba"], ground: "#62ab3a", stalk: "#15432b", head: "#b30d6e", head2: "#d2318a", head3: "#9a0c5e", petal: "#ffc4e1", petal2: "#ffd8ec", night: "#ff5fae", pale: "#ffb7d8", centre: "#ffe7a0", hl: 7, hw: 13 },
+  summer: { tones: ["#439534", "#64b035", "#88c83f", "#aedd57", "#ddf0b0"], ground: "#55a235", stalk: "#103821", head: "#a50f19", head2: "#c4221d", head3: "#8a0c14", petal: "#ffbfa8", petal2: "#ffd3c2", night: "#f0452e", pale: "#ffa089", centre: "#1a0c0c", hl: 2, hw: 14.5 },
+  autumn: { tones: ["#a67a2e", "#c59a40", "#dab455", "#ebcf7c", "#f7e9bd"], ground: "#b58c38", stalk: "#4a3a22", head: "#4a27b4", head2: "#6843d8", head3: "#3b1f95", petal: "#d9ccff", petal2: "#e6deff", night: "#9a7dff", pale: "#d0c1ff", centre: "#ffc93a", hl: 2, hw: 13.5 },
 };
 const ORDER = ["winter", "spring", "summer", "autumn", "winter"];
 const CENTRES = [15, 105, 196, 288, 380]; // mid-January, mid-April, mid-July, mid-October
@@ -69,12 +75,15 @@ function seasonAt(doy) {
   const a = SEASONS[ORDER[i]];
   const b = SEASONS[ORDER[i + 1]];
   const out = { tones: a.tones.map((c, k) => mix(c, b.tones[k], t)), hl: lerp(a.hl, b.hl, t), hw: lerp(a.hw, b.hw, t) };
-  for (const key of ["ground", "stalk", "head", "head2", "night", "pale", "centre"]) out[key] = mix(a[key], b[key], t);
+  for (const key of ["ground", "stalk", "head", "head2", "head3", "petal", "petal2", "night", "pale", "centre"]) out[key] = mix(a[key], b[key], t);
   const weight = (name) => (ORDER[i] === name ? 1 - t : 0) + (ORDER[i + 1] === name ? t : 0);
   out.summer = weight("summer");
   out.winter = weight("winter");
   return out;
 }
+
+const toLin = (v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+const fromLin = (l) => 255 * (l <= 0.0031308 ? 12.92 * l : 1.055 * l ** (1 / 2.4) - 0.055);
 
 const offscreen = (w, h) => {
   const c = document.createElement("canvas");
@@ -270,7 +279,45 @@ export default {
         ctx.fillText(hh, W / 2 / CELL, HOURS_BASE / CELL);
         ctx.fillText(mm, W / 2 / CELL, MINS_BASE / CELL);
       });
+      // The shaded patch the tall plants make round themselves: the numerals
+      // grown out by SH_PAD and softened, at the mask's resolution. The old
+      // patch is kept so the two can cross over while the plants change.
+      const o = shadeOld.getContext("2d");
+      o.clearRect(0, 0, MC, MR);
+      o.drawImage(shadeNew, 0, 0);
+      const c = shadeNew.getContext("2d");
+      c.clearRect(0, 0, MC, MR);
+      c.filter = `blur(${SH_BLUR / CELL}px)`;
+      c.font = `900 ${FS / CELL}px "Nunito"`;
+      c.textAlign = "center";
+      c.textBaseline = "alphabetic";
+      c.fillStyle = c.strokeStyle = "#fff";
+      c.lineJoin = "round";
+      c.lineWidth = (2 * SH_PAD) / CELL;
+      for (const [str, base] of [[hh, HOURS_BASE], [mm, MINS_BASE]]) {
+        const y = (base + 8) / CELL; // a little low: the stalks stand below their heads
+        c.strokeText(str, W / 2 / CELL, y);
+        c.fillText(str, W / 2 / CELL, y);
+      }
+      c.filter = "none";
+      // dappled, not flat: light comes through the leaves here and there
+      c.globalCompositeOperation = "destination-out";
+      c.drawImage(dappleC, 0, 0);
+      c.globalCompositeOperation = "source-over";
+      shadeSig = "";
     };
+    const SH_PAD = 56, SH_BLUR = 10;
+    const shadeNew = offscreen(MC, MR), shadeOld = offscreen(MC, MR), shadeComp = offscreen(MC, MR);
+    const scx = shadeComp.getContext("2d");
+    const tintC = [offscreen(MC, MR), offscreen(MC, MR)], tintSig = ["", ""];
+    const dappleC = offscreen(MC, MR);
+    {
+      const dc = dappleC.getContext("2d");
+      const img = dc.createImageData(MC, MR);
+      for (let i = 0; i < img.data.length; i += 4) img.data[i + 3] = Math.round(255 * R.range(0, 0.24));
+      dc.putImageData(img, 0, 0);
+    }
+    let shadeSig = "";
 
     // Every place a flower could stand: a jittered hex grid over the time's area.
     const PITCH = 16, PROW = 13.5;
@@ -541,25 +588,28 @@ export default {
     // Colour. Everything is recomputed only when the light or weather moves.
     // ---------------------------------------------------------------------
     const fieldCol = new Array(NBUCKET).fill("#000");
-    const pal = { head: new Array(7).fill("#000"), bud: ["#000", "#000"], stalk: "#000", centreD: "#000", centreL: "#000", cDark: 1, cLumi: 1, inkPick: 0, ink2L: "#000", ink2D: "#000", accent: "#000", bead: "#000", rain: "#000", flake: "#000", flake2: "#000", hl: 4, hw: 13, groundLum: 0 };
+    const pal = { head: new Array(7).fill("#000"), bud: ["#000", "#000"], stalk: "#000", centreD: "#000", centreL: "#000", fieldL: 0.2, fieldLow: 0.2, darkNeed: 0.16, winterSide: false, shadeCol: "#000", shadeA: 0, liftCol: "#000", liftA: 0, inkPick: 0, ink2L: "#000", ink2D: "#000", accent: "#000", bead: "#000", rain: "#000", flake: "#000", flake2: "#000", hl: 4, hw: 13, groundLum: 0 };
     let season = null, seasonDay = -1;
     let sigA = -1, sigB = -1, sigSky = "";
     // Which side each ink is on, chosen outright with hysteresis, and a short
     // fade (about a second) when it changes: the flowers (dark or luminous)
     // and the markers' type (burnt or cream).
-    let lumOn = null, lumT = 0, inkLight = null, inkT = 0, inkSig = "";
+    let lumOn = null, lumT = 1, inkLight = null, inkT = 0, inkSig = "";
 
     const cond = { snow: 0, wet: 0, frost: 0, hot: 0, haze: 0, fog: 0, warm: 0, moon: 0, dew: 0, cloud: 0 };
 
     const recolour = (s) => {
       const d = s.daylight;
-      const dk = Math.pow(d, 1.1);
       const { snow, wet, frost, hot, haze, fog, warm, moon, cloud } = cond;
+      // the light level; snow and fog lose it sooner, so the room is dark by
+      // the time daylight is under about 0.15 (a white field and a pale veil
+      // would otherwise glow into the evening)
+      const dk = Math.pow(d, 1.1) * lerp(1, smoothstep(0.08, 0.45, d), Math.max(snow, fog));
       const sky = s.sky.mean;
       const twilight = 4 * d * (1 - d);
       const dim = 1 - 0.13 * cloud - 0.07 * wet;
       const chroma = (1 - 0.22 * cloud) * (1 + 0.14 * wet) * (1 - 0.45 * hot);
-      const hazeCol = mix(sky, "#f4f6f4", 0.3 * dk);
+      const hazeCol = mix(mix(sky, "#f4f6f4", 0.3 * dk), "#070a0d", 0.55 * (1 - dk) * Math.max(snow, fog));
       const snowDay = mix("#f3f6f9", sky, 0.1);
       const lit = (day, night, skyTint) => mix(mix(night, day, dk), sky, skyTint);
 
@@ -576,7 +626,7 @@ export default {
         // pale underside still catches a little light, so the wind stays visible
         let night = mix(mix("#0d1b15", "#3d5f50", k / (NT - 1)), adjust(season.tones[k], { l: 0.18 + 0.06 * k, c: (v) => v * 0.4 }), 0.4);
         if (moon > 0.01) night = mix(night, "#5a7890", moon * 0.1 * k);
-        if (snow > 0.01) night = mix(night, mix("#162030", "#4e6380", k / (NT - 1)), snow * 0.7);
+        if (snow > 0.01) night = mix(night, mix("#121a28", "#3e5068", k / (NT - 1)), snow * 0.7);
         let c = lit(day, night, 0.05 + 0.17 * twilight);
         // wet blades glisten: the pale side of a bent blade catches the sky
         if (wet > 0.01 && k >= 2) c = mix(c, mix(sky, "#d6e0e6", 0.35 + 0.3 * dk), wet * 0.16 * (k - 1));
@@ -614,55 +664,83 @@ export default {
 
       // the time's plants
       const headHaze = haze * 0.16 + fog * 0.06;
-      const dusk = 1 - dk;
       // What the time is seen against: the bare ground between its stalks and
       // the blades standing round it (0.7, nearer 0.9 on snow: the understory, shadows and gaps make
       // the field read darker than its flat colours; measured on the frames).
       const fieldL = (0.7 + 0.2 * snow) * (0.5 * luminance(g1) + 0.5 * luminance(fieldCol[NT + 1]));
-      const crL = (la) => (Math.max(la, fieldL) + 0.05) / (Math.min(la, fieldL) + 0.05);
-      const hd = [season.head, season.head2, mix(season.head2, season.pale, 0.22)].map((c) => adjust(c, { l: (v) => v * (1 - 0.06 * cloud) }));
-      const dayHead = (c, k) => mix(mix(c, "#060606", k), hazeCol, headHaze);
-      // As the field darkens toward evening the dark flowers deepen toward
-      // black-red, as far as it takes (where it can) to keep 3.2:1 against the
-      // field, so they never sink into its tone. Full day is left as it was.
-      let deep = dusk * 0.45;
-      const gate = smoothstep(1, 0.88, d);
-      if (gate > 0) {
-        const want = (fieldL + 0.05) / 3.2 - 0.05;
-        const lumAt = (k) => luminance(dayHead(hd[2], k));
-        let k = deep;
-        if (lumAt(deep) > want) {
-          if (lumAt(0.985) >= want) k = 0.985;
-          else {
-            let lo = deep, hi = 0.985;
-            for (let it = 0; it < 14; it++) { const m = (lo + hi) / 2; if (lumAt(m) > want) lo = m; else hi = m; }
-            k = hi;
-          }
-        }
-        deep = lerp(deep, k, gate);
-      }
-      pal.head[0] = dayHead(hd[0], deep);
-      pal.head[1] = dayHead(hd[1], deep);
-      pal.head[2] = dayHead(hd[2], deep);
-      // in twilight the luminous heads are pale, palest where they first come on
-      const lift = smoothstep(0.1, 0.45, d);
-      const headN = mix(adjust(season.night, { l: (v) => v * 0.94 }), mix(season.pale, "#fff8f0", 0.35 * lift), lift * 0.85);
+      pal.fieldL = fieldL;
+      // The time is told in luminance, not in hue (red on green is grey on grey
+      // to a colour-blind eye, and measures under 3:1). Two sides:
+      // LIGHT: pale flowers of the season's colour (blush-pink, pale coral
+      // poppies with a black eye, pale lavender asters, frost-white seed heads)
+      // standing in the patch of shade the tall plants cast round themselves;
+      // at night they turn luminous. The shade deepens exactly as far as it
+      // takes to keep the flowers 3:1 and more, so it fades out as the field
+      // darkens toward evening. Spring, summer and autumn are always on this
+      // side, so their time never changes ink.
+      // DARK: winter's near-black seed heads, on the bleached field, wherever
+      // that field is bright enough to hold them (bright winter days, snow);
+      // on duller days and in the evening winter turns to the light side.
+      const capL = (c, top) => adjust(c, { l: (v) => Math.min(v, top) });
+      const floorL = (c, bot) => adjust(c, { l: (v) => Math.max(v, bot) });
+      const veil = (c) => mix(c, hazeCol, headHaze);
+      pal.head[0] = veil(capL(season.head, 0.25));
+      pal.head[1] = veil(capL(season.head2, 0.27));
+      pal.head[2] = veil(capL(season.head3, 0.23));
+      const darkMax = Math.max(luminance(pal.head[0]), luminance(pal.head[1]), luminance(pal.head[2]));
+      // the field must be this bright to carry the dark heads at 3.3:1
+      pal.darkNeed = 3.3 * (darkMax + 0.05) - 0.05;
+      // drifting cloud shadows fall on the field (under the time's plants):
+      // at their deepest they take the field down this far
+      const so = d * smoothstep(0.15, 0.45, cloud) * (1 - smoothstep(0.72, 0.95, cloud));
+      pal.fieldLow = fieldL * Math.pow(1 - 0.5 * so, 2.3);
+      pal.winterSide = season.winter >= 0.5;
+      // light side: pale petals by day, luminous at night; one tone glides to
+      // the other with the light, and both are light, so the blend never
+      // passes through the field's tone
+      const lift = smoothstep(0.08, 0.5, d);
+      const n0 = adjust(season.night, { l: (v) => v * (0.94 - 0.1 * season.winter) }); // winter's frost-blue is dimmed a little: a dark room
+      const n1 = mix(n0, "#fff4ea", 0.1); // the second shade is a touch paler, never darker
+      const p0 = floorL(season.petal, 0.86), p1 = floorL(season.petal2, 0.9);
+      // (the veil only lightens: at night it would dim the luminous heads)
+      const veilL = (c) => mix(c, hazeCol, headHaze * dk);
+      const headN = veilL(mix(n0, p0, lift));
       pal.head[3] = headN;
-      pal.head[4] = mix(headN, "#0a0612", 0.2 * (1 - lift));
+      pal.head[4] = veilL(mix(n1, p1, lift));
       pal.head[5] = mix(mix(season.pale, "#f4ff8a", season.summer), "#ffffff", season.winter * 0.6);
       pal.stalk = mix(lit(season.stalk, mix("#07100c", season.night, 0.2), 0.03), hazeCol, headHaze);
       pal.bud[0] = mix(pal.stalk, pal.head[0], 0.5);
       pal.bud[1] = mix(pal.stalk, headN, 0.5);
-      // a luminous head has a pale heart, not a dark one: dark hearts mottle the numerals at night
-      pal.centreD = mix(season.centre, "#060606", dusk * 0.3);
-      pal.centreL = mix(headN, season.pale, 0.55);
-      // how well the dark heads and the luminous heads (each as planted, in
-      // their mix of shades) read against the field: the flowers take whichever
-      // side reads better, but only once the dark ones have deepened fully, so
-      // a dull day keeps its dark flowers
-      const lh = (k) => luminance(pal.head[k]);
-      pal.cDark = crL(0.5 * lh(0) + 0.32 * lh(1) + 0.18 * lh(2));
-      pal.cLumi = gate < 1 ? 0 : crL(0.68 * lh(3) + 0.32 * lh(4));
+      // hearts: the season's own by day; a luminous head has a pale heart, not
+      // a dark one (dark hearts mottle the numerals at night)
+      pal.centreD = mix(season.centre, "#060606", 0.5);
+      pal.centreL = mix(mix(n0, season.pale, 0.55), season.centre, lift);
+      // How deep the shade must be for the light flowers to hold 4:1 (by
+      // this estimate; 3:1 and more as measured on the frames). The patch is
+      // painted over the field as a translucent dark layer, which the canvas
+      // blends in sRGB: solve for its opacity on a grey of the field's luminance.
+      const lightMin = Math.min(luminance(pal.head[3]), luminance(pal.head[4]));
+      const target = Math.max(0.003, (lightMin + 0.05) / 4 - 0.05);
+      // the opacity of a layer of colour `col` over a grey of luminance `under`
+      // that brings it to luminance `goal` (darker or lighter)
+      const solve = (under, col, goal, darker) => {
+        const v = fromLin(under), sc = parse(col);
+        const lumAt = (al) => 0.2126 * toLin(v + (sc[0] - v) * al) + 0.7152 * toLin(v + (sc[1] - v) * al) + 0.0722 * toLin(v + (sc[2] - v) * al);
+        if (darker ? under <= goal : under >= goal) return 0;
+        let lo = 0, hi = 0.84;
+        if (darker ? lumAt(hi) > goal : lumAt(hi) < goal) return 0.95;
+        for (let it = 0; it < 16; it++) { const m = (lo + hi) / 2; if (darker ? lumAt(m) > goal : lumAt(m) < goal) lo = m; else hi = m; }
+        return Math.min(0.95, Math.round((hi / 0.88) * 200) / 200); // the dapple lets about an eighth through
+      };
+      pal.shadeCol = mix(mix("#06120a", "#0b1420", snow), "#0a0d10", fog * 0.5);
+      pal.shadeA = solve(fieldL, pal.shadeCol, target, true);
+      // Winter's dark seed heads stand where the grass is thin and pale (or the
+      // snow lies clean): a pale patch, deep enough for 3.5:1 even if the field
+      // round them is half as bright as this estimate (its understory, the
+      // flattened blades in a gale and cloud shadows all darken it locally).
+      pal.liftCol = mix(mix(mix("#efe6cc", snowDay, snow), sky, 0.08), "#2a2e33", 1 - dk);
+      pal.liftA = pal.winterSide ? solve(0.55 * pal.fieldLow, pal.liftCol, 3.5 * (darkMax + 0.05) - 0.05, false) : 0;
+      globalThis.__tgpal = pal; // DEBUG-REMOVE
       pal.hl = season.hl;
       pal.hw = season.hw;
 
@@ -797,8 +875,12 @@ export default {
         recolour(s);
       }
       const toward1 = (v, to, rate) => (jumped ? to : v < to ? Math.min(to, v + dt / rate) : Math.max(to, v - dt / rate));
-      if (lumOn === null) lumOn = pal.cLumi >= pal.cDark;
-      else if (lumOn ? pal.cDark > pal.cLumi * 1.05 : pal.cLumi > pal.cDark * 1.05) lumOn = !lumOn;
+      // the flowers' side, chosen outright: light, except winter's dark seed
+      // heads while the field is bright enough for them; the gap between the
+      // two thresholds keeps it from flickering, and it changes once a dusk
+      if (!pal.winterSide) lumOn = true;
+      else if (lumOn === null) lumOn = pal.shadeA < pal.liftA;
+      else if (lumOn ? pal.liftA < 0.8 * pal.shadeA - 0.04 : pal.shadeA < 0.8 * pal.liftA - 0.04) lumOn = !lumOn;
       lumT = toward1(lumT, lumOn ? 1 : 0, 1.1);
       if (inkLight === null) inkLight = pal.inkPick >= 1;
       else if (inkLight ? pal.inkPick < 1 / 1.06 : pal.inkPick > 1.06) inkLight = !inkLight;
@@ -935,6 +1017,57 @@ export default {
         ctx.fill();
       }
 
+      // ----- broken cloud: shadows drifting downwind over the field (under the time's plants) -----
+      const so = d * smoothstep(0.15, 0.45, cloud) * (1 - smoothstep(0.72, 0.95, cloud));
+      if (so > 0.02) {
+        shadeP += (14 + w.wind * 3.2) * dt;
+        ctx.globalAlpha = so;
+        for (let i = 0; i < 3; i++) {
+          const along = ((shadeP + i * 1260) % 3780) - 1890;
+          const across = (i - 1) * 620 + 160 * Math.sin(i * 2.4 + 1);
+          const cx = W / 2 + along * wdx - across * wdy, cy = H / 2 + along * wdy * 0.8 + across * wdx;
+          if (cx < -750 || cx > W + 750 || cy < -575 || cy > H + 575) continue;
+          ctx.drawImage(blobC, cx - 750, cy - 575, 1500, 1150);
+        }
+        ctx.globalAlpha = 1;
+      }
+
+      // ----- the patch the time stands in: shade round the light flowers, a
+      // pale clearing round winter's dark seed heads (crossing over with them) -----
+      const shA = pal.shadeA * lumT, liA = pal.liftA * (1 - lumT);
+      if (shA > 0.004 || liA > 0.004) {
+        const xo = Math.min(1, smoothstep(0.3, 2.6, sinceChange));
+        if (xo.toFixed(3) !== shadeSig) {
+          shadeSig = xo.toFixed(3);
+          tintSig[0] = tintSig[1] = "";
+          scx.globalCompositeOperation = "copy";
+          scx.globalAlpha = 1 - xo;
+          scx.drawImage(shadeOld, 0, 0);
+          scx.globalCompositeOperation = "lighter";
+          scx.globalAlpha = xo;
+          scx.drawImage(shadeNew, 0, 0);
+          scx.globalCompositeOperation = "source-over";
+          scx.globalAlpha = 1;
+        }
+        for (let k = 0; k < 2; k++) {
+          const al = k ? liA : shA, col = k ? pal.liftCol : pal.shadeCol;
+          if (al <= 0.004) continue;
+          if (tintSig[k] !== col) {
+            tintSig[k] = col;
+            const tc = tintC[k].getContext("2d");
+            tc.globalCompositeOperation = "copy";
+            tc.drawImage(shadeComp, 0, 0);
+            tc.globalCompositeOperation = "source-in";
+            tc.fillStyle = col;
+            tc.fillRect(0, 0, MC, MR);
+            tc.globalCompositeOperation = "source-over";
+          }
+          ctx.globalAlpha = al;
+          ctx.drawImage(tintC[k], 0, 0, W, H);
+        }
+        ctx.globalAlpha = 1;
+      }
+
       // ----- the time: stiff stalks that lean a third as far, and their flowers -----
       const lean3 = 0.34;
       // the turn to luminous ripples through the heads in about a second, in
@@ -1026,21 +1159,6 @@ export default {
           const r = 30 * YR[i] * (0.75 + 0.25 * glow);
           ctx.globalAlpha = glow * 0.9;
           ctx.drawImage(flyC, x - r, y - r, 2 * r, 2 * r);
-        }
-        ctx.globalAlpha = 1;
-      }
-
-      // ----- broken cloud: shadows drifting downwind -----
-      const so = d * smoothstep(0.15, 0.45, cloud) * (1 - smoothstep(0.72, 0.95, cloud));
-      if (so > 0.02) {
-        shadeP += (14 + w.wind * 3.2) * dt;
-        ctx.globalAlpha = so;
-        for (let i = 0; i < 3; i++) {
-          const along = ((shadeP + i * 1260) % 3780) - 1890;
-          const across = (i - 1) * 620 + 160 * Math.sin(i * 2.4 + 1);
-          const cx = W / 2 + along * wdx - across * wdy, cy = H / 2 + along * wdy * 0.8 + across * wdx;
-          if (cx < -750 || cx > W + 750 || cy < -575 || cy > H + 575) continue;
-          ctx.drawImage(blobC, cx - 750, cy - 575, 1500, 1150);
         }
         ctx.globalAlpha = 1;
       }

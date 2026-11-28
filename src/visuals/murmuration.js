@@ -1656,7 +1656,9 @@ export default {
           const span = (Vi - Vs) * (1 - g.veil);
           opNeed = clamp((Vg - Vs) / (Math.abs(span) < 0.02 ? (Vi > Vs ? 0.02 : -0.02) : span), 0, 0.94) * aim;
         }
-        const op = Math.round(Math.max(lerp(0.68, 0.46, S.inkT), opNeed) * (1 - 0.45 * S.rel) * 40) / 40;
+        // (a digit that has just changed thins its silhouette while its birds
+        // swirl back in, but never below what the figure needs to read)
+        const op = Math.round(Math.max(lerp(0.68, 0.46, S.inkT) * (1 - 0.45 * S.rel), opNeed) * 40) / 40;
         if (op !== g.op || qs !== g.sh || S.ox !== g.x) {
           g.op = op;
           g.sh = qs;
@@ -1690,7 +1692,7 @@ export default {
           }
           if (dk) tL = a * liftAim;
           else tD = a * liftAim;
-          t2 = o * liftAim * (1 - 0.45 * S.rel);
+          t2 = o * liftAim;
         }
         const step_ = dt / LIFT_FADE;
         const toward = (v, t) => (inkSnap ? t : t > v ? Math.min(t, v + step_) : Math.max(t, v - step_));
