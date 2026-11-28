@@ -158,10 +158,10 @@ void main() {
 const FS_CLOTH = `${PREC}varying vec2 v_uv; varying vec3 v_n; varying vec3 v_p;
 uniform sampler2D u_tex; uniform sampler2D u_noise;
 uniform vec2 u_size; uniform float u_ratio; uniform float u_seed; uniform float u_shade; uniform float u_crumple;
-uniform vec3 u_L; uniform vec3 u_amb; uniform vec3 u_sun; uniform vec3 u_cloth; uniform vec3 u_wetTint;
+uniform vec3 u_L; uniform vec3 u_amb; uniform vec3 u_sun; uniform vec3 u_cloth; uniform vec2 u_wetK; uniform float u_inkK;
 uniform vec3 u_inkDay; uniform vec3 u_inkNight; uniform vec3 u_night; uniform vec3 u_moonL;
 uniform vec4 u_lamp; uniform vec3 u_lampCol;
-uniform vec3 u_wet; uniform float u_frost; uniform vec4 u_fog; uniform float u_flash; uniform float u_clothNight;
+uniform vec3 u_wet; uniform float u_frost; uniform vec4 u_fog; uniform float u_flash; uniform float u_turn;
 ${FRONT}
 void main() {
   vec4 pr = texture2D(u_tex, v_uv);
@@ -180,9 +180,12 @@ void main() {
   // by day: white cotton under the sky and the sun
   vec3 light = u_amb + u_sun * mix(u_L.z, max(dot(n, u_L), 0.0), u_shade);
   vec3 dayC = min(u_cloth * light, vec3(1.0));
-  dayC = mix(dayC, mix(dayC, vec3(dot(dayC, vec3(0.3, 0.6, 0.1))), 0.45) * u_wetTint, wet); // darker and greyer, in the cloth's own tone
+  // wet: darker and greyer, in the cloth's own tone, but never so dark that the print sinks into it (u_wetK.x,
+  // worked out each frame from the light and the ink); where the cotton cannot go darker, the wet print does (u_wetK.y)
+  dayC = mix(dayC, mix(dayC, vec3(dot(dayC, vec3(0.3, 0.6, 0.1))), 0.45) * u_wetK.x * vec3(1.0, 0.9914, 0.9829), wet);
   float lum = min(dot(light, vec3(0.3, 0.6, 0.1)), 1.0);
-  vec3 inkD = u_inkDay * (0.45 + 0.55 * lum) * (1.0 - 0.2 * wet);
+  // the print darkens with the light as the cotton does (u_inkK is 1 in full light), so it never lightens against it
+  vec3 inkD = u_inkDay * (0.45 + 0.55 * lum) * u_inkK * mix(1.0, u_wetK.y, wet);
   vec3 day = mix(dayC, inkD, ink) * (1.0 - pr.b * 0.1);
 
   // in shadow: dark cotton by moon and lamp, and the print glows
@@ -194,7 +197,11 @@ void main() {
   vec3 inkN = u_inkNight * (0.8 + 0.2 * n.z) + u_lampCol * la * lamb * 0.6;
   vec3 night = mix(nightC, inkN, ink) * (1.0 - pr.b * 0.25);
 
-  float f = u_clothNight;
+  // a cloth turns outright: the shadow's edge crosses it as a hard line in a fraction of a second (u_turn runs
+  // 0 to 1 in time, not with the light), rising at dusk and falling back at dawn; each side keeps its own contrast
+  float ey = 6.0 / u_size.y;
+  float edge = u_turn * (1.0 + 2.0 * ey + 0.04) - ey - 0.02;
+  float f = 1.0 - smoothstep(edge - ey, edge + ey, 1.0 - v_uv.y + (v_uv.x - 0.5) * 0.04);
   vec3 col = mix(day, night, f);
 
   if (u_frost > 0.003) {
@@ -284,6 +291,7 @@ export default {
         tw: Math.ceil(sp.w * texScale), th: Math.ceil(sp.h * texScale), canvas: document.createElement("canvas"), ctx: null,
         wetA: 0, wetB: 0, wetD: 0, wetAmt: 0, hl: 0, held: false, wrapped: false, ox: 0, nx: 0, wasVis: true, settle: 0, ax: 0, az: 0, rip: 0, damp: 1.5, mass: 1, cs: 1, slack: 0,
         th1: 0, th1v: 0, ph1: 0, ph1v: 0, frozenSet: false, seed: r.range(0, 10),
+        nightOn: false, turn: 0, fogA: 0, timeSheet: sp.tether === true,
         scallop: new Float32Array(sp.cols),
       };
       c.canvas.width = c.tw;
@@ -1333,11 +1341,11 @@ export default {
     // A cloth carried along by the pulley. Most of the move is carried kinematically (position and its
     // history together, so its own swing is only relative to the line); the rest it feels through its pegs,
     // which gives a little sway as the line starts and stops but never a whip.
-    function haulCloth(c, hl) {
+    function haulCloth(c, hl, rigid = false) {
       const d = hl - c.hl;
       c.hl = hl;
       if (!d) return;
-      const k = 0.85 * d;
+      const k = rigid ? d : 0.85 * d;
       for (let n = c.off + c.cols; n < c.off + c.n; n++) {
         P[n * 3] += k;
         Q[n * 3] += k;
@@ -1412,7 +1420,12 @@ export default {
       }
       printOne(c);
     }
+    let jumpT = -99;
     function runPulleys(s, jumped) {
+      if (jumped) jumpT = s.t;
+      // a change of time in the first moments after the clock jumped belongs to the jump: hang it in place
+      // rather than show a run caught in mid-air
+      if (!jumped && s.t - jumpT < 1.5 && (tx.hh !== disp.hh || tx.ampm !== disp.ampm || tx.mm !== disp.mm || tx.weekday !== disp.weekday)) jumped = true;
       if (jumped) {
         let reset = false;
         for (let i = 0; i < lines.length; i++) {
@@ -1470,6 +1483,9 @@ export default {
           prog = unitHaul(u);
           if (L.phase === 1 && u >= UNIT_OUT) {
             applyTime(i); // out of sight now
+            // it comes home carried flat, as one piece with the line, and is let go to sway only once it is
+            // there: a sheet bowed by the run would fold over itself against the wall as it stops
+            hangFlat(m2);
             L.phase = 2;
           }
           if (u >= UNIT_OUT + UNIT_HOLD + UNIT_BACK) {
@@ -1477,7 +1493,7 @@ export default {
             L.phase = 0;
             m2.settle = 1;
           }
-          haulCloth(m2, prog);
+          haulCloth(m2, prog, L.phase === 2);
         }
         L.spin += prog - L.prog; // the pulley wheels turn with the rope
         L.prog = prog;
@@ -1491,7 +1507,7 @@ export default {
       sky: [new Float32Array(3), new Float32Array(3), new Float32Array(3), new Float32Array(3)],
       skyRaw: [new Float32Array(3), new Float32Array(3), new Float32Array(3), new Float32Array(3)],
       mean: new Float32Array(3), amb: new Float32Array(3), sun: new Float32Array(3), L: new Float32Array(3), moonL: new Float32Array([0.42, -0.5, 0.76]),
-      inkDay: new Float32Array(3), inkNight: new Float32Array(3), night: new Float32Array(3), wetTint: new Float32Array(3),
+      inkDay: new Float32Array(3), inkNight: new Float32Array(3), night: new Float32Array(3),
       fog: new Float32Array(3), sil: new Float32Array(3), cloud: new Float32Array(3), light: new Float32Array(3), lightN: new Float32Array(3),
       rope: new Float32Array(3), ropeN: new Float32Array(3), cord: new Float32Array(3), cordN: new Float32Array(3),
       sunC: new Float32Array(3), skyKey: "", inkKey: -999, lampStrength: 0, stars: 0, sunWarm: 0,
@@ -1548,7 +1564,6 @@ export default {
         const tint = lerp(1, col.mean[k] / mx, tintAmt);
         col.amb[k] = tint * A * env.level;
         col.sun[k] = sunC[k] * S * env.level;
-        col.wetTint[k] = 0.7 - 0.006 * k; // wet cotton is darker, from the cloth, not the sky
         col.light[k] = tint * 0.9 * env.level + sunC[k] * 0.22 * env.sunVis;
       }
       // the night side
@@ -1582,6 +1597,130 @@ export default {
         if (u > 0) flash = Math.min(u / 0.35, 1) * Math.exp(-Math.max(0, u - 0.35) / 1.1) * (0.5 + 0.5 * hash(n, 3)) * env.storm;
       }
       env.flash = flash;
+      toneModel();
+    }
+
+    // ------------------------------------------------------------------
+    // How well the print reads on its cotton: the cloth shader's own sums for a cloth facing the room,
+    // in linear light. They set how dark wet cotton may go, how much fog a printed cloth may wear, and
+    // the moment each cloth turns from its day state (white cotton, dark print) to its night state.
+    // ------------------------------------------------------------------
+    const CLOTH = [0.985, 0.965, 0.93];
+    const lin1 = (v) => (v <= 0.04045 ? Math.max(v, 0) / 12.92 : ((Math.min(v, 1) + 0.055) / 1.055) ** 2.4);
+    const lum3 = (r, g, b) => 0.2126 * lin1(r) + 0.7152 * lin1(g) + 0.0722 * lin1(b);
+    const tone = {
+      k: 1, wetF: 0.7, wetI: 0.8, dryR: 9, wetR: 9, anyWet: false,
+      dc: new Float32Array(3), ink: new Float32Array(3), nc: new Float32Array(3), ni: new Float32Array(3),
+      cap: new Float32Array(4), // the most fog a printed cloth may wear: time sheets by day, by night; small linen by day, by night
+    };
+    // a cloth leaves its day state when that would read under TURN (the time sheets) or TURN_S (the small linen),
+    // and comes back only once it reads TURN_UP better than that; wet cotton and fog are held to HOLD, above
+    // every comeback threshold, so a cloth held there by day can turn back at dawn as it turned at dusk
+    const TURN = 3.5, TURN_S = 3.3, TURN_UP = 0.15, HOLD = 3.75, HOLD_S = 3.6, TURN_TIME = 0.4;
+    // cotton c (times cf; greyed as wet cotton is when wet) against print i (times iff), under a veil of fog a
+    function rat(c, cf, i, iff, a, wet) {
+      let cr = c[0], cg = c[1], cb = c[2];
+      if (wet) {
+        const g = 0.3 * cr + 0.6 * cg + 0.1 * cb;
+        cr = lerp(cr, g, 0.45) * cf; cg = lerp(cg, g, 0.45) * cf * 0.9914; cb = lerp(cb, g, 0.45) * cf * 0.9829;
+      } else { cr *= cf; cg *= cf; cb *= cf; }
+      const f = col.fog;
+      const lc = lum3(lerp(cr, f[0], a), lerp(cg, f[1], a), lerp(cb, f[2], a));
+      const li = lum3(lerp(i[0] * iff, f[0], a), lerp(i[1] * iff, f[1], a), lerp(i[2] * iff, f[2], a));
+      return (Math.max(lc, li) + 0.05) / (Math.min(lc, li) + 0.05);
+    }
+    function fogOk(a, T, night) {
+      if (night) return rat(tone.nc, 1, tone.ni, 1, a, false) >= T && (!tone.anyWet || rat(tone.nc, 0.7, tone.ni, 1, a, false) >= T);
+      return rat(tone.dc, 1, tone.ink, 1, a, false) >= T && (!tone.anyWet || rat(tone.dc, tone.wetF, tone.ink, tone.wetI, a, true) >= T);
+    }
+    function fogCap(amax, T, night) {
+      if (amax <= 0.002 || fogOk(amax, T, night)) return amax;
+      let lo = 0, hi = amax;
+      for (let it = 0; it < 9; it++) {
+        const m = (lo + hi) / 2;
+        if (fogOk(m, T, night)) lo = m;
+        else hi = m;
+      }
+      return lo;
+    }
+    function toneModel() {
+      const Lz = col.L[2];
+      let lumL = 0;
+      for (let k = 0; k < 3; k++) {
+        const l = col.amb[k] + col.sun[k] * Lz;
+        tone.dc[k] = Math.min(CLOTH[k] * l, 1);
+        lumL += l * (k === 0 ? 0.3 : k === 1 ? 0.6 : 0.1);
+      }
+      lumL = Math.min(lumL, 1);
+      // 1 in any daylight worth the name, so a dry day looks as it always has; under it the print darkens with the cotton
+      tone.k = Math.min(1, lumL / 0.8) ** 1.3;
+      const sc = (0.45 + 0.55 * lumL) * tone.k;
+      for (let k = 0; k < 3; k++) {
+        tone.ink[k] = col.inkDay[k] * sc;
+        tone.nc[k] = col.night[k] * (0.42 + 1.05 * col.moonL[2]);
+        tone.ni[k] = col.inkNight[k];
+      }
+      tone.dryR = rat(tone.dc, 1, tone.ink, 1, 0, false);
+      // wet cotton goes to 0.7 of the cloth's tone, but no darker than keeps the print at HOLD; past 0.84 (too
+      // little to tell from dry) it stays there and the wet print darkens instead
+      let wf = 0.7;
+      let wi = 0.8;
+      if (rat(tone.dc, wf, tone.ink, wi, 0, true) < HOLD) {
+        if (rat(tone.dc, 0.84, tone.ink, wi, 0, true) >= HOLD) {
+          let lo = 0.7, hi = 0.84;
+          for (let it = 0; it < 10; it++) {
+            const m = (lo + hi) / 2;
+            if (rat(tone.dc, m, tone.ink, wi, 0, true) >= HOLD) hi = m;
+            else lo = m;
+          }
+          wf = hi;
+        } else {
+          wf = 0.84;
+          let lo = 0.3, hi = 0.8;
+          if (rat(tone.dc, wf, tone.ink, lo, 0, true) < HOLD) wi = lo;
+          else {
+            for (let it = 0; it < 10; it++) {
+              const m = (lo + hi) / 2;
+              if (rat(tone.dc, wf, tone.ink, m, 0, true) >= HOLD) lo = m;
+              else hi = m;
+            }
+            wi = lo;
+          }
+        }
+      }
+      tone.wetF = wf;
+      tone.wetI = wi;
+      tone.wetR = rat(tone.dc, wf, tone.ink, wi, 0, true);
+      tone.anyWet = env.soak > 0.01 || env.damp > 0.01;
+      // fog is thinned over printed cloth as far as the print needs (the sky and the ropes keep theirs)
+      const ft = env.fog * 0.24;
+      const fs = env.fog * 0.17;
+      tone.cap[0] = fogCap(ft, HOLD, false);
+      tone.cap[1] = fogCap(ft, HOLD, true);
+      tone.cap[2] = fogCap(fs, HOLD_S, false);
+      tone.cap[3] = fogCap(fs, HOLD_S, true);
+    }
+    // Each cloth turns when the shadow line reaches it, or sooner, the moment its day state would read under
+    // TURN in this light, wetness and ink; at dawn the same, read the other way. A fresh start takes the side a
+    // running piece would be on (the dawn threshold in the morning), so the two differ by seconds at most.
+    function updateTurns(s, snap) {
+      const morning = s.clock.h24 < 12;
+      for (const c of cloths) {
+        const cy = 1 - (lines[c.line].y + c.h * 0.5) / H;
+        const frontNight = env.front - cy - ((c.x + c.w * 0.5) / W - 0.5) * 0.14 > 0;
+        const wetHere = c.wetA - c.wetD > 0.04 || c.wetB > 0.02;
+        const dayR = wetHere ? Math.min(tone.dryR, tone.wetR) : tone.dryR;
+        const T = (c.timeSheet ? TURN : TURN_S) + 0.04 * c.line; // the lower lines first, so it still climbs the wash
+        if (snap) c.nightOn = frontNight || dayR < (morning ? T + TURN_UP : T);
+        else if (c.nightOn) {
+          if (!frontNight && dayR >= T + TURN_UP) c.nightOn = false;
+        } else if (frontNight || dayR < T) c.nightOn = true;
+        if (snap) c.turn = c.nightOn ? 1 : 0;
+        else c.turn = c.nightOn ? Math.min(1, c.turn + s.dt / TURN_TIME) : Math.max(0, c.turn - s.dt / TURN_TIME);
+        const design = env.fog * (c.line === 0 ? 0.24 : 0.1 + 0.07 * (3 - c.line)); // the hour line no foggier than the minutes
+        const cap = c.timeSheet ? lerp(tone.cap[0], tone.cap[1], c.turn) : lerp(tone.cap[2], tone.cap[3], c.turn);
+        c.fogA = Math.min(design, cap);
+      }
     }
 
     // ------------------------------------------------------------------
@@ -1791,7 +1930,8 @@ export default {
       gl.uniform1f(u.u_front, env.front);
       set3(u.u_L, col.L); set3(u.u_amb, col.amb);
       gl.uniform3f(u.u_cloth, 0.985, 0.965, 0.93);
-      set3(u.u_wetTint, col.wetTint);
+      gl.uniform2f(u.u_wetK, tone.wetF, tone.wetI);
+      gl.uniform1f(u.u_inkK, tone.k);
       set3(u.u_inkDay, col.inkDay); set3(u.u_inkNight, col.inkNight); set3(u.u_night, col.night); set3(u.u_moonL, col.moonL);
       gl.uniform4f(u.u_lamp, LAMP[0], LAMP[1], LAMP[2], lampW);
       gl.uniform3f(u.u_lampCol, LAMP_COL[0], LAMP_COL[1], LAMP_COL[2]);
@@ -1806,10 +1946,8 @@ export default {
         gl.uniform1f(u.u_crumple, 0.1 + 0.07 * c.wetAmt + 0.22 * env.frz);
         gl.uniform3f(u.u_sun, col.sun[0] * c.cs, col.sun[1] * c.cs, col.sun[2] * c.cs);
         gl.uniform3f(u.u_wet, c.wetD > 0.001 ? c.wetD : -1, c.wetA > 0.001 ? c.wetA : -1, c.wetB > 0.001 ? 1.03 - c.wetB : 2);
-        // each cloth turns from sunlit to lamp-lit as a whole, so no line of type is ever split by the shadow
-        const cy = 1 - (lines[c.line].y + c.h * 0.5) / H;
-        gl.uniform1f(u.u_clothNight, smoothstep(-0.015, 0.015, env.front - cy - ((c.x + c.w * 0.5) / W - 0.5) * 0.14));
-        gl.uniform4f(u.u_fog, col.fog[0], col.fog[1], col.fog[2], env.fog * (0.1 + 0.07 * (3 - c.line)));
+        gl.uniform1f(u.u_turn, c.turn);
+        gl.uniform4f(u.u_fog, col.fog[0], col.fog[1], col.fog[2], c.fogA);
         gl.drawElements(gl.TRIANGLES, c.idxN, gl.UNSIGNED_SHORT, c.idx0 * 2);
       }
 
@@ -2029,6 +2167,7 @@ export default {
         else for (const c of cloths) if (!c.frozenSet && c.visible) captureFrozen(c);
         if (s.dt > 1e-4) simulate(s.dt);
         relight(s);
+        updateTurns(s, jumped);
         if (glPending) {
           glPending = false;
           try {
