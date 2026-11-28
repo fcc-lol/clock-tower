@@ -35,7 +35,7 @@
 // and writes a few transforms. The paper texture is a pair of tiles painted
 // into the flat grounds, not an overlay, to keep the layer count down.
 
-import { W, H, TAU, clamp, lerp, smoothstep, remap, approach, rng, mix, adjust, toOklch, el, svg, addStyle } from "../lib/kit.js";
+import { W, H, TAU, clamp, lerp, smoothstep, remap, approach, rng, mix, adjust, toOklch, contrast, el, svg, addStyle } from "../lib/kit.js";
 
 // The print inside its paper margin, and the far waterline.
 const X0 = 44, Y0 = 44, X1 = 1036, Y1 = 1724;
@@ -718,7 +718,26 @@ export default {
     let rainRGB = "28,32,48", rainAlpha = 0.5, snowCol = "#f7f2e4";
     let moonKey = "", birdsWant = 0;
 
-    function palette(s) {
+    // The margin's two ink sets, and how far the type stands between them
+    // (1: sumi, 0: cream). The change of set is a short fade of under a
+    // second, run from frame(), not a blend tied to the light.
+    let marginDark = null, marginK = -1, skyLight = null;
+    const marginSet = { dark: { ink: SUMI, beni: "#a62a20", edge: SUMI }, light: { ink: CREAM_N, beni: "#f08e76", edge: "#2c3040" } };
+    const legible = (base, toward, bg) => {
+      for (let t = 0; t <= 1.001; t += 0.1) {
+        const c = t ? mix(base, toward, t) : base;
+        if (contrast(c, bg) >= 4) return c;
+      }
+      return toward;
+    };
+    const applyMargin = () => {
+      const k = marginK, A = marginSet.light, B = marginSet.dark;
+      for (const [name, key] of [["--ink", "ink"], ["--beniText", "beni"], ["--edge", "edge"]]) {
+        setVar(name, k >= 1 ? B[key] : k <= 0 ? A[key] : mix(A[key], B[key], k));
+      }
+    };
+
+    function palette(s, jump) {
       const w = s.weather;
       const d = s.daylight;
       const dd = smoothstep(0.02, 0.62, d);
@@ -754,7 +773,12 @@ export default {
       let top = mix("#020308", topDay, smoothstep(0.02, 0.7, d));
       top = mix(top, "#030305", 0.6 * f.storm);
       const flatL = toOklch(flat).l;
-      const onLight = flatL > 0.553; // the ground is light: print in sumi; else leave the type as bare paper
+      // the ground is light: print in sumi; else leave the type as bare paper.
+      // Chosen outright, with a little hysteresis so it cannot flicker.
+      // (The dead band lies on the dark-ink side of the crossover: over the warm horizon band the cream ink
+      // touches 3:1 on a lightening sky just under 0.553, where the sumi already stands at 3.7, so the sumi
+      // comes in from 0.548 and is held down to 0.532.)
+      const onLight = (skyLight = skyLight === null || jump ? flatL > 0.548 : flatL > (skyLight ? 0.532 : 0.548));
       // the horizon band climbs higher in heat haze
       // and in the low sun, as a broad warm bokashi rather than a thin line
       const warm = sunLow * dd * (1 - 0.7 * cl);
@@ -769,11 +793,19 @@ export default {
       // half-light and the evening, near-black at night. The passage from
       // cream to indigo is kept to a few minutes either side of sunset.
       const paperC = d >= 0.66 ? mix(PAPER_DUSK, PAPER_D, smoothstep(0.66, 0.74, d)) : mix(PAPER_N, PAPER_DUSK, smoothstep(0.08, 0.6, d));
-      const paperLight = toOklch(paperC).l > 0.553;
       setVar("--paper", paperC);
-      setVar("--ink", paperLight ? SUMI : CREAM_N);
-      setVar("--beniText", paperLight ? "#a62a20" : "#f08e76");
-      setVar("--edge", paperLight ? SUMI : "#2c3040");
+      // The margin's type is printed in one ink set or the other, never a
+      // blend of the two: sumi on the cream, paper-cream on the indigo, chosen
+      // by which stands further from the paper, with a margin either way so it
+      // cannot flicker at the crossover. The red labels keep their beni, cut
+      // deeper (or paler) only while the paper passes through the mid tones.
+      const cS = contrast(SUMI, paperC), cC = contrast(CREAM_N, paperC);
+      if (marginDark === null || jump) marginDark = cS >= cC;
+      else if (marginDark ? cC > cS * 1.08 : cS > cC * 1.08) marginDark = !marginDark;
+      marginSet.dark.beni = legible("#a62a20", "#2e0906", paperC);
+      marginSet.light.beni = legible("#f08e76", "#fff0e8", paperC);
+      if (jump || marginK < 0) marginK = marginDark ? 1 : 0;
+      applyMargin();
       setVar("--timeInk", onLight ? SUMI : mix(CREAM_N, "#f4ecd6", d));
       setVar("--timeKey", onLight ? mix(flat, PAPER_D, 0.85) : mix(flat, "#05060c", 0.8));
       setVar("--beni", mix("#5e1a18", "#bf3427", dd));
@@ -968,7 +1000,14 @@ export default {
         }
         if (jump || s.t - palT > 0.5) {
           palT = s.t;
-          palette(s);
+          palette(s, jump);
+        }
+        {
+          const mT = marginDark ? 1 : 0;
+          if (marginK !== mT) {
+            marginK = mT > marginK ? Math.min(mT, marginK + dt / 0.8) : Math.max(mT, marginK - dt / 0.8);
+            applyMargin();
+          }
         }
 
         // The wind across a view that faces west-north-west: positive blows to the right.
