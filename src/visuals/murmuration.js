@@ -725,7 +725,7 @@ export default {
     const TYPE_NIGHT = "#f5f1e8"; // near-white: at the switch even this only just reads
     const FLIP = 0.168; // sky luminance where dark and pale type read equally well
     const TYPE_HYST = 0.01; // a dead band either side of the type's flip, so its ink cannot flicker
-    let birdFlip = 0.1; // the same for birds, which stay silhouettes for as long as there is daylight
+    let birdFlip = 0.1; // the same for birds: silhouettes by full day, the better ink through twilight
     // Each numeral takes the dark or the pale ink outright (never a blend that
     // passes through the tone of the sky behind it), with a dead band either
     // side of the flip so it cannot flicker, and the change itself is a short
