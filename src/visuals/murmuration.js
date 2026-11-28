@@ -844,7 +844,7 @@ export default {
     // (liftA) and the opacity of its unveiled silhouette (liftO), all blended in sRGB.
     let liftA = 0;
     let liftO = 0;
-    function liftNeed(dark, Lr, aw, op, Vc, Li, night, gl) {
+    function liftNeed(dark, Lr, aw, op, Vc, Li, night, gl, patch) {
       const Vr = srgb(Lr);
       let Vg = Vr * (1 - aw) + cloudV * aw; // the ground
       let V0 = (Vr + (Vc - Vr) * op) * (1 - aw) + cloudV * aw; // the silhouette below, veiled
@@ -867,7 +867,7 @@ export default {
       const Lf = lerp(Ls, unsrgb(V0), night);
       const Gt = dark ? A2 * (Lf + 0.05) - 0.05 : (Lf + 0.05) / A2 - 0.05;
       let a = 0;
-      if (dark ? Lg < Gt : Lg > Gt) {
+      if (patch && (dark ? Lg < Gt : Lg > Gt)) {
         const d = Vp - Vg;
         // (a quarter more than the sum says: the blot thins toward a stroke's tips)
         a = Math.abs(d) < 0.01 ? 1 : clamp((1.25 * (srgb(clamp(Gt)) - Vg)) / d);
@@ -1675,11 +1675,16 @@ export default {
           const Li = dk ? L_DAY : paleLum;
           const Vc = lerp(srgb(L_DAY), srgb(paleLum), S.inkT);
           const Lr = dk ? g.rLo : g.rHi;
-          liftNeed(dk, Lr, g.aMin, op, Vc, Li, dk ? 0 : nightPref, gl);
+          // the digits of a line are set close: a patch would reach under its
+          // neighbour, so where the neighbour has the other ink there is none
+          // (and the silhouette alone holds the figure)
+          const nb = slots[k ^ 1];
+          const patchOk = nb.ch < 0 || nb.light === S.light;
+          liftNeed(dk, Lr, g.aMin, op, Vc, Li, dk ? 0 : nightPref, gl, patchOk);
           let a = liftA;
           let o = liftO;
           if (g.aMax !== g.aMin) {
-            liftNeed(dk, Lr, g.aMax, op, Vc, Li, dk ? 0 : nightPref, gl);
+            liftNeed(dk, Lr, g.aMax, op, Vc, Li, dk ? 0 : nightPref, gl, patchOk);
             a = Math.max(a, liftA);
             o = Math.max(o, liftO);
           }
