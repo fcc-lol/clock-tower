@@ -42,7 +42,7 @@
 // loose cards are small sprites on their own layer. The boards are DOM; the
 // held sheet is cut into 60 px slices that ripple with the wind.
 
-import { TAU, clamp, lerp, smoothstep, rng, hash, createNoise, mix, ramp, rgba, luminance, toOklch, oklch, el, addStyle, canvas2d, grain } from "../lib/kit.js";
+import { TAU, clamp, lerp, smoothstep, rng, hash, createNoise, mix, ramp, rgba, luminance, contrast, toOklch, oklch, el, addStyle, canvas2d, grain } from "../lib/kit.js";
 
 const COLS = 36;
 const ROWS = 64;
@@ -258,7 +258,7 @@ export default {
       stand: "#05060a", eye: "#17181c", snow: "#f5f7fb", flake: "#f5f7fb", rain: "#dfe7f5", loose: "#e9e3d4", loose2: "#9fb6d6", straw: "#e6cd8a",
       sky: new Array(COLS * 3), alt: new Array(COLS * 3), cloud: new Array(COLS * 3), core: new Array(COLS * 3), lap: new Array(COLS),
       lit: new Array(4), litSeam: "#000", ink: new Array(4), inkSeam: "#000", umbHi: new Array(6), skin: new Array(6), skinLit: new Array(6), skinMoat: new Array(6), hair: new Array(8), shirt: new Array(8),
-      beanie: new Array(6), umb: new Array(6), umbDark: new Array(6), veil: new Array(ROWS), veilNum: new Array(ROWS),
+      beanie: new Array(6), umb: new Array(6), umbDark: new Array(6), veil: new Array(ROWS), veilNum: new Array(ROWS), veilHalo: new Array(ROWS),
     };
     const env = {
       cloud: 0, thrCloud: 9, thrCore: 9, lit: false, umb: 0, sleep: 0, snow: 0, beanie: 0, sunhat: 0, fog: 0,
@@ -373,15 +373,13 @@ export default {
         const a = thick * 0.92 * Math.pow(1 - row / ROWS, 1.15);
         P.veil[row] = a > 0.012 ? rgba(fogCol, +a.toFixed(3)) : "";
         P.veilNum[row] = a > 0.08 ? rgba(fogCol, +(a * 0.15).toFixed(3)) : "";
+        // The dark halo round lit numerals takes less of the fog than the crowd,
+        // or in thick fog after dark it greys up to the deep amber of the figures.
+        P.veilHalo[row] = a > 0.012 ? rgba(fogCol, +(a * 0.45).toFixed(3)) : "";
       }
 
-      // Cloth and paint. The cloth is cream by day and dark at night; the paint
-      // flips from ink to amber while the cloth is passing through mid-grey.
-      const k = smoothstep(0.15, 0.17, env.gloomLight); // a short passage: about two minutes of real twilight
-      const day = k > 0.5;
+      // The cloth and its paint are set every frame in updateCloth().
       const st = wrap.style;
-      st.setProperty("--cloth", mix("#17181e", "#f1e7d3", k));
-      st.setProperty("--hem", mix("#2a2b34", "#d6c8ab", k));
       // The boards' lamps are turned down a little after dark.
       st.setProperty("--bink", mix("#d3c7af", "#f3ead8", dayK));
       st.setProperty("--bsoft", mix("#cf9244", "#eba851", dayK));
@@ -389,13 +387,40 @@ export default {
       st.setProperty("--hand1", P.skin[1]);
       st.setProperty("--hand2", P.skin[3]);
       st.setProperty("--hand3", P.skin[0]);
-      if (day !== clothDay) {
-        clothDay = day;
-        st.setProperty("--paint", day ? "#14151c" : "#f6be64");
-        st.setProperty("--soft", day ? "#b0301b" : "#bd8d4c");
-        st.setProperty("--accent", day ? "#b0301b" : "#bd8d4c");
-        st.setProperty("--on", day ? "#f6eedd" : "#17181e");
+    }
+
+    // Cloth and paint. The cloth is cream by day and dark at night, gliding
+    // between the two through a short passage of twilight (about two minutes),
+    // followed every frame, not in the palette's coarse steps. The paint is
+    // never a blend tied to the light: it is the dark ink or the amber outright,
+    // whichever stands further from the cloth as it is now, with hysteresis
+    // (the other must be 10% better before it takes over), so at the switch
+    // both still hold about 3.1:1. The change of paint itself is a one-second fade.
+    const PAINT_DAY = "#14151c", PAINT_NIGHT = "#f6be64";
+    let clothK = -1;
+    let paintMix = -1; // 1 = dark ink, 0 = amber; -1 before the first frame
+    function updateCloth(dt, snap) {
+      const st = wrap.style;
+      const k = smoothstep(0.15, 0.17, env.gloomLight);
+      if (snap || clothK < 0 || Math.abs(k - clothK) > 0.004 || (k !== clothK && (k === 0 || k === 1))) {
+        clothK = k;
+        const cloth = mix("#17181e", "#f1e7d3", k);
+        st.setProperty("--cloth", cloth);
+        st.setProperty("--hem", mix("#2a2b34", "#d6c8ab", k));
+        const cD = contrast(cloth, PAINT_DAY);
+        const cA = contrast(cloth, PAINT_NIGHT);
+        const day = clothDay === null ? cD > cA : clothDay ? cD * 1.1 > cA : cD > cA * 1.1;
+        if (day !== clothDay) {
+          clothDay = day;
+          st.setProperty("--soft", day ? "#b0301b" : "#bd8d4c");
+          st.setProperty("--accent", day ? "#b0301b" : "#bd8d4c");
+          st.setProperty("--on", day ? "#f6eedd" : "#17181e");
+        }
       }
+      const target = clothDay ? 1 : 0;
+      if (paintMix === target) return;
+      paintMix = snap || paintMix < 0 ? target : target > paintMix ? Math.min(target, paintMix + dt) : Math.max(target, paintMix - dt);
+      st.setProperty("--paint", paintMix === 1 ? PAINT_DAY : paintMix === 0 ? PAINT_NIGHT : mix(PAINT_NIGHT, PAINT_DAY, paintMix));
     }
 
     function updateEnv(s) {
@@ -821,7 +846,7 @@ export default {
       const lv = lift[i]; // the stadium wave: 0 seated .. 3 card held high, other face out
       const up = face[i] >= F_INK && face[i] <= F_LIT ? 0 : lv * 3; // numeral holders hold still, so the figure stays whole
       const cx = 15 + jx[i];
-      const veil = f === F_INK || f === F_LIT ? "" : P.veil[row];
+      const veil = f === F_INK || f === F_LIT ? "" : env.lit && role[i] === R_MOAT ? P.veilHalo[row] : P.veil[row];
 
       if ((f === F_INK || f === F_LIT) && open >= 0.97) {
         // A numeral card, settled: it fills the seat, so the cards close up into
@@ -1130,6 +1155,7 @@ export default {
           refreshLeft = N; // repaint everyone once, a few dozen seats a frame
         }
       }
+      updateCloth(clamp(dt, 0, 0.25), jump);
 
       // The clouds ride the wind.
       const adv = env.cloudSpeed * clamp(dms / 1000, 0, 900);
@@ -1164,7 +1190,9 @@ export default {
           if (w === face[i]) continue;
           prev[i] = face[i];
           face[i] = w;
-          const slow = w === F_UMB || prev[i] === F_UMB ? 2.6 : w === F_SLEEP || prev[i] === F_SLEEP ? 5 : 0.5;
+          // the ring round the numerals keeps the numerals' own pace: when they light at dusk or go to ink at
+          // dawn, a ring that lagged left them for a couple of seconds against cards of their own tone
+          const slow = w === F_UMB || prev[i] === F_UMB ? 2.6 : role[i] === R_MOAT ? 0.5 : w === F_SLEEP || prev[i] === F_SLEEP ? 5 : 0.5;
           ap[i] = -hash(i, s.frame) * slow * TURN;
           stage[i] = 0;
           steps[i] = 3;

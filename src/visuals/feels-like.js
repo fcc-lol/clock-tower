@@ -9,7 +9,7 @@
 // heat, interpuncts for dust. After a while the shape of the numerals says what
 // it is like outside before any number is read.
 
-import { W, H, TAU, clamp, lerp, remap, smoothstep, approach, mix, ramp, rgba, contrast, toOklch, oklch, rng, hash, createNoise, el, addStyle, canvas2d, grain, fitText } from "../lib/kit.js";
+import { W, H, TAU, clamp, lerp, remap, smoothstep, approach, mix, ramp, rgba, contrast, luminance, toOklch, oklch, rng, hash, createNoise, el, addStyle, canvas2d, grain, fitText } from "../lib/kit.js";
 
 const M = 96; // side margin
 const MEASURE = W - 2 * M;
@@ -26,6 +26,9 @@ const T = (f) => clamp((f - 5) / 100);
 const PAPER = ramp([[T(5), "#eef3f8"], [T(25), "#cfdae6"], [T(42), "#d8d5cc"], [T(58), "#efe6d1"], [T(72), "#f3cf46"], [T(86), "#f08b2d"], [T(100), "#e2452a"]]);
 const INK = ramp([[T(5), "#1b2fc2"], [T(25), "#11265f"], [T(42), "#1b1b1c"], [T(58), "#1d1a15"], [T(72), "#15120c"], [T(86), "#1c0e06"], [T(100), "#150705"]]);
 const NIGHT_INK = ramp([[T(5), "#b9ccff"], [T(25), "#b4c6e8"], [T(42), "#d5d2c8"], [T(58), "#eadfc6"], [T(72), "#f2d36a"], [T(86), "#ff9d57"], [T(100), "#ff7858"]]);
+const PALE_FLOOR = 4.6; // the least the pale ink may stand from the paper behind it (it is dimmed no further)
+const HALO = 0.21; // in fog: how far the halo takes the paper toward the ink at the edge of a figure (measured)
+const HALO_FLOOR = 3.15; // in fog: the least the ink may stand from that edge
 const NIGHT_PAPER = ramp([[T(5), "#070a14"], [T(42), "#0b0b0d"], [T(72), "#0e0c07"], [T(100), "#120806"]]);
 
 // The punctuation the air is set in.
@@ -161,6 +164,13 @@ export default {
     let refit = true;
     let lastMs = 0;
     let flashShown = 0;
+    let paleInk = null; // the ink in use: pale (on dark paper) or dark (on light paper); null before the first frame
+    let inkFrom = ""; // the ink being faded from when the ink changes
+    let inkFade = 1; // 0 when the ink has just changed, 1 once the fade (about a second) is over
+    let blockH = 0; // the height the block below the time is drawn at, px (0 before the first frame)
+    let glideFrom = 0;
+    let glideTo = 0;
+    let glideT = 1; // 0 when the block has just changed height, 1 once it has glided there
 
     // Sizes the two lines of the time, as one block, to fill the measure or the
     // room between the rules, whichever binds first. `tan` is the lean to leave
@@ -214,8 +224,13 @@ export default {
         const lit = smoothstep(0.1, 0.4, s.daylight);
         const nightFloor = lerp(440, 320, lit);
         const wantWght = Math.round(Math.max(remap(w.temp, 10, 100, 320, 1000), nightFloor) / 4) * 4;
-        // The minute's swell starts from a hairline by day, from that same floor in the dark.
-        const swellFrom = Math.min(wantWght, Math.round(lerp(nightFloor, 140, lit)));
+        // How far the paper has gone from its night tone (0) to its day tone (1).
+        const day = smoothstep(0.4, 0.6, s.daylight);
+        // The minute's swell starts from a hairline on light paper. It follows the
+        // sheet itself, not the light outside: while the sheet is dark paper with
+        // pale ink it never starts thinner than the night floor.
+        const sheetLit = paleInk === false ? smoothstep(0.45, 0.9, day) : 0;
+        const swellFrom = Math.min(wantWght, Math.round(lerp(440, 140, sheetLit)));
         const wantWdth = Math.round(remap(w.humidity, 20, 100, 40, 151));
         const wantBig = `"opsz" 144, "wght" ${wantWght}, "wdth" ${wantWdth}`;
         if (big !== wantBig) {
@@ -258,8 +273,9 @@ export default {
 
         // A wide, heavy instance can push a long line past the measure: let it
         // shrink, and let the size in the margin say so.
-        const fitKey = `${shown.small}|${shown.temp}|${shown.cond}|${shown.sun}|${shown.moon}|${shown.air}|${shown.date}|${shown.factV}`;
-        if (shown.fit !== fitKey) {
+        const fitKey = `${shown.small}|${shown.temp}|${shown.cond}|${shown.sun}|${shown.moon}|${shown.air}|${shown.date}|${shown.factV}|${shown.factShow}`;
+        const relaid = shown.fit !== fitKey;
+        if (relaid) {
           shown.fit = fitKey;
           const measure = MEASURE - LABEL - 24;
           labels.temp.textContent = String(fitText(rows.temp, measure, 132));
@@ -269,6 +285,37 @@ export default {
           if (tx.factValue) fitFact();
           measureBoxes();
           refit = true; // the room left for the figures may have changed
+          // When the block below the time changes height (a fact goes or arrives,
+          // or takes another number of lines) the block and the figures glide to
+          // their new place and size over 0.8 s rather than jumping in one frame;
+          // after a jump of the clock, or on a fresh start, they go straight there.
+          block.style.height = "";
+          const natural = block.offsetHeight;
+          if (blockH > 0 && !jumped && Math.abs(natural - blockH) > 1) {
+            glideFrom = blockH;
+            glideTo = natural;
+            glideT = 0;
+            block.style.height = `${blockH}px`;
+            block.style.clipPath = "inset(-400px -400px 0 -400px)"; // a growing block is revealed from its foot, never drawn into the margin below
+          } else {
+            glideT = 1;
+            blockH = natural;
+            block.style.clipPath = "";
+          }
+        }
+        if (glideT < 1) {
+          glideT = jumped ? 1 : Math.min(1, glideT + s.dt / 0.8);
+          if (glideT >= 1) {
+            block.style.height = "";
+            block.style.clipPath = "";
+            blockH = glideTo;
+          } else {
+            const e = glideT * glideT * (3 - 2 * glideT);
+            blockH = Math.round(lerp(glideFrom, glideTo, e));
+            block.style.height = `${blockH}px`;
+          }
+          refit = true;
+          shown.glide = true;
         }
 
         // ---- the wind leans every line; gusts lean it further and let go ----
@@ -293,6 +340,11 @@ export default {
         if (refit) {
           refit = false;
           fitFigures(Math.tan((reach * Math.PI) / 180), grow);
+          if (shown.glide) {
+            measureBoxes(); // the lines of type have moved: the air keeps clear of them where they are now
+            if (glideT >= 1) shown.glide = false;
+          }
+          if (glideT >= 1) blockH = block.offsetHeight; // (the page is laid out already)
         }
         // The weight of the figures: the instance, or on its way up to it from a
         // hairline after the minute turns. Stepped ten times a second, not every
@@ -321,13 +373,15 @@ export default {
         }
 
         // ---- paper and ink: by temperature, by day and by night ----
-        // The paper crosses from dark to light quickly, so the moment when neither
-        // ink is at its best against it is short.
-        const day = smoothstep(0.4, 0.6, s.daylight);
+        // The paper glides from its night tone to its day tone with `day`. The ink
+        // never glides with it (a blend of the two inks would pass through the
+        // tone of the paper): one of the two is chosen outright, and a change of
+        // ink is a short fade of about a second.
         const twilight = smoothstep(0.02, 0.22, s.daylight) * (1 - smoothstep(0.34, 0.6, s.daylight));
         const tt = T(w.feels);
         const wet = w.falling && w.falling !== "snow" ? 0.12 + 0.2 * w.intensity + (w.kind === "storm" ? 0.14 : 0) : 0;
-        const colorKey = `${Math.round(tt * 60)}/${Math.round(day * 50)}/${Math.round(twilight * 20)}/${w.fog ? 1 : 0}/${Math.round(w.cloud / 10)}/${Math.round(wet * 20)}/${s.sky.mean}`;
+        if (inkFade < 1) inkFade = jumped ? 1 : Math.min(1, inkFade + s.dt / 0.9);
+        const colorKey = `${Math.round(tt * 60)}/${Math.round(day * 50)}/${Math.round(twilight * 20)}/${w.fog ? 1 : 0}/${Math.round(w.cloud / 10)}/${Math.round(wet * 20)}/${s.sky.mean}/${Math.round(inkFade * 15)}`;
         if (shown.color !== colorKey) {
           shown.color = colorKey;
           // Cloud greys the paper; rain darkens it. At dusk and dawn the dark
@@ -336,22 +390,76 @@ export default {
           dayPaper = mix(dayPaper, "#7d8388", wet);
           const nightPaper = mix(NIGHT_PAPER(tt), mix("#000000", s.sky.mean, 0.34), twilight * 0.7);
           const paper = mix(nightPaper, dayPaper, day);
-          const dark = contrast(paper, NIGHT_INK(tt)) > contrast(paper, INK(tt));
-          // At night the warm, heavy instances cover a lot of the sheet: their ink
-          // is held lower in deep night (lightness only, so the hue stays
-          // saturated) and the room is not lit by the figures.
-          const dim = (1 - day) * (0.1 + 0.3 * smoothstep(0.4, 0.85, tt));
-          let ink = INK(tt);
-          if (dark) {
-            const lch = toOklch(NIGHT_INK(tt));
-            ink = oklch(lch.l * (1 - 0.9 * dim), lch.c, lch.h);
+          // The two inks. At night the warm, heavy instances cover a lot of the
+          // sheet: their ink is held lower in deep night (lightness only, so the
+          // hue stays saturated) and the room is not lit by the figures. While
+          // the paper passes through its middle tones neither ink as it is would
+          // stand far enough from it (the dimmed night ink, the blue day ink of
+          // the cold), so there the pale ink is lifted toward white and the dark
+          // ink sunk toward black: whichever is in use keeps well over 4:1. Full
+          // night and full day keep their own inks exactly.
+          const lift = smoothstep(0.02, 0.3, day);
+          const sink = 1 - smoothstep(0.8, 1, day);
+          const veil = w.fog ? 0.2 * (1 - lift * sink) : 0; // the fog's veil over the ink lets go for the crossing
+          const veiled = (c) => (veil > 0 ? mix(c, paper, veil) : c);
+          // The night ink is dimmed only as far as the contrast it leaves allows:
+          // never below about 4.5:1 against the paper actually behind it, fog veil
+          // included (the hot inks, the reds and oranges, are dark for their
+          // brightness and a fixed dimming took them under 3:1). Only the
+          // lightness moves, so the hue of the temperature is kept.
+          const dim = (1 - day) * (0.1 + 0.3 * smoothstep(0.4, 0.85, tt)) * (1 - lift);
+          const pl = toOklch(NIGHT_INK(tt));
+          const holds = (l) => contrast(paper, veiled(oklch(l, pl.c, pl.h))) >= PALE_FLOOR;
+          let paleL = lerp(pl.l * (1 - 0.9 * dim), 0.985, lift);
+          if (!holds(paleL)) {
+            let lo = paleL;
+            let hi = 0.985;
+            for (let i = 0; i < 14; i++) {
+              const mid = (lo + hi) / 2;
+              if (holds(mid)) hi = mid;
+              else lo = mid;
+            }
+            paleL = hi;
           }
-          if (w.fog) ink = mix(ink, paper, 0.2);
+          let pale = veiled(oklch(paleL, pl.c, pl.h));
+          let dark = INK(tt);
+          if (sink > 0) {
+            const dl = toOklch(dark);
+            dark = oklch(lerp(dl.l, Math.min(dl.l, 0.15), sink), dl.c, dl.h);
+          }
+          dark = veiled(dark);
+          // Whichever stands further from the paper, chosen outright and then
+          // kept until the other is clearly better, so it cannot flicker near the
+          // crossing. At the ends (full night, full day) the choice is as it was.
+          let usePale = paleInk;
+          if (day <= 0.02 || day >= 0.98) usePale = contrast(paper, NIGHT_INK(tt)) > contrast(paper, INK(tt));
+          else if (usePale === null || jumped) usePale = contrast(paper, pale) > contrast(paper, dark);
+          else if (usePale ? contrast(paper, dark) > contrast(paper, pale) * 1.12 : contrast(paper, pale) > contrast(paper, dark) * 1.12) usePale = !usePale;
+          if (usePale !== paleInk) {
+            if (paleInk !== null && !jumped && shown.ink) {
+              inkFrom = shown.ink;
+              inkFade = 0;
+            } else inkFade = 1;
+            paleInk = usePale;
+          }
+          const target = usePale ? pale : dark;
+          const ink = inkFade < 1 ? mix(inkFrom, target, smoothstep(0, 1, inkFade)) : target;
           wrap.style.background = paper;
           wrap.style.color = ink;
           flash.style.background = ink;
           // Fog: the figures go out of focus, soft copies of themselves behind the sharp ones.
-          const blur = w.fog ? `0 0 26px ${rgba(ink, 0.55)}, 0 -34px 60px ${rgba(ink, 0.3)}, 0 34px 60px ${rgba(ink, 0.3)}` : "none";
+          // The copies lift (or darken) the paper right at the edge of every figure,
+          // by about a fifth of the way to the ink: where the ink stands only just
+          // clear of the paper (the hot inks at night) they are set softer, so the
+          // edge itself still holds 3:1.
+          let k = 1;
+          if (w.fog) {
+            const li = luminance(ink);
+            const lp = luminance(paper);
+            const hMax = li > lp ? ((li + 0.05) / HALO_FLOOR - 0.05 - lp) / (li - lp) : (lp + 0.05 - HALO_FLOOR * (li + 0.05)) / (lp - li || 1);
+            k = Math.round(clamp(hMax / HALO) * 20) / 20;
+          }
+          const blur = w.fog ? `0 0 26px ${rgba(ink, 0.55 * k)}, 0 -34px 60px ${rgba(ink, 0.3 * k)}, 0 34px 60px ${rgba(ink, 0.3 * k)}` : "none";
           if (shown.blur !== blur) {
             shown.blur = blur;
             hh.style.textShadow = mm.style.textShadow = blur;
