@@ -1094,6 +1094,7 @@ export default {
         const hv = Math.max(smoothstep(0.55, 0.9, cloud), e.wet, e.storm, e.fog, Math.min(1, e.snow * 1.6));
         let seen = null, cA = null, cB = null;
         const AIM = 4.3, EDGE = 0.85; // aimed above 3:1 by what the model leaves out (ripple by ripple, the seen contrast wanders)
+        const LAMIN = 0.008; // the darkest the cobalt is taken for the water's sake: deep blue, not black (beyond it, thin the water)
         U.thin[0] = 1;
         U.thin[1] = 1;
         U.thin[2] = 0;
@@ -1132,7 +1133,7 @@ export default {
           };
           // (dark figures are held against the darkest of the field beside them: toward the pool's ends
           // the floor falls off, and the figures' last row sits there)
-          cA = (th) => (EDGE * seen(0, 0, th, 0) + 0.05) / (seen(0, 1, th, 0) + 0.05); // a black tile
+          cA = (th) => (EDGE * seen(0, 0, th, 0) + 0.05) / (seen(LAMIN, 1, th, 0) + 0.05); // the deepest cobalt
           cB = (th) => (seen(LWHITE, 2, th, th) + 0.05) / (seen(0, 0, th, th) + 0.05); // a white tile
           // which ink reads better, as the water is and as it can be thinned: past the middle by a margin
           const x = 0.5 * (Math.log(cB(0) / cA(0)) + Math.log(cB(1) / cA(1)));
@@ -1172,7 +1173,7 @@ export default {
           }
           // both inks aimed at what is seen (never weaker than the aim at the floor's colour above)
           const SF = seen(0, 0, thin, dp) + 0.05;
-          let lo = 0, hi = LCOB;
+          let lo = LAMIN, hi = LCOB;
           for (let i = 0; i < 12; i++) {
             const m = (lo + hi) / 2;
             if ((SF - 0.05) * EDGE + 0.05 >= AIM * (seen(m, 1, thin, dp) + 0.05)) lo = m;

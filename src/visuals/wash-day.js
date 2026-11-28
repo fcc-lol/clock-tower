@@ -22,9 +22,10 @@
 //              claret, to tomato in the heat). Below about 25 F the wash freezes
 //              in whatever pose the wind left it in and rocks as stiff boards,
 //              with frost on the hems and icicles.
-//   rain       soaks down from the top hem as a dark front, makes the cloth
-//              heavy and less lively, bows the lines and drips from the hems.
-//              After rain, humidity decides how long the hems stay damp.
+//   rain       soaks down from the top hem as a dark grey front, makes the
+//              cloth heavy and less lively, bows the lines and drips from the
+//              hems. When it stops the top dries first and the wet runs down to
+//              the hems; humidity decides how long the hems stay damp.
 //   snow       falls on the real wind and rides the lines.
 //   sky        the background is the measured sky (west on the left, east on
 //              the right); cloud softens the light on the cotton and sends
@@ -36,10 +37,11 @@
 //              it the cotton is dark and the print glows pale, so the room stays
 //              dark at night. A wall lamp warms the nearest cloth after dark.
 //   the clock  on the minute the pulley turns: when only the last digit changes
-//              the line runs just far enough to take that sheet behind the
-//              right-hand wall and back; when the tens change (and on the
-//              hour, for both lines) it runs on round like a conveyor, the old
-//              sheets out to the right and the new ones in from the left.
+//              that sheet alone is drawn along behind the right-hand wall and
+//              back (the tens stay put); when the tens change (and on the
+//              hour, for both lines together) the line runs once round like a
+//              conveyor, the old sheets out to the right as the new ones come
+//              in from the left, so the line is never empty.
 //
 // Technique: one WebGL canvas (the kit has full-screen shaders only, so the
 // small mesh renderer lives in this file). Prints are drawn to 2D canvases when
@@ -159,7 +161,7 @@ uniform vec2 u_size; uniform float u_ratio; uniform float u_seed; uniform float 
 uniform vec3 u_L; uniform vec3 u_amb; uniform vec3 u_sun; uniform vec3 u_cloth; uniform vec3 u_wetTint;
 uniform vec3 u_inkDay; uniform vec3 u_inkNight; uniform vec3 u_night; uniform vec3 u_moonL;
 uniform vec4 u_lamp; uniform vec3 u_lampCol;
-uniform vec2 u_wet; uniform float u_frost; uniform vec4 u_fog; uniform float u_flash; uniform float u_clothNight;
+uniform vec3 u_wet; uniform float u_frost; uniform vec4 u_fog; uniform float u_flash; uniform float u_clothNight;
 ${FRONT}
 void main() {
   vec4 pr = texture2D(u_tex, v_uv);
@@ -170,13 +172,15 @@ void main() {
   n = normalize(n + vec3((nz.rg - 0.5) * u_crumple, 0.0));
   float ink = clamp(pr.r + pr.g * 0.3, 0.0, 1.0);
 
-  float wv = v_uv.y + (nz.b - 0.5) * 0.12;
-  float wet = max(1.0 - smoothstep(u_wet.x - 0.025, u_wet.x + 0.025, wv), smoothstep(u_wet.y - 0.025, u_wet.y + 0.025, wv));
+  // wet cotton: a soaked band from u_wet.x down to u_wet.y, and the damp hems below u_wet.z; the
+  // edge is soft and nearly level, with only a slight wave along the weave
+  float wv = v_uv.y + (texture2D(u_noise, vec2(q.x / 420.0 + u_seed, 0.31)).b - 0.5) * 0.035;
+  float wet = max(smoothstep(u_wet.x - 0.04, u_wet.x + 0.04, wv) * (1.0 - smoothstep(u_wet.y - 0.04, u_wet.y + 0.04, wv)), smoothstep(u_wet.z - 0.04, u_wet.z + 0.04, wv));
 
   // by day: white cotton under the sky and the sun
   vec3 light = u_amb + u_sun * mix(u_L.z, max(dot(n, u_L), 0.0), u_shade);
   vec3 dayC = min(u_cloth * light, vec3(1.0));
-  dayC = mix(dayC, dayC * u_wetTint, wet);
+  dayC = mix(dayC, mix(dayC, vec3(dot(dayC, vec3(0.3, 0.6, 0.1))), 0.45) * u_wetTint, wet); // darker and greyer, in the cloth's own tone
   float lum = min(dot(light, vec3(0.3, 0.6, 0.1)), 1.0);
   vec3 inkD = u_inkDay * (0.45 + 0.55 * lum) * (1.0 - 0.2 * wet);
   vec3 day = mix(dayC, inkD, ink) * (1.0 - pr.b * 0.1);
@@ -264,7 +268,7 @@ export default {
     // ------------------------------------------------------------------
     // The lines and the wash
     // ------------------------------------------------------------------
-    const lines = LINE_Y.map((y) => ({ y, sag: 10, bob: 0, haul: 0, phase: 0, t0: 0, dur: 1, dist: 0, full: false, prog: 0, spin: 0 }));
+    const lines = LINE_Y.map((y) => ({ y, sag: 10, bob: 0, phase: 0, t0: 0, loop: 1, full: false, prog: 0, spin: 0, oldSingle: false, newSingle: false }));
     const lineY = (L, x) => {
       const k = (x - 540) / 496;
       return L.y + L.bob + L.sag * (1 - k * k);
@@ -278,7 +282,7 @@ export default {
         idx0: indexCount, idxN: (sp.cols - 1) * (sp.rows - 1) * 6,
         visible: true, sig: null, dirty: false, tex: null,
         tw: Math.ceil(sp.w * texScale), th: Math.ceil(sp.h * texScale), canvas: document.createElement("canvas"), ctx: null,
-        wetA: 0, wetB: 0, wetAmt: 0, ax: 0, az: 0, rip: 0, damp: 1.5, mass: 1, cs: 1, slack: 0,
+        wetA: 0, wetB: 0, wetD: 0, wetAmt: 0, hl: 0, held: false, wrapped: false, ox: 0, nx: 0, wasVis: true, settle: 0, ax: 0, az: 0, rip: 0, damp: 1.5, mass: 1, cs: 1, slack: 0,
         th1: 0, th1v: 0, ph1: 0, ph1v: 0, frozenSet: false, seed: r.range(0, 10),
         scallop: new Float32Array(sp.cols),
       };
@@ -332,7 +336,7 @@ export default {
       for (let j = 0; j < c.rows; j++) {
         for (let i = 0; i < c.cols; i++) {
           const k3 = (c.off + j * c.cols + i) * 3;
-          const x = c.x + L.haul + i * c.dx;
+          const x = c.x + c.hl + i * c.dx;
           P[k3] = Q[k3] = x;
           P[k3 + 1] = Q[k3 + 1] = lineY(L, x) + c.scallop[i] + j * c.dy * 0.985;
           P[k3 + 2] = Q[k3 + 2] = 0;
@@ -581,28 +585,32 @@ export default {
     // when a whole bundle of data arrives the rest follow in the next frames, the time sheets first.
     let printBudget = Infinity;
     let printsPending = false;
+    function printOne(c, sig = signature(c)) {
+      c.sig = sig;
+      if (c.key === "h1") c.visible = sig !== "";
+      if (c.key === "fact") {
+        // no fact today: the tea towel is not hung out at all
+        const show = tx.factValue !== "";
+        if (show && !c.visible) hangFlat(c);
+        c.visible = show;
+      }
+      if (c.visible || c.key !== "h1") {
+        print(c);
+        c.dirty = true;
+        printBudget--;
+      }
+    }
     function refreshPrints(force) {
       printsPending = false;
       for (const c of cloths) {
+        if (c.held) continue; // on its way round the pulley: printed afresh when it is out of sight
         const sig = signature(c);
         if (!force && sig === c.sig) continue;
         if ((c.key !== "h1" || sig !== "") && printBudget <= 0) {
           printsPending = true;
           continue;
         }
-        c.sig = sig;
-        if (c.key === "h1") c.visible = sig !== "";
-        if (c.key === "fact") {
-          // no fact today: the tea towel is not hung out at all
-          const show = tx.factValue !== "";
-          if (show && !c.visible) hangFlat(c);
-          c.visible = show;
-        }
-        if (c.visible || c.key !== "h1") {
-          print(c);
-          c.dirty = true;
-          printBudget--;
-        }
+        printOne(c, sig);
       }
       // A fact may use letters outside the subset already loaded: ask for them, and print again when they arrive.
       if (tx.factValue && tx.factValue !== fontsAsked && document.fonts?.load) {
@@ -613,11 +621,16 @@ export default {
         }, () => {});
       }
     }
-    function layoutHours() {
-      // two digits fill the line; one digit and the pillowcase hang as a centred pair
+    // where a cloth hangs at rest: two hour digits fill the line; one digit and the pillowcase hang as a centred pair
+    function restX(c) {
       const two = disp.hh.length > 1;
-      shiftCloth(byKey.h2, two ? 386 : 235);
-      shiftCloth(byKey.ap, two ? 846 : 695);
+      if (c.key === "h2") return two ? 386 : 235;
+      if (c.key === "ap") return two ? 846 : 695;
+      return SPEC[c.i].x;
+    }
+    function layoutHours() {
+      shiftCloth(byKey.h2, restX(byKey.h2));
+      shiftCloth(byKey.ap, restX(byKey.ap));
     }
     layoutHours();
     byKey.h1.visible = disp.hh.length > 1;
@@ -980,10 +993,10 @@ export default {
     // The weather as the wash feels it
     // ------------------------------------------------------------------
     const env = {
-      haze: 0, glow: 0, wind: 0, gust: 0, dirX: 0, dirZ: 1, dirRad: 0, frz: 0, frost: 0, wet: 0, damp: 0, rain: 0, snow: 0, snowCap: 0, fog: 0, storm: 0, flash: 0,
+      haze: 0, glow: 0, wind: 0, gust: 0, dirX: 0, dirZ: 1, dirRad: 0, frz: 0, frost: 0, wet: 0, soak: 0, dry: 0, damp: 0, rain: 0, snow: 0, snowCap: 0, fog: 0, storm: 0, flash: 0,
       cover: 0, sunVis: 0, level: 1, front: 0, night: 0, lampOn: 0, simT: r.range(0, 500), lastH: 1 / 30, warm: true,
     };
-    function readWeather(s, dt, snap) {
+    function readWeather(s, dt, snap, cdt = 0) {
       const wx = s.weather;
       env.wind = wx.wind;
       env.gust = Math.max(wx.gust, wx.wind);
@@ -1001,14 +1014,27 @@ export default {
       env.frz = smoothstep(26.5, 23.5, wx.temp);
       env.frost = smoothstep(33, 24, wx.temp) * (1 - env.rain);
       env.snowCap = approach(env.snowCap, f === "snow" ? clamp(0.45 + wx.intensity * 0.8) : 0, dt, snap ? 1e-6 : 20);
-      // rain soaks down from the top hem; how far depends on how hard it is coming down
-      const target = raining ? 0.34 + 0.95 * wx.intensity : 0;
-      env.wet = approach(env.wet, target, dt, snap ? 1e-6 : target > env.wet ? 25 : 70);
       // after rain the hems stay damp for a while: longer in humid air
       let since = 99;
       for (let k = s.pastHours.length - 1; k >= 0 && since === 99; k--) if (s.pastHours[k].precip > 0.01) since = s.pastHours.length - k - 0.5;
       const dryHours = 1 + 4.5 * clamp(wx.humidity / 100) ** 2;
       env.damp = raining || wx.temp < 30 ? 0 : clamp(1 - since / dryHours) * 0.7;
+      // rain soaks down from the top hem; how far depends on how hard it is coming down. When it stops the
+      // water runs down and the cotton dries from the top, so the wet ends at the hems, where the damp-hems
+      // model takes over (dried by the clock, not the animation: drying is real time)
+      const target = raining ? 0.34 + 0.95 * wx.intensity : 0;
+      if (snap) {
+        env.soak = target;
+        env.dry = 0;
+      } else if (raining) {
+        env.soak = approach(env.soak, target, dt, target > env.soak ? 25 : 70);
+        env.dry = approach(env.dry, 0, dt, 5);
+      } else if (env.soak > 0) {
+        env.soak = Math.min(1.06, env.soak + cdt / 40);
+        env.dry += cdt / 170;
+        if (env.dry >= 1.03 - 0.6 * env.damp) env.soak = env.dry = 0;
+      }
+      env.wet = Math.max(0, env.soak - env.dry);
     }
 
     // ------------------------------------------------------------------
@@ -1046,7 +1072,7 @@ export default {
       // the gusts make the wash breathe in and out, whatever the bearing
       c.az = Math.cos(dir) * A + A * 0.55 * (pulse - 0.45) * (c.tether ? 1 : 0.6);
       c.rip = A * (1 + 0.6 * clamp((env.gust - env.wind) / 14)) + GRAV * 0.035;
-      c.damp = 1.5 + 2.2 * c.wetAmt * (1 - 0.6 * env.storm);
+      c.damp = 1.5 + 2.2 * c.wetAmt * (1 - 0.6 * env.storm) + 4 * c.settle; // a sheet just hauled in settles quickly
       // the cords at a sheet's bottom corners give in a wind, so it can belly like a sail; in a calm it hangs plumb
       c.slack = approach(c.slack, 0.09 * smoothstep(3, 30, spd) * (1 - 0.7 * env.frz) * (1 - 0.3 * c.wetAmt), dt, 1.5);
       c.mass = 1 + 0.35 * c.wetAmt;
@@ -1062,14 +1088,15 @@ export default {
       c.th1 += c.th1v * dt;
       c.ph1v += (-w0 * w0 * (c.ph1 - (c.ax / GRAV) * 0.1 * hold) - 0.55 * c.ph1v) * dt;
       c.ph1 += c.ph1v * dt;
-      // cloud shadows crossing the yard
-      c.cs = 1 - 0.8 * Math.sin(Math.PI * env.cover) * smoothstep(-0.1, 0.5, noise.n3(cx * 0.0007 - t * 0.02 * env.dirX, cy * 0.0006, t * 0.035 + 40));
+      // cloud shadows crossing the yard: slow (20 to 30 s to come over the wash, as long to pass) and
+      // shallow (half the sunlight at most), so the picture never pulses
+      c.cs = 1 - 0.5 * Math.sin(Math.PI * env.cover) * smoothstep(-0.3, 0.55, noise.n3(cx * 0.0005 - t * 0.006 * env.dirX, cy * 0.0004, t * 0.016 + 40));
     }
     function pinTop(c) {
       const L = lines[c.line];
       for (let i = 0; i < c.cols; i++) {
         const k3 = (c.off + i) * 3;
-        const x = c.x + L.haul + i * c.dx;
+        const x = c.x + c.hl + i * c.dx;
         P[k3] = x;
         P[k3 + 1] = lineY(L, x) + c.scallop[i];
         P[k3 + 2] = 0;
@@ -1133,14 +1160,14 @@ export default {
           // elastic cords from the bottom corners to the lower line
           for (let s = 0; s < 2; s++) {
             const k3 = (last + (s ? cols - 1 : 0)) * 3;
-            const tx0 = c.x + L.haul + (s ? c.w : 0) + (c.ax / GRAV) * 26;
+            const tx0 = c.x + c.hl + (s ? c.w : 0) + (c.ax / GRAV) * 26;
             const ty0 = lineY(L, tx0) + c.h * (0.972 - c.slack);
             P[k3] += (tx0 - P[k3]) * 0.16;
             P[k3 + 1] += (ty0 - P[k3 + 1]) * 0.16;
             P[k3 + 2] += -P[k3 + 2] * 0.16;
           }
           // the hem is stitched heavy: it may swing in and out but does not roll up sideways
-          const off0 = c.x + L.haul + (c.ax / GRAV) * 26;
+          const off0 = c.x + c.hl + (c.ax / GRAV) * 26;
           for (let i = 1; i < cols - 1; i++) {
             const k3 = (last + i) * 3;
             P[k3] += (off0 + i * dx - P[k3]) * 0.05;
@@ -1153,7 +1180,7 @@ export default {
           const drop = drop0 / Math.sqrt(1 + lean * lean);
           for (let s = 0; s < 2; s++) {
             const k3 = (last + (s ? cols - 1 : 0)) * 3;
-            const px = c.x + L.haul + (s ? c.w : 0);
+            const px = c.x + c.hl + (s ? c.w : 0);
             const tx0 = px + lean * drop;
             const ty0 = lineY(L, px) + drop;
             P[k3] += (tx0 - P[k3]) * 0.06;
@@ -1179,7 +1206,7 @@ export default {
         }
       }
       // the courtyard walls: cloth on the line never swings out of sight behind them
-      if (L.haul === 0) {
+      if (c.hl === 0) {
         for (let k = off + cols, e = off + c.n; k < e; k++) {
           const k3 = k * 3;
           let z = P[k3 + 2];
@@ -1266,9 +1293,12 @@ export default {
       const h = dt / sub;
       for (const c of cloths) {
         // each cloth soaks or dries toward the weather, a little out of step with its neighbours
-        c.wetA = env.wet > 0.01 ? env.wet * (0.9 + 0.2 * hash(c.i, 5)) + 0.02 * Math.sin(t * 0.2 + c.i) : 0;
+        // the soaked band runs from wetD (0 while it rains; it moves down as the top dries) to wetA
+        c.wetA = env.soak > 0.01 ? env.soak * (0.9 + 0.2 * hash(c.i, 5)) + 0.02 * Math.sin(t * 0.2 + c.i) : 0;
+        c.wetD = c.wetA > 0 ? env.dry : 0;
         c.wetB = env.damp * (0.6 + 0.4 * hash(c.i, 9));
-        c.wetAmt = clamp(c.wetA + c.wetB * 0.5);
+        c.wetAmt = clamp(Math.max(0, c.wetA - c.wetD) + c.wetB * 0.5);
+        c.settle = approach(c.settle, 0, dt, 0.45);
         if (c.visible) feelWind(c, dt);
       }
       for (let sIdx = 0; sIdx < sub; sIdx++) {
@@ -1300,28 +1330,105 @@ export default {
       }
       refreshPrints(false);
     }
-    function shiftLine(i, d) {
-      // the whole line moves at once (cloth, its velocity and all), so a sheet carried round is not torn
+    // A cloth carried along by the pulley. Most of the move is carried kinematically (position and its
+    // history together, so its own swing is only relative to the line); the rest it feels through its pegs,
+    // which gives a little sway as the line starts and stops but never a whip.
+    function haulCloth(c, hl) {
+      const d = hl - c.hl;
+      c.hl = hl;
+      if (!d) return;
+      const k = 0.85 * d;
+      for (let n = c.off + c.cols; n < c.off + c.n; n++) {
+        P[n * 3] += k;
+        Q[n * 3] += k;
+      }
+    }
+    // The units sheet alone is drawn along the line behind the right-hand wall and back (the tens stay put):
+    // out, a beat out of sight while it is changed, and back.
+    const UNIT_D = 560;
+    const UNIT_OUT = 0.65;
+    const UNIT_HOLD = 0.2;
+    const UNIT_BACK = 0.75;
+    function unitHaul(u) {
+      if (u < UNIT_OUT) return UNIT_D * smoothstep(0, 1, u / UNIT_OUT);
+      if (u < UNIT_OUT + UNIT_HOLD) return UNIT_D;
+      return UNIT_D * (1 - smoothstep(0, 1, (u - UNIT_OUT - UNIT_HOLD) / UNIT_BACK));
+    }
+    // When every sheet on a line changes, the pulley runs the line on round like a conveyor, once round a
+    // loop of length L.loop: each sheet goes out behind the right-hand wall (HIDE_R), comes back in from
+    // behind the left one with its new print, and is home at the end. The old set leaves as the new set
+    // arrives, so the line is never empty.
+    const RUN = 2.2;
+    const HIDE_R = W - WALL + 40; // a sheet whose left edge is past this is wholly out of sight
+    function startRun(i) {
+      const L = lines[i];
+      L.oldSingle = disp.hh.length === 1;
       for (const c of cloths) {
         if (c.line !== i) continue;
-        for (let k = c.off; k < c.off + c.n; k++) {
-          P[k * 3] += d;
-          Q[k * 3] += d;
-        }
+        c.ox = c.x;
+        c.wasVis = c.visible;
+        c.held = true;
+        c.wrapped = false;
       }
+      if (i === 0) {
+        disp.hh = tx.hh;
+        disp.ampm = tx.ampm;
+      } else {
+        disp.mm = tx.mm;
+        disp.weekday = tx.weekday;
+        disp.monthDay = tx.monthDay;
+      }
+      L.newSingle = disp.hh.length === 1;
+      // the loop is long enough that a sheet out of sight on the right is also out of sight when it goes
+      // up on the left, even where the new layout hangs it further right (a new first hour digit)
+      let loop = 0;
+      for (const c of cloths) {
+        if (c.line !== i) continue;
+        c.nx = restX(c);
+        loop = Math.max(loop, HIDE_R - WALL + 40 + Math.max(0, c.nx - c.ox) + c.w);
+      }
+      L.loop = loop;
+      for (const c of cloths) {
+        if (c.line !== i || c.wasVis) continue;
+        // not on the line before (a new first hour digit): it comes round with the new set
+        c.wrapped = true;
+        c.held = false;
+        c.x = c.nx;
+        c.hl = -loop;
+        printOne(c);
+        if (c.visible) hangFlat(c);
+      }
+    }
+    function wrapCloth(c, L) {
+      // out of sight on the right: it goes up out of sight on the left with its new print
+      const d = c.nx - c.ox - L.loop;
+      c.wrapped = true;
+      c.held = false;
+      c.x = c.nx;
+      c.hl -= L.loop;
+      for (let n = c.off; n < c.off + c.n; n++) {
+        P[n * 3] += d;
+        Q[n * 3] += d;
+      }
+      printOne(c);
     }
     function runPulleys(s, jumped) {
       if (jumped) {
+        let reset = false;
         for (let i = 0; i < lines.length; i++) {
-          const L = lines[i];
-          L.phase = 0;
-          if (L.haul) {
-            L.haul = 0;
-            for (const c of cloths) if (c.line === i) hangFlat(c);
-          }
+          if (lines[i].phase) reset = true;
+          lines[i].phase = 0;
+        }
+        for (const c of cloths) {
+          c.held = false;
+          c.hl = 0;
         }
         applyTime(0);
         applyTime(1);
+        if (reset) {
+          for (const c of cloths) if (c.line < 2) shiftCloth(c, restX(c));
+          for (const c of cloths) if (c.line < 2) hangFlat(c);
+        }
         return;
       }
       const hourChanged = tx.hh !== disp.hh || tx.ampm !== disp.ampm;
@@ -1329,44 +1436,51 @@ export default {
       for (let i = 0; i < 2; i++) {
         const L = lines[i];
         if (L.phase === 0 && (i === 0 ? hourChanged : minChanged)) {
-          // When every sheet on the line changes, the pulley runs the line on round like a conveyor: the old
-          // sheets go out behind the right-hand wall and the new ones come in from the left, in one smooth
-          // run. When only the last minute digit changes, the line goes just far enough to take that sheet
-          // behind the wall and comes back, so the tens stay in view.
+          // the hours line (on the hour) and the minutes line (when the tens or the day change) run round
+          // together, so the time is out of sight once, briefly, and never shows a new hour with old minutes
           L.full = i === 0 || tx.mm[0] !== disp.mm[0] || tx.weekday !== disp.weekday;
-          L.dist = L.full ? 966 : 500;
-          L.dur = L.full ? 3.6 : 3;
           L.phase = 1;
           L.t0 = s.t;
           L.prog = 0;
+          if (L.full) startRun(i);
         }
-        if (L.phase) {
-          const p = clamp((s.t - L.t0) / L.dur);
-          let prog;
-          if (L.full) {
-            prog = 2 * L.dist * p * p * (3 - 2 * p);
-            if (L.phase === 1 && prog >= L.dist) {
-              shiftLine(i, -2 * L.dist);
-              L.phase = 2;
-              L.haul = prog - 2 * L.dist; // a sheet hung out now (a new first hour digit) goes up where the line now is
-              applyTime(i);
-            }
-            L.haul = L.phase === 2 ? prog - 2 * L.dist : prog;
-          } else {
-            L.haul = (L.dist * (1 - Math.cos(TAU * p))) / 2;
-            prog = L.haul;
-            if (L.phase === 1 && p >= 0.5) {
-              applyTime(i);
-              L.phase = 2;
-            }
+        if (!L.phase) continue;
+        const u = s.t - L.t0;
+        let prog;
+        if (L.full) {
+          const p = clamp(u / RUN);
+          prog = L.loop * smoothstep(0, 1, p);
+          for (const c of cloths) {
+            if (c.line !== i) continue;
+            if (!c.wrapped && c.ox + prog >= HIDE_R) wrapCloth(c, L);
+            haulCloth(c, c.wrapped ? prog - L.loop : prog);
           }
-          L.spin += prog - L.prog; // the pulley wheels turn with the rope
-          L.prog = prog;
           if (p >= 1) {
             L.phase = 0;
-            L.haul = 0;
+            for (const c of cloths) {
+              if (c.line !== i) continue;
+              haulCloth(c, 0);
+              c.held = false;
+              c.settle = 1;
+            }
+            refreshPrints(false);
           }
+        } else {
+          const m2 = byKey.m2;
+          prog = unitHaul(u);
+          if (L.phase === 1 && u >= UNIT_OUT) {
+            applyTime(i); // out of sight now
+            L.phase = 2;
+          }
+          if (u >= UNIT_OUT + UNIT_HOLD + UNIT_BACK) {
+            prog = 0;
+            L.phase = 0;
+            m2.settle = 1;
+          }
+          haulCloth(m2, prog);
         }
+        L.spin += prog - L.prog; // the pulley wheels turn with the rope
+        L.prog = prog;
       }
     }
 
@@ -1434,7 +1548,7 @@ export default {
         const tint = lerp(1, col.mean[k] / mx, tintAmt);
         col.amb[k] = tint * A * env.level;
         col.sun[k] = sunC[k] * S * env.level;
-        col.wetTint[k] = lerp(0.8, (col.mean[k] / mx) * 0.86, 0.35);
+        col.wetTint[k] = 0.7 - 0.006 * k; // wet cotton is darker, from the cloth, not the sky
         col.light[k] = tint * 0.9 * env.level + sunC[k] * 0.22 * env.sunVis;
       }
       // the night side
@@ -1525,7 +1639,7 @@ export default {
         const L = lines[c.line];
         for (let s = 0; s < 2; s++) {
           const k3 = (c.off + (c.rows - 1) * c.cols + (s ? c.cols - 1 : 0)) * 3;
-          const ax = c.x + L.haul + (s ? c.w - 3 : 3);
+          const ax = c.x + c.hl + (s ? c.w - 3 : 3);
           strip(projX(P[k3], P[k3 + 2]), projY(P[k3 + 1], P[k3 + 2]), ax, cordY(L, ax), 0.9);
         }
       }
@@ -1559,10 +1673,15 @@ export default {
         if (p.bottom) quad(x + (p.tilt > 0 ? 3 : -3), y + 5, 5.5, 15, Math.PI + p.tilt, PEG[0], PEG[1], PEG[2], PEG[3], 0);
         else quad(x, y + 3, 5.5, 15, p.tilt, PEG[0], PEG[1], PEG[2], PEG[3], 0);
       }
-      if (disp.hh.length === 1) {
-        const L = lines[0];
-        for (const p of spare) quad(p.x + L.haul, lineY(L, p.x + L.haul) + 4, 5.5, 15, p.tilt, PEG[0], PEG[1], PEG[2], PEG[3], 0);
-      }
+      const L0 = lines[0];
+      const spareAt = (x, tilt) => quad(x, lineY(L0, x) + 4, 5.5, 15, tilt, PEG[0], PEG[1], PEG[2], PEG[3], 0);
+      if (L0.phase && L0.full) {
+        // the spare pegs go round with the line too: the old layout's out to the right, the new one's in from the left
+        for (const p of spare) {
+          if (L0.oldSingle && p.x + L0.prog < W) spareAt(p.x + L0.prog, p.tilt);
+          if (L0.newSingle && p.x + L0.prog - L0.loop > 0) spareAt(p.x + L0.prog - L0.loop, p.tilt);
+        }
+      } else if (disp.hh.length === 1) for (const p of spare) spareAt(p.x, p.tilt);
       if (!byKey.fact.visible) {
         const L = lines[3];
         for (const p of spareFact) quad(p.x, lineY(L, p.x) + 4, 5.5, 15, p.tilt, PEG[0], PEG[1], PEG[2], PEG[3], 0);
@@ -1686,7 +1805,7 @@ export default {
         gl.uniform1f(u.u_shade, c.tether ? 1 : 0.62);
         gl.uniform1f(u.u_crumple, 0.1 + 0.07 * c.wetAmt + 0.22 * env.frz);
         gl.uniform3f(u.u_sun, col.sun[0] * c.cs, col.sun[1] * c.cs, col.sun[2] * c.cs);
-        gl.uniform2f(u.u_wet, c.wetA > 0.001 ? c.wetA : -1, c.wetB > 0.001 ? 1.03 - c.wetB : 2);
+        gl.uniform3f(u.u_wet, c.wetD > 0.001 ? c.wetD : -1, c.wetA > 0.001 ? c.wetA : -1, c.wetB > 0.001 ? 1.03 - c.wetB : 2);
         // each cloth turns from sunlit to lamp-lit as a whole, so no line of type is ever split by the shadow
         const cy = 1 - (lines[c.line].y + c.h * 0.5) / H;
         gl.uniform1f(u.u_clothNight, smoothstep(-0.015, 0.015, env.front - cy - ((c.x + c.w * 0.5) / W - 0.5) * 0.14));
@@ -1896,9 +2015,10 @@ export default {
         // when the clock jumps (a time-lapse) everything goes straight to the new state, or the time sheets,
         // which change in every frame of a fast lapse, would keep the small linen waiting
         printBudget = jumped && !first ? Infinity : 2;
+        const cdt = clamp((s.ms - lastMs) / 1000, 0, 3); // seconds of clock since the last frame
         lastMs = s.ms;
         first = false;
-        readWeather(s, s.dt, jumped);
+        readWeather(s, s.dt, jumped, cdt);
         runPulleys(s, jumped);
         if (s.clock.s !== lastSecond || jumped || printsPending) {
           lastSecond = s.clock.s;
