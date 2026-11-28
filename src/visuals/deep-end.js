@@ -186,6 +186,96 @@ const COL = {
 };
 
 // ---------------------------------------------------------------------------
+// What the water lays over the floor, on average: the shader's own surface
+// slopes (swell, cat's-paws, rain cells) and its ice line, evaluated at a fixed
+// sample of points round the figures, each at its own moment, so the palette
+// can aim at the contrast that is seen rather than at the floor's colour. The
+// sample is fixed, so the result is a smooth function of the conditions.
+// ---------------------------------------------------------------------------
+
+const NSAMP = 96;
+const SAMP = new Float32Array(NSAMP * 4); // x, y, wave clock, cat's-paw travel
+{
+  const r = rng(9173);
+  for (let i = 0; i < NSAMP; i++) {
+    SAMP[i * 4] = lerp(PX0 + 120, PX1 - 120, ((i % 8) + r()) / 8);
+    SAMP[i * 4 + 1] = lerp(PY0 + 110, PY1 - 170, (Math.floor(i / 8) + r()) / 12);
+    SAMP[i * 4 + 2] = r() * 400;
+    SAMP[i * 4 + 3] = r() * 5000;
+  }
+}
+const fract = (x) => x - Math.floor(x);
+const hashJ = (x, y, a, b) => fract(Math.sin(x * a + y * b) * 43758.5453);
+function vnoiseJ(x, y) {
+  const ix = Math.floor(x), iy = Math.floor(y);
+  let fx = x - ix, fy = y - iy;
+  fx = fx * fx * (3 - 2 * fx);
+  fy = fy * fy * (3 - 2 * fy);
+  const a = hashJ(ix, iy, 127.1, 311.7), b = hashJ(ix + 1, iy, 127.1, 311.7), c = hashJ(ix, iy + 1, 127.1, 311.7), d = hashJ(ix + 1, iy + 1, 127.1, 311.7);
+  return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
+}
+const RC = [0, 0];
+function rainCellsJ(px, py, cell, time, dens, salt) {
+  let ax = 0, ay = 0;
+  const bx = Math.floor(px / cell - 0.5), by = Math.floor(py / cell - 0.5);
+  for (let j = 0; j < 2; j++)
+    for (let i = 0; i < 2; i++) {
+      const idx = bx + i, idy = by + j;
+      const hx = hashJ(idx + salt, idy + salt, 127.1, 311.7), hy = hashJ(idx + salt, idy + salt, 269.5, 183.3);
+      const ph = time * (0.5 + 0.45 * hx) + hy * 9;
+      const n = Math.floor(ph), u = ph - n;
+      const X = idx * 1.37 + n * 0.713 + salt, Y = idy * 1.37 + n * 0.713 + salt;
+      if (hashJ(X, Y, 419.2, 371.9) > dens) continue;
+      const dvx = px - (idx + 0.25 + 0.5 * hashJ(X, Y, 127.1, 311.7)) * cell;
+      const dvy = py - (idy + 0.25 + 0.5 * hashJ(X, Y, 269.5, 183.3)) * cell;
+      const d = Math.hypot(dvx, dvy) + 0.001;
+      const x = d - u * cell * 0.5;
+      const w = (Math.sin(x * 0.55) * Math.exp((-x * x) / (cell * 0.22 + 14)) * (1 - u) * (1 - u)) / d;
+      ax += dvx * w;
+      ay += dvy * w;
+    }
+  RC[0] = ax;
+  RC[1] = ay;
+}
+const nrm = (x, y) => [x / Math.hypot(x, y), y / Math.hypot(x, y)];
+const WD1 = nrm(1, 0.32), WD2 = nrm(1, -0.5), WD3 = nrm(1, 1.2); // the swells, for a wind along +x (the statistics do not care which way)
+// out: mean of smoothstep(0.3, 1.5, steepness) (what drives the sky's reflection), mean steepness,
+// mean ring-crest highlight, mean ice cover over the figures
+function waterStats(out, amp, ruffle, rx, ry, rz, hlA, ice) {
+  let S = 0, ST = 0, HL = 0, C = 0;
+  for (let i = 0; i < NSAMP; i++) {
+    const px = SAMP[i * 4], py = SAMP[i * 4 + 1], t = SAMP[i * 4 + 2], tr = SAMP[i * 4 + 3];
+    const p1 = px * WD1[0] + py * WD1[1], p2 = px * WD2[0] + py * WD2[1], p3 = px * WD3[0] + py * WD3[1];
+    const a1 = p1 * 0.0235 - t * 1.7;
+    const c1 = Math.cos(a1 + 0.9 * Math.sin(py * 0.0105 + t * 0.37));
+    const c2 = 0.62 * Math.cos(p2 * 0.039 - t * 2.3 + 1.2 * Math.sin(p3 * 0.016 - t * 0.5));
+    const c3 = 0.36 * Math.cos(p3 * 0.064 - t * 2.9 + Math.sin(a1 * 0.5));
+    const sx = WD1[0] * c1 + WD2[0] * c2 + WD3[0] * c3 + 0.5 * Math.cos(py * 0.0121 + t * 0.61 + Math.sin(px * 0.0083 + t * 0.2));
+    const sy = WD1[1] * c1 + WD2[1] * c2 + WD3[1] * c3 + 0.5 * Math.cos(px * 0.0137 - t * 0.53 + Math.sin(py * 0.0091));
+    const pm = vnoiseJ((px - tr) * 0.004, py * 0.004);
+    const patch = smoothstep(0.5, 0.74, pm) * ruffle;
+    const c4 = 0.7 * Math.cos(p2 * 0.22 - t * 4.7);
+    const rsx = (Math.cos(px * 0.29 - t * 6 + pm * 12) + WD2[0] * c4) * patch, rsy = WD2[1] * c4 * patch;
+    let rgx = 0, rgy = 0;
+    if (rx > 0) (rainCellsJ(px, py, 150, t, rx, 3), (rgx += RC[0] * rz), (rgy += RC[1] * rz));
+    if (ry > 0) (rainCellsJ(px, py, 62, t * 1.25, ry, 17), (rgx += RC[0] * rz * 0.55), (rgy += RC[1] * rz * 0.55));
+    const dEdge = Math.min(PHW - Math.abs(px - PCX), PHH - Math.abs(py - PCY));
+    const cover = ice > 0.002 ? smoothstep(-150, 150, ice * (PHW + 150) - dEdge) : 0;
+    const open = 1 - cover;
+    const st = Math.hypot(sx * amp * 0.12 + rsx * 0.22 + rgx * 0.22, sy * amp * 0.12 + rsy * 0.22 + rgy * 0.22) * open;
+    S += smoothstep(0.3, 1.5, st);
+    ST += st;
+    HL += clamp((-0.45 * rgx - 0.89 * rgy) * hlA, -0.25, 0.6) * open;
+    C += cover;
+  }
+  out[0] = S / NSAMP;
+  out[1] = ST / NSAMP;
+  out[2] = HL / NSAMP;
+  out[3] = C / NSAMP;
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // The water.
 // ---------------------------------------------------------------------------
 
@@ -222,6 +312,7 @@ uniform sampler2D u_glow;    // the figures blurred (linear filtering): the halo
 uniform vec4 u_glowC;        // rgb: colour of the pool lights, a: how much they are on
 uniform float u_cap;         // most the floor may be displaced, px: digits wobble but never smear
 uniform vec4 u_hl;           // rgb: what the crest of a ring catches, a: how much
+uniform vec3 u_thin;         // x: how much of the surface reflection, y: of the veils (1, 1: all of it), z: grout darkened in the figures
 
 const vec2 GRID = vec2(${GW}.0, ${GH}.0);
 
@@ -352,7 +443,7 @@ void main() {
     vec3 tile = mix(fieldc, inkc, ink) * (1.0 - 0.1 * (f.x + f.y));
     float e = max(abs(f.x) / max(tx.a, 0.04), abs(f.y));
     float g = smoothstep(0.445 - aa, 0.445 + aa, e);
-    col = mix(tile, mix(u_grout, tile, 0.55 * ink), g);
+    col = mix(tile, mix(u_grout, tile, (0.55 + u_thin.z) * ink), g);
     col *= 0.8 + 0.2 * smoothstep(0.0, 0.035, 1.0 - max(abs(w.x), abs(w.y)));
     vec2 sp = w - u_sun.xy;
     shade = max(smoothstep(0.985, 1.02, abs(sp.x)), smoothstep(0.985, 1.02, abs(sp.y)));
@@ -418,6 +509,7 @@ void main() {
   float steep = length(sl);
   float fres = u_refl.x + u_refl.y * smoothstep(0.3, 1.5, steep);
   fres *= 1.0 - 0.75 * ink * pale * u_glowC.a; // a dark sky never blots out the lit figures
+  fres *= u_thin.x; // heavy weather: the reflection thinned where no ink could hold against it
   col = mix(col, sky * (1.0 + 0.2 * steep), clamp(fres, 0.0, 0.7));
   col *= 1.0 - 0.09 * patch * open; // a cat's-paw: a matte, darker ruffled patch moving downwind
   // Sun glints: where a wave tilts to mirror the sun. Kept off the figures.
@@ -427,7 +519,7 @@ void main() {
   // Ring crests catch the light: rain reads in any light.
   col += u_hl.rgb * (clamp(dot(rg, vec2(-0.45, -0.89)) * u_hl.a, -0.25, 0.6) * open);
 
-  float guard = 1.0 - 0.55 * ink; // keep veils from washing out the time
+  float guard = (1.0 - 0.55 * ink) * u_thin.y; // keep veils from washing out the time (thinner still in heavy weather)
   if (u_cold.y > 0.002) {
     // slush rafts
     float sn = fbm((p - d * u_wave.w * 0.3) * 0.0068 + 5.0);
@@ -738,8 +830,27 @@ export default {
       wind: [1, 0], wave: [0, 0, 0, 0], light: [0, 0, 0, 0], sunCol: [1, 1, 1], sun: [0, 0, 0, -1], glint: [0, 0, 60],
       skyW: [0, 0, 0], skyNW: [0, 0, 0], skyNE: [0, 0, 0], skyE: [0, 0, 0], refl: [0, 0],
       rain: [0, 0, 0, 0], cold: [0, 0, 0, 0], veil: [0, 0, 0], float: [0, 0, 0, 0],
-      glowC: [0, 0, 0, 0], hl: [0, 0, 0, 0], cap: 6,
+      glowC: [0, 0, 0, 0], hl: [0, 0, 0, 0], cap: 6, thin: [1, 1, 0],
     };
+    // pale tiles: glaze, lifted toward white until it reaches `want`
+    const paleInk = (out, want, steps = 6) => {
+      let k = 0;
+      if (lum(COL.glaze) < want) {
+        let lo = 0, hi = 1;
+        for (let i = 0; i < steps; i++) {
+          k = (lo + hi) / 2;
+          if (lum(mix3(tmp, COL.glaze, COL.white, k)) < want) lo = k;
+          else hi = k;
+        }
+        k = hi;
+      }
+      return mix3(out, COL.glaze, COL.white, k);
+    };
+    const WS = [0, 0, 0, 0];
+    let wsAt = -1e9;
+    let paleOn = -1, flipH = 0, thinE = 0, deepE = 0; // heavy weather: the ink chosen outright, the turn, the thinning
+    let flipNow = 0; // the turn as last worked out (0 cobalt .. 1 pale): the fallback draws by it too
+    const LGLAZE = lum(COL.glaze), LWHITE = lum(COL.white), LCOB = lum(COL.cobalt), VGLOW = Math.pow(lum(COL.glow), 1 / 2.2);
     const RING_U = ["u_r0", "u_r1", "u_r2", "u_r3", "u_r4", "u_r5", "u_r6", "u_r7"];
     const rings = [];
     for (let i = 0; i < 8; i++) rings.push({ u: [0, 0, 0, 0], age: 9, life: 1, amp: 0 });
@@ -809,7 +920,7 @@ export default {
       ctx.fillStyle = css(U.grout);
       ctx.fillRect(PX0, PY0, PX1 - PX0, PY1 - PY0);
       const ts = (PX1 - PX0) / GW;
-      const pale = s.daylight < 0.5;
+      const pale = flipNow > 0.5; // the same turn as the water's, so the ink is the one the palette made for this floor
       for (let y = 0; y < GH; y++)
         for (let x = 0; x < GW; x++) {
           const i = y * GW + x;
@@ -887,25 +998,15 @@ export default {
         mix3(tmp, COL.fNight, skyMean, 0.1);
         mix3(f, tmp, f, dw);
         const F = lum(f);
-        // (the tiles turn over where a solid dark and a solid pale tile read equally well against the field)
-        const flip = smoothstep(0.195, 0.16, F);
+        // (the tiles turn over where a solid dark and a solid pale tile read equally well against the
+        // field: from F in clear weather, from what is seen through the water in heavy weather, below)
         // dark tiles: cobalt, deepened until it holds against the field
         const wantA = Math.max(0.002, (F + 0.05) / 4.4 - 0.05);
         mul3(U.inkA, COL.cobalt, Math.min(1, Math.pow(wantA / 0.043, 1 / 2.2)));
         // pale tiles: glaze, lifted until it holds against the field
         // (aimed well past 3:1: ripples, grout and the sky on the water take about a fifth of it back)
         const wantB = 4.8 * (F + 0.05) - 0.05;
-        let k = 0;
-        if (lum(COL.glaze) < wantB) {
-          let lo = 0, hi = 1;
-          for (let i = 0; i < 6; i++) {
-            k = (lo + hi) / 2;
-            if (lum(mix3(tmp, COL.glaze, COL.white, k)) < wantB) lo = k;
-            else hi = k;
-          }
-          k = hi;
-        }
-        mix3(U.inkB, COL.glaze, COL.white, k);
+        paleInk(U.inkB, wantB);
         mix3(tmp, f, COL.white, 0.62);
         mul3(U.grout, f, 0.5);
         mix3(U.grout, U.grout, tmp, dw);
@@ -980,6 +1081,118 @@ export default {
           const u = s.t - at;
           if (hash(n + 40, seed) < 0.7 && u > 0 && u < 3) flash = (u < 0.35 ? smoothstep(0, 0.35, u) : Math.pow(1 - (u - 0.35) / 2.65, 2)) * 0.2 * e.storm;
         }
+
+        // ----- what is seen -----
+        // The palette above aims each ink at the floor's colour. Through the water the eye gets that
+        // colour with the sky reflected over it, ring crests, grout, veils of steam, slush and ice, and
+        // from dusk the lamps and the halo of the lit tiles. In clear water that takes about a fifth of
+        // the contrast back, which the palette allows for; in heavy weather (overcast, rain, storm, fog,
+        // snow) it takes far more. So there the inks are aimed at the contrast that is seen, the tiles
+        // turn over outright (with hysteresis, in a second) to whichever ink can be made to read better,
+        // and where even a white or the deepest cobalt tile could not hold, the reflection, the veils and the
+        // crests are thinned, and under pale figures the floor deepened (dark water under a heavy sky).
+        // In clear and partly cloudy weather none of this runs: the palette is exactly as above.
+        const hv = Math.max(smoothstep(0.55, 0.9, cloud), e.wet, e.storm, e.fog, Math.min(1, e.snow * 1.6));
+        let seen = null, cA = null, cB = null;
+        const AIM = 4.3, EDGE = 0.85; // aimed above 3:1 by what the model leaves out (ripple by ripple, the seen contrast wanders)
+        const LAMIN = 0.008; // the darkest the cobalt is taken for the water's sake: deep blue, not black (beyond it, thin the water)
+        U.thin[0] = 1;
+        U.thin[1] = 1;
+        U.thin[2] = 0;
+        if (hv > 0) {
+          if (jump || s.t - wsAt > 0.5) {
+            wsAt = s.t;
+            waterStats(WS, U.wave[0], U.wave[1], U.rain[0], U.rain[1], U.rain[2], U.hl[3], ice);
+          }
+          const gk = U.glowC[3];
+          const toV = (L) => Math.pow(Math.max(0, L), 1 / 2.2); // the shader mixes display values
+          const litM = 1 - 0.12 * lamp; // the lamp's pool of light over the figures, on average
+          const vSky = toV(lum(skyMean)) * (1 + 0.2 * WS[1]);
+          const phi = clamp(U.refl[0] + U.refl[1] * WS[0], 0, 0.7);
+          const vHl = toV(lum(U.hl)) * WS[2];
+          const vVeil = toV(lum(U.veil));
+          const veilA = clamp(WS[3] * (0.23 + U.cold[2] * 0.12) + U.cold[1] * (1 - WS[3]) * 0.12 + U.cold[3] * 0.29);
+          const vField = toV(F) * litM;
+          const vGrout = toV(lum(U.grout)) * litM;
+          const vHalo = 0.09 * gk * VGLOW + 0.014 * lamp;
+          // what a tile of luminance L shows: kind 0 the field beside the figures, 1 a dark tile, 2 a
+          // pale one; the overlay thinned by th, and the floor deepened and its grout darkened by dp
+          seen = (L, kind, th, dp) => {
+            const vf = vField * (1 - 0.3 * dp);
+            const vg = lerp(vGrout, vf * 0.9, 0.7 * dp);
+            let v;
+            if (kind === 0) v = vf + (vg - vf) * 0.12 + vHalo;
+            else {
+              v = toV(L) * litM;
+              if (kind === 2) v = v * (1 - 0.55 * gk) + 0.74 * gk * VGLOW;
+              v += (vg - v) * (0.45 - 0.35 * th) * 0.25; // the grout inside the figure
+            }
+            v += (vSky - v) * phi * (1 - 0.6 * th) * (kind === 2 ? 1 - 0.75 * gk : 1);
+            v += vHl * (1 - 0.5 * th);
+            v += (vVeil - v) * veilA * (kind ? 0.45 : 1) * (1 - 0.5 * th);
+            return Math.pow(clamp(v), 2.2);
+          };
+          // (dark figures are held against the darkest of the field beside them: toward the pool's ends
+          // the floor falls off, and the figures' last row sits there)
+          cA = (th) => (EDGE * seen(0, 0, th, 0) + 0.05) / (seen(LAMIN, 1, th, 0) + 0.05); // the deepest cobalt
+          cB = (th) => (seen(LWHITE, 2, th, th) + 0.05) / (seen(0, 0, th, th) + 0.05); // a white tile
+          // which ink reads better: the one that can hold the aim at all, and between two that can, the
+          // one that reads better through the water as it is (decided past the middle by a margin)
+          const x = Math.log(Math.min(AIM, cB(1)) / Math.min(AIM, cA(1))) + Math.log(cB(0) / cA(0));
+          if (jump || paleOn < 0) paleOn = x > 0 ? 1 : 0;
+          else if (paleOn === 0 && x > 0.06) paleOn = 1;
+          else if (paleOn === 1 && x < -0.06) paleOn = 0;
+        }
+        if (hv > 0) flipH = jump ? paleOn : flipH + clamp(paleOn - flipH, -dt / 1.2, dt / 1.2); // the turn takes a second
+        else flipH = smoothstep(0.195, 0.16, F); // (so heavy weather sets in from where the tiles are)
+        const flip = smoothstep(0.195, 0.16, F) * (1 - hv) + flipH * hv;
+        flipNow = flip;
+        if (hv > 0) {
+          // how much to thin the overlay so that an extreme tile still holds
+          const need = (c) => {
+            if (c(0) >= AIM) return 0;
+            if (c(1) < AIM) return 1;
+            let lo = 0, hi = 1;
+            for (let i = 0; i < 10; i++) {
+              const m = (lo + hi) / 2;
+              if (c(m) >= AIM) hi = m;
+              else lo = m;
+            }
+            return hi;
+          };
+          // (while the tiles turn both inks are on the floor: both must hold)
+          const thinT = hv * Math.max(need(cA) * Math.min(1, (1 - flip) * 4), need(cB) * Math.min(1, flip * 4));
+          const deepT = thinT * flip;
+          thinE = jump ? thinT : approach(thinE, thinT, dt, 0.4);
+          deepE = jump ? deepT : approach(deepE, deepT, dt, 0.4);
+          const thin = thinE, dp = deepE;
+          if (thin > 0) {
+            mul3(f, f, 1 - 0.3 * dp);
+            mix3(U.grout, U.grout, mul3(tmp, f, 0.9), 0.7 * dp);
+            U.hl[3] *= 1 - 0.5 * thin;
+            U.thin[0] = 1 - 0.6 * thin;
+            U.thin[1] = 1 - 0.5 * thin;
+            U.thin[2] = 0.35 * thin;
+          }
+          // both inks aimed at what is seen (never weaker than the aim at the floor's colour above)
+          const SF = seen(0, 0, thin, dp) + 0.05;
+          let lo = LAMIN, hi = LCOB;
+          for (let i = 0; i < 12; i++) {
+            const m = (lo + hi) / 2;
+            if ((SF - 0.05) * EDGE + 0.05 >= AIM * (seen(m, 1, thin, dp) + 0.05)) lo = m;
+            else hi = m;
+          }
+          const wA = lerp(wantA, Math.min(wantA, lo), hv);
+          mul3(U.inkA, COL.cobalt, Math.min(1, Math.pow(Math.max(0.002, wA) / 0.043, 1 / 2.2)));
+          lo = LGLAZE;
+          hi = LWHITE;
+          for (let i = 0; i < 12; i++) {
+            const m = (lo + hi) / 2;
+            if ((seen(m, 2, thin, dp) + 0.05) / SF >= AIM) hi = m;
+            else lo = m;
+          }
+          paleInk(U.inkB, lerp(wantB, Math.max(wantB, hi), hv), 10);
+        } else paleOn = -1;
 
         // ----- the mosaic -----
         const stamp = s.text.hh + ":" + s.text.mm + s.text.ampm;
@@ -1094,6 +1307,7 @@ export default {
           water.set("u_glowC", U.glowC);
           water.set("u_hl", U.hl);
           water.set("u_cap", U.cap);
+          water.set("u_thin", U.thin);
           water.draw(s.t);
         } else if (fallback && (jump || s.t - cssAt > 0.5)) drawFallback(s);
 
