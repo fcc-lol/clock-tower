@@ -524,7 +524,7 @@ export default {
     // give way as soon as the faces are lifted at all, and are gone by lift 0.4
     const fanK = () => Math.max(0, 1 - 2.5 * lift);
     let WL = (WL_HIGH + WL_LOW) / 2;
-    let haze = 0, direct = 0, night = 0;
+    let haze = 0, direct = 0, night = 0, haloW = 1;
     let driftX = 0;
     let sceneKey = "", sceneDue = -1, lastPaint = -1, snowDepth = 0, snowKey = "", capsKey = "";
     let glitX = -999, glitK = 0, glitDp = 0;
@@ -733,10 +733,9 @@ export default {
       const sunGlow = s.sun.alt > -7 && s.sun.alt < 14 ? inView * (1 - cloud * 0.75) * (1 - haze) * Math.sin(((s.sun.alt + 7) / 21) * Math.PI) : 0;
 
       // The floodlights: on or off outright, decided from the sky right behind the
-      // numerals. They come on as soon as the day ink can no longer hold about
-      // 3.8:1 against it (and the lit faces would do better), go off again only
-      // once the day ink is comfortably clear (hysteresis), and in between they
-      // never dwell half on: frame() ramps them over a second. The lit faces are
+      // numerals: on when the lit faces would read better against it than the day
+      // ink does, off when the day ink reads better (see lampScore below), and in
+      // between they never dwell half on: frame() ramps them over a second. The lit faces are
       // lifted toward pale sodium wherever plain amber would not hold 3.8:1 (3.5:1
       // at the tops) against the brightest sky behind them (a dark storm by day,
       // early dusk); at night they are the amber they always were.
@@ -768,6 +767,7 @@ export default {
       const rows = [[[HOUR_BASE - 10, xs], [MIN_BASE - 10, xs], [HOUR_BASE - 100, xs], [MIN_BASE - 100, xs]],
         [[HOUR_TOP + 180, xs], [MIN_TOP + 180, xs], [MIN_BASE - 0.45 * AH, xa]],
         [[HOUR_TOP + 8, xs], [MIN_TOP + 8, xs], [MIN_BASE - AH + 8, xa]]];
+      const samples = [];
       rows.forEach((ys, k) => {
         for (const [y, xr] of ys) for (const x of xr) {
           let c = over(cW, cN, clamp((x / W - 0.28) / 0.72));
@@ -775,14 +775,21 @@ export default {
           c = over(c, cZ, zenA * clamp(1 - y / zenEndC));
           if (sunGlow > 0.02) c = over(c, cS, 0.72 * sunGlow * clamp(1 - Math.hypot((x - glitX) / 820, (y - WL) / 470) / 0.72));
           const v = veilAt(y);
-          const lit = over(c, cHalo, haloK * haloAt(x, y) * (k ? 1 : 0.75)); // (the feet stand in the fans' brightest light)
-          // a storm's cloud now and then brightens behind the numerals: allow for it
-          const hi = storm ? over(lit, cSwell, 0.153 * clamp(1 - Math.hypot((x - 660) / 900, (y - 300) / 520) / 0.7)) : lit;
+          samples.push([k, x, y, c, v]);
           behind.push([k, lumOf(c), v, seenL(c, v)]);
-          const Lh = seenL(hi, v);
-          if (Lh >= skyHi[k]) { skyHi[k] = Lh; veilK[k] = v; }
         }
       });
+      // The halo only warms up once the sky behind the numerals is dark (with
+      // the sky, never in a step): against a sky still light it adds nothing
+      // but a glow that the lifted faces would have to outshine.
+      haloW = 1 - smoothstep(0.08, 0.17, Math.max(...behind.map((b) => b[3])));
+      for (const [k, x, y, c, v] of samples) {
+        const lit = over(c, cHalo, haloK * haloW * haloAt(x, y) * (k ? 1 : 0.75)); // (the feet stand in the fans' brightest light)
+        // a storm's cloud now and then brightens behind the numerals: allow for it
+        const hi = storm ? over(lit, cSwell, 0.153 * clamp(1 - Math.hypot((x - 660) / 900, (y - 300) / 520) / 0.7)) : lit;
+        const Lh = seenL(hi, v);
+        if (Lh >= skyHi[k]) { skyHi[k] = Lh; veilK[k] = v; }
+      }
       // The day ink. By day the upper faces take a little of the sky's colour;
       // as the light goes in twilight they keep to the plain ink, which reads longer.
       const skyTint = smoothstep(0.25, 0.85, dl);
@@ -823,7 +830,6 @@ export default {
       if (P.jump || lampOn === null) lampOn = lampScore > 1;
       else if (lampOn ? lampScore < 0.965 : lampScore > 1.035) lampOn = !lampOn;
       lampT = lampOn ? 1 : 0;
-      wrap.dataset.dbg = `${dayC.toFixed(2)},${litC.toFixed(2)},${lampScore.toFixed(3)},${lampOn ? 1 : 0},${lift.toFixed(2)}|${skyHi.map((v) => v.toFixed(3))}|${nightF.map((c, k) => seenL(c, veilK[k]).toFixed(3))}|${behind.map((b) => b[3].toFixed(3))}`; // DEBUG
       // the ink of a zone: whichever of the two reads better against the worst of
       // what is behind it, switched in one step; a soft halo of the ground's own
       // colour pushed away from the ink keeps it clear in the half-light
@@ -952,7 +958,7 @@ export default {
       const lampS = lamp.toFixed(3), fanS = (lamp * fanK()).toFixed(3);
       setAttr("fanM", minFans, "opacity", fanS); setAttr("fanH", hourFans, "opacity", fanS);
       setAttr("dots", lampDots, "opacity", lampS); setAttr("dlit", deckLit, "opacity", lampS);
-      setStyle("halo", halo, "opacity", (lamp * clamp(0.3 + 0.7 * haze + (wx.falling ? 0.25 : 0))).toFixed(3));
+      setStyle("halo", halo, "opacity", (lamp * haloK * haloW).toFixed(3));
       setAttr("slights", shoreLights, "opacity", (night * (1 - clamp(haze * 1.5))).toFixed(2));
       setAttr("shoreY", shoreG, "transform", `translate(0 ${WL})`);
       setStyle("wl", water, "transform", `translateY(${WL}px)`);
