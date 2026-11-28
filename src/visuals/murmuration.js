@@ -411,10 +411,10 @@ export default {
       p.width = GC + 2 * PM;
       p.height = GR + 2 * PM;
       const pc = p.getContext("2d");
-      pc.filter = "blur(4px)";
+      pc.filter = "blur(3.5px)";
       pc.fillStyle = pc.strokeStyle = "#fff";
       pc.lineJoin = "round";
-      pc.lineWidth = 84;
+      pc.lineWidth = 96;
       pc.scale(1 / CELL, 1 / CELL);
       pc.font = FONT;
       pc.textBaseline = "alphabetic";
@@ -854,7 +854,8 @@ export default {
       let a = 0;
       if (dark ? Lg < Gt : Lg > Gt) {
         const d = Vp - Vg;
-        a = Math.abs(d) < 0.01 ? 1 : clamp((srgb(clamp(Gt)) - Vg) / d);
+        // (a quarter more than the sum says: the blot thins toward a stroke's tips)
+        a = Math.abs(d) < 0.01 ? 1 : clamp((1.25 * (srgb(clamp(Gt)) - Vg)) / d);
       }
       const G1 = unsrgb(Vg + (Vp - Vg) * a);
       const V1 = V0 + (Vp - V0) * a; // the stroke under the patch
