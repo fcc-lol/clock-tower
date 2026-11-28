@@ -59,7 +59,7 @@ const INK_LIGHT = "#f6ecd2";
 // set in light flowers on a shaded patch); `head`, `head2`, `head3` are winter's
 // dark seed heads, standing on the bleached field when it is bright enough.
 const SEASONS = {
-  winter: { tones: ["#93876a", "#b0a27e", "#c8ba96", "#ddd2b2", "#f1ead6"], ground: "#a39672", stalk: "#3b2c1e", head: "#22150d", head2: "#2e1c11", head3: "#1a120c", petal: "#eef3f8", petal2: "#f8fafc", night: "#b2c9de", pale: "#e4eef7", centre: "#6b5037", hl: 11, hw: 9.5 },
+  winter: { tones: ["#93876a", "#b0a27e", "#c8ba96", "#ddd2b2", "#f1ead6"], ground: "#a39672", stalk: "#28341e", head: "#22150d", head2: "#2e1c11", head3: "#1a120c", petal: "#eef3f8", petal2: "#f8fafc", night: "#b2c9de", pale: "#e4eef7", centre: "#6b5037", hl: 11, hw: 9.5 },
   spring: { tones: ["#4c9c37", "#72bb3c", "#95d247", "#b8e35f", "#e3f5ba"], ground: "#62ab3a", stalk: "#15432b", head: "#b30d6e", head2: "#d2318a", head3: "#9a0c5e", petal: "#ffc4e1", petal2: "#ffd8ec", night: "#ff5fae", pale: "#ffb7d8", centre: "#ffe7a0", hl: 7, hw: 13 },
   summer: { tones: ["#439534", "#64b035", "#88c83f", "#aedd57", "#ddf0b0"], ground: "#55a235", stalk: "#103821", head: "#a50f19", head2: "#c4221d", head3: "#8a0c14", petal: "#ffbfa8", petal2: "#ffd3c2", night: "#f0452e", pale: "#ffa089", centre: "#1a0c0c", hl: 2, hw: 14.5 },
   autumn: { tones: ["#a67a2e", "#c59a40", "#dab455", "#ebcf7c", "#f7e9bd"], ground: "#b58c38", stalk: "#4a3a22", head: "#4a27b4", head2: "#6843d8", head3: "#3b1f95", petal: "#d9ccff", petal2: "#e6deff", night: "#9a7dff", pale: "#d0c1ff", centre: "#ffc93a", hl: 2, hw: 13.5 },
@@ -588,7 +588,7 @@ export default {
     // Colour. Everything is recomputed only when the light or weather moves.
     // ---------------------------------------------------------------------
     const fieldCol = new Array(NBUCKET).fill("#000");
-    const pal = { head: new Array(7).fill("#000"), bud: ["#000", "#000"], stalk: "#000", centreD: "#000", centreL: "#000", fieldL: 0.2, fieldLow: 0.2, darkNeed: 0.16, winterSide: false, shadeCol: "#000", shadeA: 0, liftCol: "#000", liftA: 0, inkPick: 0, ink2L: "#000", ink2D: "#000", accent: "#000", bead: "#000", rain: "#000", flake: "#000", flake2: "#000", hl: 4, hw: 13, groundLum: 0 };
+    const pal = { head: new Array(7).fill("#000"), bud: ["#000", "#000"], stalk: "#000", centreD: "#000", centreL: "#000", fieldL: 0.2, fieldLow: 0.2, winterSide: false, shadeCol: "#000", shadeA: 0, liftCol: "#000", liftA: 0, inkPick: 0, ink2L: "#000", ink2D: "#000", accent: "#000", bead: "#000", rain: "#000", flake: "#000", flake2: "#000", hl: 4, hw: 13, groundLum: 0 };
     let season = null, seasonDay = -1;
     let sigA = -1, sigB = -1, sigSky = "";
     // Which side each ink is on, chosen outright with hysteresis, and a short
@@ -678,9 +678,10 @@ export default {
       // takes to keep the flowers 3:1 and more, so it fades out as the field
       // darkens toward evening. Spring, summer and autumn are always on this
       // side, so their time never changes ink.
-      // DARK: winter's near-black seed heads, on the bleached field, wherever
-      // that field is bright enough to hold them (bright winter days, snow);
-      // on duller days and in the evening winter turns to the light side.
+      // DARK: winter's near-black seed heads, in a pale clearing. Winter takes
+      // whichever side needs the lighter patch (dark on snow, frost-pale on
+      // bare bleached grass and in the evening), chosen outright, with a gap
+      // so it cannot flicker: at most one change a dusk and one a dawn.
       const capL = (c, top) => adjust(c, { l: (v) => Math.min(v, top) });
       const floorL = (c, bot) => adjust(c, { l: (v) => Math.max(v, bot) });
       const veil = (c) => mix(c, hazeCol, headHaze);
@@ -688,8 +689,6 @@ export default {
       pal.head[1] = veil(capL(season.head2, 0.27));
       pal.head[2] = veil(capL(season.head3, 0.23));
       const darkMax = Math.max(luminance(pal.head[0]), luminance(pal.head[1]), luminance(pal.head[2]));
-      // the field must be this bright to carry the dark heads at 3.3:1
-      pal.darkNeed = 3.3 * (darkMax + 0.05) - 0.05;
       // drifting cloud shadows fall on the field (under the time's plants):
       // at their deepest they take the field down this far
       const so = d * smoothstep(0.15, 0.45, cloud) * (1 - smoothstep(0.72, 0.95, cloud));
@@ -708,7 +707,7 @@ export default {
       pal.head[3] = headN;
       pal.head[4] = veilL(mix(n1, p1, lift));
       pal.head[5] = mix(mix(season.pale, "#f4ff8a", season.summer), "#ffffff", season.winter * 0.6);
-      pal.stalk = mix(lit(season.stalk, mix("#07100c", season.night, 0.2), 0.03), hazeCol, headHaze);
+      pal.stalk = mix(lit(season.stalk, "#0a1a10", 0.03), hazeCol, headHaze); // dark green at night too: the stalks stay out of the figure
       pal.bud[0] = mix(pal.stalk, pal.head[0], 0.5);
       pal.bud[1] = mix(pal.stalk, headN, 0.5);
       // hearts: the season's own by day; a luminous head has a pale heart, not
@@ -733,14 +732,14 @@ export default {
         return Math.min(0.95, Math.round((hi / 0.88) * 200) / 200); // the dapple lets about an eighth through
       };
       pal.shadeCol = mix(mix("#06120a", "#0b1420", snow), "#0a0d10", fog * 0.5);
-      pal.shadeA = solve(fieldL, pal.shadeCol, target, true);
+      // (on snow the field reads brighter than this estimate in daylight: be generous)
+      pal.shadeA = solve(fieldL * (1 + 0.45 * snow), pal.shadeCol, target, true);
       // Winter's dark seed heads stand where the grass is thin and pale (or the
       // snow lies clean): a pale patch, deep enough for 3.5:1 even if the field
       // round them is half as bright as this estimate (its understory, the
       // flattened blades in a gale and cloud shadows all darken it locally).
       pal.liftCol = mix(mix(mix("#efe6cc", snowDay, snow), sky, 0.08), "#2a2e33", 1 - dk);
       pal.liftA = pal.winterSide ? solve(0.55 * pal.fieldLow, pal.liftCol, 3.5 * (darkMax + 0.05) - 0.05, false) : 0;
-      globalThis.__tgpal = pal; // DEBUG-REMOVE
       pal.hl = season.hl;
       pal.hw = season.hw;
 
