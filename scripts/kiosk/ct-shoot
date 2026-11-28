@@ -1,0 +1,46 @@
+#!/bin/zsh
+# Photograph Clock Tower faces with an iPhone (Continuity Camera), run from a Mac on the same network.
+#   ct-shoot <id> [query]   show one face, wait, take an iPhone photo + a panel screenshot
+#   ct-shoot all            every face in the rotation, one after another
+#   ct-shoot cue <id> [query]   show a face, chime + say "ready" when settled, leave it up (you press the shutter)
+#   ct-shoot cue all            step through every face: chime, then press Enter for the next
+#   any [query] can be "random": a random weather preset + time of day per face
+#   ct-shoot list|status|rotate   passed straight to ct-face on the Pi
+# Env: SETTLE=seconds to wait after switching (default 8), OUT=folder,
+#      CT_HOST=user@device (default fcc-015@fcc-pi-15.lan), CAM=camera name (default: the first
+#      "iPhone Camera" ffmpeg sees), KEEP=1 to stay on the face afterwards.
+set -e
+PI=${CT_HOST:-fcc-015@fcc-pi-15.lan}
+CAM=${CAM:-$(ffmpeg -hide_banner -f avfoundation -list_devices true -i "" 2>&1 | sed -nE 's/.*\[[0-9]+\] (.*iPhone Camera)$/\1/p' | head -1)}
+SETTLE=${SETTLE:-8}
+OUT=${OUT:-$HOME/Pictures/Studio/clock-tower}
+mkdir -p "$OUT"
+
+WX=(clear partly overcast fog drizzle rain downpour storm snow blizzard windy heat cold)
+AT=(dawn sunrise morning noon afternoon golden sunset dusk night midnight)
+# "random" as the query picks a weather preset and a part of the day.
+q() { [[ $1 == random ]] && echo "wx=${WX[RANDOM % ${#WX} + 1]}&at=${AT[RANDOM % ${#AT} + 1]}" || echo "$1"; }
+
+face() { ssh -o ConnectTimeout=5 $PI "~/bin/ct-face $(printf '%q ' "$@")"; }
+
+shoot() {
+  local id=$1 extra=$(q "$2") stamp=$(date +%Y%m%d-%H%M%S)
+  face show "$id" ${extra:+"$extra"}
+  sleep $SETTLE
+  ffmpeg -hide_banner -loglevel error -f avfoundation -framerate 30 -pixel_format nv12 -video_size 1920x1440 \
+    -i "$CAM" -ss 2 -frames:v 1 -q:v 2 -y "$OUT/$stamp-$id-photo.jpg"
+  face shot /tmp/ct-shot.png >/dev/null && scp -q $PI:/tmp/ct-shot.png "$OUT/$stamp-$id-screen.png"
+  echo "$OUT/$stamp-$id-photo.jpg"
+}
+
+cue() { local qq=$(q "$2"); face show "$1" ${qq:+"$qq"}; [[ -n $qq ]] && echo "  ($qq)"; sleep $SETTLE; afplay /System/Library/Sounds/Glass.aiff; say "ready, ${1//-/ }" & echo "READY: $1 — take the photo"; }
+
+case ${1:-} in
+  cue) if [[ $2 == all ]]; then
+         for id in $(face list | grep -v '^_'); do cue $id "$3"; read -r "?Enter for next… "; done; face rotate
+       else cue "$2" "$3"; fi ;;
+  ""|-h|--help) sed -n '2,11p' $0 | sed 's/^# \{0,1\}//' ;;
+  list|status|rotate) face "$1" ;;
+  all) for id in $(face list | grep -v '^_'); do shoot $id "$2"; done; [[ -n $KEEP ]] || face rotate ;;
+  *) shoot "$1" "$2"; [[ -n $KEEP ]] || face rotate ;;
+esac

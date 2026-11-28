@@ -1,0 +1,47 @@
+#!/usr/bin/env -S node --experimental-websocket --no-warnings
+// Control the Clock Tower kiosk over Chrome DevTools (localhost:9222). Runs on the device;
+// needs Chromium started with --remote-debugging-port=9222 (see README, "Remote control").
+//   ct-face list                 visualization ids (_name = out of rotation)
+//   ct-face status               what the kiosk is showing
+//   ct-face show <id> [query]    hold one face, e.g. ct-face show die-cut "wx=snow&at=night"
+//   ct-face rotate               back to the normal 15-minute rotation
+//   ct-face shot [file]          screenshot the panel (default /tmp/ct-shot.png)
+import { readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+import { execFileSync } from "node:child_process";
+// The repo this script lives in (follows a symlink such as ~/bin/ct-face).
+const VISUALS = resolve(dirname(fileURLToPath(import.meta.url)), "../../src/visuals");
+const BASE = "http://localhost:3118/?onDevice=true";
+const [cmd = "status", arg, extra] = process.argv.slice(2);
+const ids = () => readdirSync(VISUALS).filter((f) => f.endsWith(".js") && f !== "_example.js").map((f) => f.slice(0, -3));
+const targets = async () => (await fetch("http://127.0.0.1:9222/json/list")).json();
+async function navigate(url) {
+  const page = (await targets()).find((t) => t.type === "page" && t.url.includes(":3118"));
+  if (!page) throw new Error("kiosk page not found (is Chromium running? try ~/bin/kiosk-restart)");
+  const ws = new WebSocket(page.webSocketDebuggerUrl);
+  await new Promise((ok, bad) => { ws.onopen = ok; ws.onerror = bad; });
+  ws.send(JSON.stringify({ id: 1, method: "Page.navigate", params: { url } }));
+  await new Promise((ok) => { ws.onmessage = (m) => JSON.parse(m.data).id === 1 && ok(); });
+  ws.close();
+}
+const showing = async () => {
+  const t = await targets();
+  const page = t.find((x) => x.type === "page" && x.url.includes(":3118"));
+  const frames = t.filter((x) => x.type === "iframe").map((x) => new URL(x.url).searchParams.get("id"));
+  return { url: page?.url, frames };
+};
+if (cmd === "list") console.log(ids().join("\n"));
+else if (cmd === "status") console.log(JSON.stringify(await showing()));
+else if (cmd === "show") {
+  if (!ids().includes(arg)) { console.error(`unknown id "${arg}". ids:\n${ids().join("\n")}`); process.exit(1); }
+  // Parked pieces (_name) are not in the display's rotation, so ?viz= ignores them: open them full-page instead.
+  const url = arg.startsWith("_") ? `http://localhost:3118/visual.html?id=${encodeURIComponent(arg)}&onDevice=true` : `${BASE}&viz=${encodeURIComponent(arg)}`;
+  await navigate(`${url}${extra ? "&" + extra : ""}`);
+  console.log(`showing ${arg}`);
+} else if (cmd === "rotate") { await navigate(BASE); console.log("rotation"); }
+else if (cmd === "shot") {
+  const out = arg || "/tmp/ct-shot.png";
+  execFileSync("grim", [out], { env: { ...process.env, WAYLAND_DISPLAY: "wayland-0", XDG_RUNTIME_DIR: "/run/user/1000" } });
+  console.log(out);
+} else { console.error("usage: ct-face list|status|show <id> [query]|rotate|shot [file]"); process.exit(1); }

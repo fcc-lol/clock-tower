@@ -84,8 +84,10 @@ Create `~/.config/autostart/clock-tower.desktop`:
 [Desktop Entry]
 Type=Application
 Name=Clock Tower
-Exec=chromium-browser --kiosk --noerrdialogs --disable-session-crashed-bubble "http://localhost:3118/?onDevice=true"
+Exec=chromium-browser --kiosk --noerrdialogs --disable-session-crashed-bubble --remote-debugging-port=9222 --remote-debugging-address=127.0.0.1 --user-data-dir=/home/pi/.config/chromium-kiosk "http://localhost:3118/?onDevice=true"
 ```
+
+The last three flags are optional: they let the kiosk be switched from the command line (see [Remote control](#remote-control-and-photographing-faces)). The port only listens on the device itself, and Chromium needs a profile of its own (`--user-data-dir`) before it will open it. On a labwc (Wayland) desktop the same command goes in `~/.config/labwc/autostart`, as `/usr/bin/lwrespawn /usr/bin/chromium --kiosk --ozone-platform=wayland … &`.
 
 ### 5. Display settings
 
@@ -104,6 +106,33 @@ npm run build
 The kiosk browser notices the new build and reloads on its own within about 30 seconds; the server does not need a restart unless `server.js` itself changed (`sudo systemctl restart clock-tower`). (The fcc.lol deployment updates itself on push to `main`; devices are updated manually.)
 
 A device that ran the earlier version, which generated images, can drop what that left behind: the `generated/` folder, any `data.sqlite*` files and the Google and Anthropic settings in `.env` are no longer used.
+
+## Remote control and photographing faces
+
+With the DevTools flags above, `scripts/kiosk/` can hold any face on the screen, under any weather, and put the rotation back afterwards.
+
+On the device (link it onto the PATH once: `ln -s ~/clock-tower/scripts/kiosk/ct-face ~/clock-tower/scripts/kiosk/kiosk-restart ~/bin/`):
+
+```sh
+ct-face list                          # every id (_name = parked, out of the rotation)
+ct-face status                        # what is on screen
+ct-face show die-cut "wx=snow&at=night"   # hold one face; the query takes any simulated conditions
+ct-face rotate                        # back to the normal rotation
+ct-face shot /tmp/screen.png          # screenshot the panel (grim)
+kiosk-restart                         # relaunch Chromium with the command in ~/.config/labwc/autostart
+```
+
+Parked faces are not in the display's rotation, so `ct-face show` opens them full-page (`/visual.html?id=…`) instead of through `?viz=`.
+
+From a Mac, `scripts/kiosk/ct-shoot` drives the device over ssh (`CT_HOST=user@device`, default `fcc-015@fcc-pi-15.lan`) and photographs it with an iPhone:
+
+```sh
+scripts/kiosk/ct-shoot cue all random      # each face in turn under random weather and time of day: chimes when it is ready, Enter for the next
+scripts/kiosk/ct-shoot cue tall-grass random   # one face, left up until `ct-shoot rotate`
+scripts/kiosk/ct-shoot die-cut random      # hands-free: also grabs a frame from the iPhone and a panel screenshot
+```
+
+`cue` is for shooting with the iPhone's own Camera app (full resolution, any lens). The hands-free mode grabs from Continuity Camera with ffmpeg, which tops out at 1920x1440 and always uses the main lens; photos and screenshots go to `~/Pictures/Studio/clock-tower/` (`OUT=`).
 
 ## Development
 

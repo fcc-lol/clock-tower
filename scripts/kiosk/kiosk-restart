@@ -1,0 +1,8 @@
+#!/bin/sh
+# Restart the Clock Tower kiosk with the same command as ~/.config/labwc/autostart.
+pkill -f "^/bin/sh /usr/bin/lwrespawn /usr/bin/chromium"
+pkill -x chromium
+sleep 2
+export WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/1000
+CMD=$(sed -n "/^\/usr\/bin\/lwrespawn \/usr\/bin\/chromium/,/&\$/p" ~/.config/labwc/autostart | sed "s/ &\$//")
+setsid nohup sh -c "$CMD" >/dev/null 2>&1 </dev/null &
