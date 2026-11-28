@@ -630,17 +630,29 @@ export default {
     }
 
     // ----- colours: recomputed a few times a second, they move slowly -----
-    const legible = (bg, light, dark, out) => {
-      let ink = readableOn(bg, light, dark);
-      let n = 0;
-      while (contrast(bg, ink) < 4.7 && n++ < 10) {
-        bg = adjust(bg, { l: (v) => clamp(v + (ink === dark ? 0.025 : -0.025)) });
-        ink = readableOn(bg, light, dark);
+    // the paper for a given ink (side 0 the light ink, 1 the dark), moved away from the ink
+    // just as far as the two need to stand well apart (found exactly, so that the paper
+    // moves smoothly with the light instead of in notches)
+    const legible = (bg, light, dark, out, side) => {
+      const ink = side ? dark : light;
+      if (contrast(bg, ink) < 4.7) {
+        const l0 = toOklch(bg).l;
+        let lo = 0, hi = 0.25;
+        if (contrast(adjust(bg, { l: clamp(l0 + (side ? hi : -hi)) }), ink) >= 4.7) {
+          for (let i = 0; i < 14; i++) {
+            const m = (lo + hi) / 2;
+            if (contrast(adjust(bg, { l: clamp(l0 + (side ? m : -m)) }), ink) >= 4.7) hi = m; else lo = m;
+          }
+        }
+        bg = adjust(bg, { l: clamp(l0 + (side ? hi : -hi)) });
       }
       out.bg = bg;
       out.ink = ink;
     };
     const pair = { bg: "", ink: "" };
+    // the tags' flip: the side now chosen, where the paper stands between the two (w), and
+    // the paper each side would have just now
+    const flip = { side: -1, w: 0, paperL: "", paperD: "", stkL: "", stkD: "", rest: "" };
     function palette(s) {
       const day = smoothstep(0.04, 0.6, s.daylight);
       const toy = toOklch(toyColor(P.feels));
@@ -697,13 +709,34 @@ export default {
       pal.frost = mix(body, "#ffffff", lerp(0.5, 0.9, day));
       pal.string = mix(gTop, "#f1e8d4", lerp(0.4, 0.92, day));
 
-      // paper and ink flip together where the paper passes mid-grey
+      // paper and ink flip together where the paper passes mid-grey. Each side is taken
+      // outright (pale ink on dark paper, or dark ink on light paper), chosen with some
+      // hysteresis so it cannot flicker, and the paper crosses from one to the other in
+      // about a second (see tagInk), never minutes of mid-grey paper.
       const pk = smoothstep(0.22, 0.55, s.daylight);
-      legible(mix("#302f2d", "#f3ead6", pk), "#efe5d0", "#1b2030", pair);
-      const paper = pair.bg, ink = pair.ink;
-      legible(mix(oklch(0.36, Math.min(toy.c, 0.09), toy.h), bodyDay, pk), "#f6eedd", "#1b2030", pair);
-      const css = `--paper:${paper};--ink:${ink};--ink2:${mix(ink, paper, 0.24)};--string:${pal.string};--stk:${pair.bg};--stkink:${pair.ink};` +
-        `--stkrim:${rgba(pair.ink, 0.16)};--hole:${mix(gTop, gBot, 0.4)};--fold:${mix(paper, pair.bg, 0.85)};--rule:${mix(paper, ink, 0.16)};--tsh:${(0.1 + 0.3 * clamp(P.direct * 1.2)).toFixed(2)};--shx:${(pal.shx * 0.5).toFixed(1)}px;--shy:${(pal.shy * 0.5).toFixed(1)}px`;
+      const side = flip.side < 0 ? (pk > 0.41 ? 1 : 0) : flip.side ? (pk < 0.39 ? 0 : 1) : (pk > 0.43 ? 1 : 0);
+      if (flip.side < 0) flip.w = side;
+      flip.side = side;
+      const paperBase = mix("#302f2d", "#f3ead6", pk);
+      const stkBase = mix(oklch(0.36, Math.min(toy.c, 0.09), toy.h), bodyDay, pk);
+      legible(paperBase, "#efe5d0", "#1b2030", pair, 0); flip.paperL = pair.bg;
+      legible(paperBase, "#efe5d0", "#1b2030", pair, 1); flip.paperD = pair.bg;
+      legible(stkBase, "#f6eedd", "#1b2030", pair, 0); flip.stkL = pair.bg;
+      legible(stkBase, "#f6eedd", "#1b2030", pair, 1); flip.stkD = pair.bg;
+      flip.rest = `;--string:${pal.string};--hole:${mix(gTop, gBot, 0.4)};--tsh:${(0.1 + 0.3 * clamp(P.direct * 1.2)).toFixed(2)};--shx:${(pal.shx * 0.5).toFixed(1)}px;--shy:${(pal.shy * 0.5).toFixed(1)}px`;
+      tagInk();
+    }
+    // The tags' paper and ink, from where the flip stands (flip.w: 0 the dark-paper side,
+    // 1 the light-paper side). At rest the paper is exactly the chosen side's; while it
+    // crosses, each ink is whichever of the two stands further from the paper under it.
+    function tagInk() {
+      const e = flip.w * flip.w * (3 - 2 * flip.w);
+      const paper = e <= 0 ? flip.paperL : e >= 1 ? flip.paperD : mix(flip.paperL, flip.paperD, e);
+      const stk = e <= 0 ? flip.stkL : e >= 1 ? flip.stkD : mix(flip.stkL, flip.stkD, e);
+      const ink = readableOn(paper, "#efe5d0", "#1b2030");
+      const stkInk = readableOn(stk, "#f6eedd", "#1b2030");
+      const css = `--paper:${paper};--ink:${ink};--ink2:${mix(ink, paper, 0.24)};--stk:${stk};--stkink:${stkInk};` +
+        `--stkrim:${rgba(stkInk, 0.16)};--fold:${mix(paper, stk, 0.85)};--rule:${mix(paper, ink, 0.16)}${flip.rest}`;
       if (shown.css !== css) { shown.css = css; wrap.style.cssText = css; }
     }
 
@@ -1395,6 +1428,11 @@ export default {
         texts(s);
         palClock += dt;
         if (palClock > 0.25 || jump) { palClock = 0; palette(s); }
+        if (flip.w !== flip.side) {
+          // the tags' paper crossing to the other side: under a second, whatever the light does
+          flip.w = jump ? flip.side : flip.side ? Math.min(1, flip.w + dt / 0.9) : Math.max(0, flip.w - dt / 0.9);
+          tagInk();
+        }
 
         // thunder: a soft, rare brightening and one collective shudder
         if (P.storm) {

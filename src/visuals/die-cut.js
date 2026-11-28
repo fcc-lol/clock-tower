@@ -907,7 +907,10 @@ export default {
       if (snap) pf = pol;
       const pm = smoothstep(0, 1, pf); // how far the scene has gone over to its night side
       // the letterpress ink is dark or light outright, and fades across with the scene (about a second)
-      P.ink = pm === 0 ? "#1a1c33" : pm === 1 ? "#e6dfcf" : mix("#1a1c33", "#e6dfcf", pm);
+      // (both inks go a little deeper while the sheet is mid-grey, where neither has much room)
+      const inkD = n > 0 && n < 1 ? mix("#1a1c33", "#0a0b18", 4 * n * (1 - n)) : "#1a1c33";
+      const inkL = n > 0 && n < 1 ? mix("#e6dfcf", "#fffbf2", 4 * n * (1 - n)) : "#e6dfcf";
+      P.ink = pm === 0 ? inkD : pm === 1 ? inkL : mix(inkD, inkL, pm);
       P.hl = pm < 0.5 ? "rgba(255,255,255,.75)" : "rgba(0,0,0,.6)";
 
       // how light the scene may be behind the day sheet, for 3:1 and a little more

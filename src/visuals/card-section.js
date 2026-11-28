@@ -42,7 +42,7 @@
 // loose cards are small sprites on their own layer. The boards are DOM; the
 // held sheet is cut into 60 px slices that ripple with the wind.
 
-import { TAU, clamp, lerp, smoothstep, rng, hash, createNoise, mix, ramp, rgba, luminance, toOklch, oklch, el, addStyle, canvas2d, grain } from "../lib/kit.js";
+import { TAU, clamp, lerp, smoothstep, rng, hash, createNoise, mix, ramp, rgba, luminance, contrast, toOklch, oklch, el, addStyle, canvas2d, grain } from "../lib/kit.js";
 
 const COLS = 36;
 const ROWS = 64;
@@ -375,13 +375,8 @@ export default {
         P.veilNum[row] = a > 0.08 ? rgba(fogCol, +(a * 0.15).toFixed(3)) : "";
       }
 
-      // Cloth and paint. The cloth is cream by day and dark at night; the paint
-      // flips from ink to amber while the cloth is passing through mid-grey.
-      const k = smoothstep(0.15, 0.17, env.gloomLight); // a short passage: about two minutes of real twilight
-      const day = k > 0.5;
+      // The cloth and its paint are set every frame in updateCloth().
       const st = wrap.style;
-      st.setProperty("--cloth", mix("#17181e", "#f1e7d3", k));
-      st.setProperty("--hem", mix("#2a2b34", "#d6c8ab", k));
       // The boards' lamps are turned down a little after dark.
       st.setProperty("--bink", mix("#d3c7af", "#f3ead8", dayK));
       st.setProperty("--bsoft", mix("#cf9244", "#eba851", dayK));
@@ -389,13 +384,40 @@ export default {
       st.setProperty("--hand1", P.skin[1]);
       st.setProperty("--hand2", P.skin[3]);
       st.setProperty("--hand3", P.skin[0]);
-      if (day !== clothDay) {
-        clothDay = day;
-        st.setProperty("--paint", day ? "#14151c" : "#f6be64");
-        st.setProperty("--soft", day ? "#b0301b" : "#bd8d4c");
-        st.setProperty("--accent", day ? "#b0301b" : "#bd8d4c");
-        st.setProperty("--on", day ? "#f6eedd" : "#17181e");
+    }
+
+    // Cloth and paint. The cloth is cream by day and dark at night, gliding
+    // between the two through a short passage of twilight (about two minutes),
+    // followed every frame, not in the palette's coarse steps. The paint is
+    // never a blend tied to the light: it is the dark ink or the amber outright,
+    // whichever stands further from the cloth as it is now, with hysteresis
+    // (the other must be 10% better before it takes over), so at the switch
+    // both still hold about 3.1:1. The change of paint itself is a one-second fade.
+    const PAINT_DAY = "#14151c", PAINT_NIGHT = "#f6be64";
+    let clothK = -1;
+    let paintMix = -1; // 1 = dark ink, 0 = amber; -1 before the first frame
+    function updateCloth(dt, snap) {
+      const st = wrap.style;
+      const k = smoothstep(0.15, 0.17, env.gloomLight);
+      if (snap || clothK < 0 || Math.abs(k - clothK) > 0.004 || (k !== clothK && (k === 0 || k === 1))) {
+        clothK = k;
+        const cloth = mix("#17181e", "#f1e7d3", k);
+        st.setProperty("--cloth", cloth);
+        st.setProperty("--hem", mix("#2a2b34", "#d6c8ab", k));
+        const cD = contrast(cloth, PAINT_DAY);
+        const cA = contrast(cloth, PAINT_NIGHT);
+        const day = clothDay === null ? cD > cA : clothDay ? cD * 1.1 > cA : cD > cA * 1.1;
+        if (day !== clothDay) {
+          clothDay = day;
+          st.setProperty("--soft", day ? "#b0301b" : "#bd8d4c");
+          st.setProperty("--accent", day ? "#b0301b" : "#bd8d4c");
+          st.setProperty("--on", day ? "#f6eedd" : "#17181e");
+        }
       }
+      const target = clothDay ? 1 : 0;
+      if (paintMix === target) return;
+      paintMix = snap || paintMix < 0 ? target : target > paintMix ? Math.min(target, paintMix + dt) : Math.max(target, paintMix - dt);
+      st.setProperty("--paint", paintMix === 1 ? PAINT_DAY : paintMix === 0 ? PAINT_NIGHT : mix(PAINT_NIGHT, PAINT_DAY, paintMix));
     }
 
     function updateEnv(s) {
@@ -1130,6 +1152,7 @@ export default {
           refreshLeft = N; // repaint everyone once, a few dozen seats a frame
         }
       }
+      updateCloth(clamp(dt, 0, 0.25), jump);
 
       // The clouds ride the wind.
       const adv = env.cloudSpeed * clamp(dms / 1000, 0, 900);

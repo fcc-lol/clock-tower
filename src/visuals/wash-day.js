@@ -479,6 +479,9 @@ export default {
       x.fillRect(0, h - 28.5, w, 2.5);
       const size = fit(x, text, 900, 146, w - 44, false, 90);
       x.fillText(text, w / 2 + size * 0.05, h / 2 + size * 0.34);
+      x.lineWidth = size * 0.014; // the same ink spread as the big digits, for the hairline of a 4
+      x.lineJoin = "round";
+      x.strokeText(text, w / 2 + size * 0.05, h / 2 + size * 0.34);
     }
     function printSun(c, label, value) {
       const x = begin(c);

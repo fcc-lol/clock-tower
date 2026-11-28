@@ -421,7 +421,7 @@ export default {
       const c = document.createElement("canvas");
       c.width = GC;
       c.height = GR;
-      return { c, ctx: c.getContext("2d"), key: "", on: false, sh: 0, x: 0, op: -1, dark: true, lum: 0.3, veil: 0 };
+      return { c, ctx: c.getContext("2d"), key: "", on: false, sh: 0, x: 0, op: -1, dark: true, lum: 0.3, lo: 0.3, hi: 0.3, veil: 0 };
     });
 
     // ------------------------------------------------------------- birds
@@ -732,8 +732,9 @@ export default {
     // fade. Near the flip neither ink has much to push against, so the soft
     // silhouette under the birds thickens until the figure holds its contrast.
     const BIRD_HYST = 0.015;
+    const INK_HYST = 1.1; // the same, as a ratio of the two inks' contrasts
     const INK_FADE = 0.8; // s
-    const GHOST_AIM = 3.6; // contrast the figure aims for while the sky is near the flip
+    const GHOST_AIM = 4; // contrast the figure aims for while the sky is near the flip
     const BIRD_COVER = 0.15; // share of a stroke the birds themselves cover, over the silhouette
     const L_DAY = luminance(INK_DAY);
     let paleLum = luminance(INK_NIGHT);
@@ -748,6 +749,19 @@ export default {
     let twilight = 0;
     let lastVeil = 0; // the cloud bands' mean cover over the last region asked for
     const unsrgb = (v) => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+    // the darkest and the brightest of the sky over a region (it is smooth: a coarse grid will do)
+    let regionLo = 0;
+    let regionHi = 0;
+    const lumSpread = (x0, x1, y0, y1) => {
+      regionLo = 1;
+      regionHi = 0;
+      for (let y = y0; y <= y1; y += 30) for (let x = x0; x <= x1; x += 30) {
+        const v = lumAt(x, y);
+        if (v < regionLo) regionLo = v;
+        if (v > regionHi) regionHi = v;
+      }
+    };
+    const underCloud = (L) => (lastVeil > 0 ? unsrgb(srgb(L) * (1 - lastVeil) + cloudV * lastVeil) : L);
     const groundLum = (x0, x1, y0, y1) => {
       const L = lumRegion(x0, x1, y0, y1);
       lastVeil = 0;
@@ -832,8 +846,25 @@ export default {
         return;
       }
       const x0 = s.ox + PAD, x1 = s.ox + GWpx - PAD, y0 = s.oy + PAD, y1 = s.oy + GHpx - PAD;
-      const lum = twilight > 0 ? lerp(lumRegion(x0, x1, y0, y1), groundLum(x0, x1, y0, y1), twilight) : lumRegion(x0, x1, y0, y1);
-      const dark = lum > birdFlip + (g.dark ? -BIRD_HYST : BIRD_HYST);
+      let dark;
+      let lum;
+      if (twilight > 0) {
+        // through twilight: the ink that holds more contrast against the worst
+        // of its own patch of sky (the darkest part for dark ink, the brightest
+        // for pale), leaning toward silhouettes as full day nears
+        const sky = lumRegion(x0, x1, y0, y1);
+        lum = lerp(sky, groundLum(x0, x1, y0, y1), twilight);
+        lumSpread(x0, x1, y0, y1);
+        g.lo = lerp(regionLo, underCloud(regionLo), twilight);
+        g.hi = lerp(regionHi, underCloud(regionHi), twilight);
+        const dCr = ((g.lo + 0.05) / (L_DAY + 0.05)) * lerp(2.5, 1, twilight);
+        const pCr = (paleLum + 0.05) / (g.hi + 0.05);
+        dark = g.dark ? dCr * INK_HYST > pCr : dCr > pCr * INK_HYST;
+      } else {
+        lum = lumRegion(x0, x1, y0, y1);
+        g.lo = g.hi = lum;
+        dark = lum > birdFlip + (g.dark ? -BIRD_HYST : BIRD_HYST);
+      }
       s.light = dark ? 0 : 1;
       if (inkSnap) s.inkT = s.light;
       const col = s.inkT <= 0 ? INK_DAY : s.inkT >= 1 ? pale : mix(INK_DAY, pale, s.inkT);
@@ -1416,7 +1447,7 @@ export default {
         // the sky in sRGB: find the silhouette tone the aim asks for, then its opacity)
         let opNeed = 0;
         if (aim > 0) {
-          const Lg = g.lum;
+          const Lg = S.light === 0 ? g.lo : g.hi; // the worst of the sky behind it
           const Li = S.light === 0 ? L_DAY : paleLum;
           const want = S.light === 0 ? (Lg + 0.05) / GHOST_AIM - 0.05 : GHOST_AIM * (Lg + 0.05) - 0.05;
           const Vg = srgb(clamp((want - BIRD_COVER * Li) / (1 - BIRD_COVER)));
