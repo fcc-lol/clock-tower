@@ -849,6 +849,7 @@ export default {
     const WS = [0, 0, 0, 0];
     let wsAt = -1e9;
     let paleOn = -1, flipH = 0, thinE = 0, deepE = 0; // heavy weather: the ink chosen outright, the turn, the thinning
+    let flipNow = 0; // the turn as last worked out (0 cobalt .. 1 pale): the fallback draws by it too
     const LGLAZE = lum(COL.glaze), LWHITE = lum(COL.white), LCOB = lum(COL.cobalt), VGLOW = Math.pow(lum(COL.glow), 1 / 2.2);
     const RING_U = ["u_r0", "u_r1", "u_r2", "u_r3", "u_r4", "u_r5", "u_r6", "u_r7"];
     const rings = [];
@@ -919,7 +920,7 @@ export default {
       ctx.fillStyle = css(U.grout);
       ctx.fillRect(PX0, PY0, PX1 - PX0, PY1 - PY0);
       const ts = (PX1 - PX0) / GW;
-      const pale = s.daylight < 0.5;
+      const pale = flipNow > 0.5; // the same turn as the water's, so the ink is the one the palette made for this floor
       for (let y = 0; y < GH; y++)
         for (let x = 0; x < GW; x++) {
           const i = y * GW + x;
@@ -1145,6 +1146,7 @@ export default {
         if (hv > 0) flipH = jump ? paleOn : flipH + clamp(paleOn - flipH, -dt / 1.2, dt / 1.2); // the turn takes a second
         else flipH = smoothstep(0.195, 0.16, F); // (so heavy weather sets in from where the tiles are)
         const flip = smoothstep(0.195, 0.16, F) * (1 - hv) + flipH * hv;
+        flipNow = flip;
         if (hv > 0) {
           // how much to thin the overlay so that an extreme tile still holds
           const need = (c) => {
