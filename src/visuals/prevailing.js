@@ -331,9 +331,6 @@ export default {
           maskKey = key;
         }
         if (jumped) old = null;
-        frontS = -HALF - FRONT_W * 1.3 + (s.t - frontAt) * 480;
-        frontOn = old != null && frontS < HALF + FRONT_W * 1.3;
-        if (!frontOn) old = null;
 
         // ---- colors: the sky's own, as ink on paper by day; as light on black at night ----
         const day = smoothstep(0.4, 0.6, s.daylight);
@@ -389,6 +386,12 @@ export default {
         dy = Math.sin(angle);
         nx = -dy; // across the lines
         ny = dx;
+        // The front sets off just outside the frame's upwind edge (not the far end
+        // of the longest line), so the new minute starts arriving at once.
+        const reachF = Math.abs(dx) * cx + Math.abs(dy) * cy + 44 + FRONT_W * 1.3;
+        frontS = -reachF + (s.t - frontAt) * 480;
+        frontOn = old != null && frontS < reachF;
+        if (!frontOn) old = null;
         const mph = live ? w.wind : 0;
         const speed = live ? 8 + 4.4 * Math.pow(mph, 0.94) : 0; // px per second the waves run downwind
         travel += speed * s.dt;

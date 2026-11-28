@@ -556,8 +556,12 @@ export default {
       let moved = placeBanner(bDate, 0, COLS - 1, DATE_TOP, DATE_H);
 
       // So is the temperature strip, to the length of what it says.
+      // Measured on the words alone: the condition box is otherwise as wide as
+      // the strip the last layout made, and the strip would grow at every change.
       condEl.style.fontSize = "54px";
+      condEl.style.width = "0px";
       const natural = tempEl.offsetWidth + condEl.scrollWidth + ampmEl.offsetWidth + 104 + 70;
+      condEl.style.width = "";
       const mseats = clamp(Math.ceil(natural / 60) * 2, 16, 34);
       moved = placeBanner(bMid, (COLS - mseats) / 2, (COLS - mseats) / 2 + mseats - 1, MID_TOP, MID_H) || moved;
       const cw = condEl.scrollWidth;

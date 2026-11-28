@@ -35,8 +35,11 @@
 //              around the end of dusk a shadow line climbs the wash, and below
 //              it the cotton is dark and the print glows pale, so the room stays
 //              dark at night. A wall lamp warms the nearest cloth after dark.
-//   the clock  on the minute the pulley hauls the line out to the right-hand
-//              window and back with the new sheet; on the hour both lines go.
+//   the clock  on the minute the pulley turns: when only the last digit changes
+//              the line runs just far enough to take that sheet behind the
+//              right-hand wall and back; when the tens change (and on the
+//              hour, for both lines) it runs on round like a conveyor, the old
+//              sheets out to the right and the new ones in from the left.
 //
 // Technique: one WebGL canvas (the kit has full-screen shaders only, so the
 // small mesh renderer lives in this file). Prints are drawn to 2D canvases when
@@ -44,7 +47,7 @@
 // letters are part of the cloth simulation. Rain, snow, drips and icicles are a
 // 2D overlay. Without WebGL the wash is drawn hanging flat on a 2D canvas.
 
-import { W, H, TAU, clamp, lerp, smoothstep, approach, rng, hash, createNoise, oklch, toOklch, ramp, vec3, el, canvas2d, grain, wrapText } from "../lib/kit.js";
+import { W, H, TAU, clamp, lerp, smoothstep, approach, rng, hash, createNoise, oklch, toOklch, ramp, vec3, el, canvas2d, wrapText } from "../lib/kit.js";
 
 const FONT = '"Fraunces", Georgia, serif';
 const WALL = 50; // width of each brick sliver
@@ -201,6 +204,7 @@ void main() {
   }
   col += u_flash * vec3(0.09, 0.1, 0.14) * (1.0 - ink);
   col = mix(col, u_fog.rgb, u_fog.a);
+  col += (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 160.0; // dither: no banding on a big panel
   vec2 e = min(v_uv, 1.0 - v_uv) * u_size * u_ratio;
   float a = clamp(min(e.x, e.y), 0.0, 1.0);
   gl_FragColor = vec4(col * a, a);
@@ -235,14 +239,14 @@ void main() {
 }`;
 
 const font = (weight, size, italic) => `${italic ? "italic " : ""}${weight} ${size}px ${FONT}`;
-const easeIO = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 const projX = (x, z) => 540 + (x - 540) * (1 + z / PERSP);
 const projY = (y, z) => HORIZON + (y - HORIZON) * (1 + z / PERSP);
 
 export default {
   title: "Wash Day",
   description: "The time is printed on bedsheets pegged out across a courtyard, and the real wind over Long Island City flies them.",
-  fonts: ["Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900"],
+  fonts: ["Fraunces:opsz,wght@9..144,400..900"],
+  fps: 24, // cloth in wind reads as well at 24 frames, and the Pi has a 4K panel to fill
 
   mount(root, { state, seed }) {
     const r = rng(seed);
@@ -255,12 +259,12 @@ export default {
     const glCanvas = el("canvas", { style: { position: "absolute", left: "0", top: "0", width: `${W}px`, height: `${H}px` } });
     wrap.append(glCanvas);
     const over = canvas2d(wrap, { adaptive: true }); // precipitation; also tells us how the machine is coping
-    grain(wrap, { opacity: 0.045 });
+    over.canvas.style.display = "none"; // shown only while something is falling, dripping or frozen
 
     // ------------------------------------------------------------------
     // The lines and the wash
     // ------------------------------------------------------------------
-    const lines = LINE_Y.map((y) => ({ y, sag: 10, bob: 0, haul: 0, phase: 0, t0: 0, dur: 1, dist: 0 }));
+    const lines = LINE_Y.map((y) => ({ y, sag: 10, bob: 0, haul: 0, phase: 0, t0: 0, dur: 1, dist: 0, full: false, prog: 0, spin: 0 }));
     const lineY = (L, x) => {
       const k = (x - 540) / 496;
       return L.y + L.bob + L.sag * (1 - k * k);
@@ -813,7 +817,8 @@ export default {
 
     function sizeGL() {
       const quality = over.ratio / Math.min(1, ss0);
-      const ratio = clamp(Math.min(2, ss0) * quality, 0.2, 2);
+      // 1.5 px per stage unit at most: crisp enough for the prints on a 4K panel at about half the fill of 2
+      const ratio = clamp(Math.min(1.5, ss0) * quality, 0.2, 1.5);
       const w = Math.round(W * ratio);
       const h = Math.round(H * ratio);
       if (glCanvas.width !== w || glCanvas.height !== h) {
@@ -1282,11 +1287,25 @@ export default {
       }
       refreshPrints(false);
     }
+    function shiftLine(i, d) {
+      // the whole line moves at once (cloth, its velocity and all), so a sheet carried round is not torn
+      for (const c of cloths) {
+        if (c.line !== i) continue;
+        for (let k = c.off; k < c.off + c.n; k++) {
+          P[k * 3] += d;
+          Q[k * 3] += d;
+        }
+      }
+    }
     function runPulleys(s, jumped) {
       if (jumped) {
-        for (const L of lines) {
+        for (let i = 0; i < lines.length; i++) {
+          const L = lines[i];
           L.phase = 0;
-          L.haul = 0;
+          if (L.haul) {
+            L.haul = 0;
+            for (const c of cloths) if (c.line === i) hangFlat(c);
+          }
         }
         applyTime(0);
         applyTime(1);
@@ -1297,25 +1316,41 @@ export default {
       for (let i = 0; i < 2; i++) {
         const L = lines[i];
         if (L.phase === 0 && (i === 0 ? hourChanged : minChanged)) {
-          // far enough that every sheet being changed is behind the wall
-          const full = i === 0 || tx.mm[0] !== disp.mm[0] || tx.weekday !== disp.weekday;
-          L.dist = full ? 966 : 500;
-          L.dur = 0.7 + L.dist / 620;
+          // When every sheet on the line changes, the pulley runs the line on round like a conveyor: the old
+          // sheets go out behind the right-hand wall and the new ones come in from the left, in one smooth
+          // run. When only the last minute digit changes, the line goes just far enough to take that sheet
+          // behind the wall and comes back, so the tens stay in view.
+          L.full = i === 0 || tx.mm[0] !== disp.mm[0] || tx.weekday !== disp.weekday;
+          L.dist = L.full ? 966 : 500;
+          L.dur = L.full ? 3.6 : 3;
           L.phase = 1;
           L.t0 = s.t;
+          L.prog = 0;
         }
         if (L.phase) {
           const p = clamp((s.t - L.t0) / L.dur);
-          L.haul = L.dist * (L.phase === 1 ? easeIO(p) : 1 - easeIO(p));
-          if (p >= 1) {
-            if (L.phase === 1) {
+          let prog;
+          if (L.full) {
+            prog = 2 * L.dist * p * p * (3 - 2 * p);
+            if (L.phase === 1 && prog >= L.dist) {
+              shiftLine(i, -2 * L.dist);
               applyTime(i);
               L.phase = 2;
-              L.t0 = s.t;
-            } else {
-              L.phase = 0;
-              L.haul = 0;
             }
+            L.haul = L.phase === 2 ? prog - 2 * L.dist : prog;
+          } else {
+            L.haul = (L.dist * (1 - Math.cos(TAU * p))) / 2;
+            prog = L.haul;
+            if (L.phase === 1 && p >= 0.5) {
+              applyTime(i);
+              L.phase = 2;
+            }
+          }
+          L.spin += prog - L.prog; // the pulley wheels turn with the rope
+          L.prog = prog;
+          if (p >= 1) {
+            L.phase = 0;
+            L.haul = 0;
           }
         }
       }
@@ -1523,7 +1558,7 @@ export default {
       // drawn over the walls: pulley wheels (they turn as the line is hauled) and the lamp
       const first = spriteVerts;
       for (const L of lines) {
-        const a = L.haul / 13;
+        const a = L.spin / 13;
         quad(WALL - 8, lineY(L, WALL - 8) + 13, 13, 13, a, WHEEL[0], WHEEL[1], WHEEL[2], WHEEL[3], 0);
         quad(W - WALL + 8, lineY(L, W - WALL + 8) + 13, 13, 13, a, WHEEL[0], WHEEL[1], WHEEL[2], WHEEL[3], 0);
       }
@@ -1720,6 +1755,8 @@ export default {
       if (!active && !overUsed) return;
       over.clear();
       overUsed = active;
+      // a transparent full-screen layer still costs a blend every frame: take it out while it is empty
+      over.canvas.style.display = active ? "" : "none";
       if (!active) return;
       const t = s.t;
       const nt = env.night;

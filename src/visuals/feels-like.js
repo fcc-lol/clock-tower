@@ -203,12 +203,19 @@ export default {
       frame(s) {
         const w = s.weather;
         const tx = s.text;
-        const jumped = Math.abs(s.ms - lastMs) > 5000;
+        // A jump: the clock moved more than a few seconds, or it is being run clearly
+        // faster than the animation (the gallery, the test tool), so no transition plays.
+        const moved = Math.abs(s.ms - lastMs);
+        const jumped = moved > 5000 || moved > 250 + 4000 * s.dt;
         lastMs = s.ms;
 
         // ---- the axes: temperature -> weight, humidity -> width ----
         // (At night the figures are never thinner than a regular weight: a hairline in a dark room is the hardest time to read.)
-        const wantWght = Math.round(Math.max(remap(w.temp, 10, 100, 320, 1000), lerp(440, 320, smoothstep(0.1, 0.4, s.daylight))) / 4) * 4;
+        const lit = smoothstep(0.1, 0.4, s.daylight);
+        const nightFloor = lerp(440, 320, lit);
+        const wantWght = Math.round(Math.max(remap(w.temp, 10, 100, 320, 1000), nightFloor) / 4) * 4;
+        // The minute's swell starts from a hairline by day, from that same floor in the dark.
+        const swellFrom = Math.min(wantWght, Math.round(lerp(nightFloor, 140, lit)));
         const wantWdth = Math.round(remap(w.humidity, 20, 100, 40, 151));
         const wantBig = `"opsz" 144, "wght" ${wantWght}, "wdth" ${wantWdth}`;
         if (big !== wantBig) {
@@ -292,7 +299,7 @@ export default {
         // frame, so the big glyphs are drawn again as seldom as possible.
         swell = jumped ? 1 : Math.min(1, swell + s.dt / 1.6);
         const stepped = swell >= 1 ? 1 : Math.floor(swell * 16) / 16;
-        const figWght = Math.round(lerp(Math.min(140, wantWght), wantWght, stepped * stepped * (3 - 2 * stepped)));
+        const figWght = Math.round(lerp(swellFrom, wantWght, stepped * stepped * (3 - 2 * stepped)));
         if (figWght !== wght) {
           wght = figWght;
           hh.style.fontVariationSettings = mm.style.fontVariationSettings = `"opsz" 144, "wght" ${wght}, "wdth" ${wantWdth}`;
