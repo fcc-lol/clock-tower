@@ -234,10 +234,10 @@ export default {
     let travel = 0; // how far the waves have run, px
     let slide = 0; // how far the rain or snow has run along the lines, px
     let frontAt = -1e9; // animation time the last minute's front set off
-    // The texts that go with the time (AM/PM, the date, the day's fact, the sun's countdown):
+    // The texts that go with the time (AM/PM, the date and the day's fact):
     // the last frame's, which belong to the figures in `cur`, and those of `old`, which are
     // kept on screen until the wipe has crossed the figures that change.
-    const TIMED = ["ampm", "date", "sunLabel", "sunValue", "factLabel", "factValue"];
+    const TIMED = ["ampm", "date", "factLabel", "factValue"];
     const lastTag = {};
     let held = null;
     const diff = [0, 0, 0, 0]; // where the old and new figures differ: x0, y0, x1, y1
@@ -334,6 +334,8 @@ export default {
         if (key !== maskKey) {
           old = maskKey && !jumped ? cur : null;
           held = old ? { ...lastTag } : null;
+          cur = digits(tx.hh, tx.mm, 1.5); // mask() returns fresh data each time, so both can be held
+          makeHalo(cur);
           if (old) {
             diff[0] = diff[1] = 1e9;
             diff[2] = diff[3] = -1e9;
@@ -347,8 +349,6 @@ export default {
               diff[3] = Math.max(diff[3], y + CELL);
             }
           }
-          cur = digits(tx.hh, tx.mm, 1.5); // mask() returns fresh data each time, so both can be held
-          makeHalo(cur);
           frontAt = old ? s.t : -1e9;
           maskKey = key;
         }
@@ -715,8 +715,8 @@ export default {
         const fresh = put("temp", temp, tx.temp);
         if (put("cond", cond, tx.condition) || fresh) fitText(cond, W - 2 * M - 54 - temp.offsetWidth, 60);
         if (put("date", date, tt.date)) fitText(date, W - 2 * M, 46);
-        put("sunL", sSun.span, tt.sunLabel);
-        put("sunV", sSun.b, tt.sunValue);
+        put("sunL", sSun.span, tx.sunLabel);
+        put("sunV", sSun.b, tx.sunValue);
         put("moon", sMoon.b, tx.moon);
         put("aqi", sAir.b, tx.aqi);
         put("uv", sUv.b, tx.uv);

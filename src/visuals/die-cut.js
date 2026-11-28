@@ -92,16 +92,14 @@ export default {
 
     addStyle(root, `
       .dc { position: absolute; inset: 0; overflow: hidden; background: #0b0d1c; font-family: "Cormorant Garamond", Georgia, serif;
-            --ink: #1b1e36; --hl: rgba(255,255,255,.7); --sheet: #f3efe6; color: var(--ink); font-variant-numeric: lining-nums;
-            transition: color 1s linear; }
-      .dc.snap, .dc.snap .txt { transition: none; }
+            --ink: #1b1e36; --hl: rgba(255,255,255,.7); --sheet: #f3efe6; color: var(--ink); font-variant-numeric: lining-nums; }
       .dc .blob { position: absolute; left: 0; top: 0; width: 1300px; height: 900px; border-radius: 50%; will-change: transform, opacity;
                   background: radial-gradient(closest-side, rgba(22,26,60,.2), rgba(22,26,60,.12) 45%, rgba(22,26,60,0) 100%); }
       .dc .flap { position: absolute; background: var(--sheet); display: none; will-change: transform; }
       .dc .flap.t { transform-origin: 50% 0; box-shadow: 0 3px 5px rgba(5,8,30,.28); }
       .dc .flap.b { transform-origin: 50% 100%; box-shadow: 0 -2px 4px rgba(5,8,30,.2); }
       .dc .flap i { position: absolute; inset: 0; background: #070a20; opacity: 0; }
-      .dc .txt { position: absolute; inset: 0; text-shadow: 0 1.2px 0 var(--hl); transition: text-shadow 1s linear; }
+      .dc .txt { position: absolute; inset: 0; text-shadow: 0 1.2px 0 var(--hl); }
       .dc .strip { position: absolute; left: ${MX}px; top: ${R1B}px; width: ${W - 2 * MX}px; height: ${STRIP}px; display: flex; align-items: center; }
       .dc .date { font-size: 52px; font-weight: 700; letter-spacing: .01em; white-space: nowrap; line-height: 1; padding-bottom: 6px; }
       .dc .rule { flex: 1; height: 2px; background: currentColor; opacity: .55; margin: 0 30px; box-shadow: 0 1.2px 0 var(--hl); }
@@ -908,9 +906,9 @@ export default {
       else if (pol === 1 && sheetL > FLIP + HYST) pol = 0;
       if (snap) pf = pol;
       const pm = smoothstep(0, 1, pf); // how far the scene has gone over to its night side
-      const lit = pol === 0;
-      P.ink = lit ? "#1a1c33" : "#e6dfcf";
-      P.hl = lit ? "rgba(255,255,255,.75)" : "rgba(0,0,0,.6)";
+      // the letterpress ink is dark or light outright, and fades across with the scene (about a second)
+      P.ink = pm === 0 ? "#1a1c33" : pm === 1 ? "#e6dfcf" : mix("#1a1c33", "#e6dfcf", pm);
+      P.hl = pm < 0.5 ? "rgba(255,255,255,.75)" : "rgba(0,0,0,.6)";
 
       // how light the scene may be behind the day sheet, for 3:1 and a little more
       const cap = Math.cbrt((dayL ** 3 + 0.05) / 3.3 - 0.05);
@@ -918,9 +916,11 @@ export default {
       // layers keep their steps), the night scene is lifted toward white while the sheet is still light
       const dSL = toOklch(daySheet).l;
       const sY = lerp(dSL, toOklch(NIGHT_SHEET).l, n) ** 3 + 0.05;
+      // (a little more margin mid-way, for the paper's tooth and the light across it; exactly 3.3 at either end)
+      const R = 3.3 + 1.6 * n * (1 - n);
       const capRef = Math.cbrt(Math.max(1e-6, (dSL ** 3 + 0.05) / 3.3 - 0.05));
-      const kD = n > 0 ? clamp(Math.cbrt(Math.max(0, sY / 3.3 - 0.05)) / capRef) : 1;
-      const kN = n < 1 ? clamp((1 - Math.cbrt(Math.min(1, 3.3 * sY - 0.05))) / (1 - FLOOR)) : 1;
+      const kD = n > 0 ? clamp(Math.cbrt(Math.max(0, sY / R - 0.05)) / capRef) : 1;
+      const kN = n < 1 ? clamp((1 - Math.cbrt(Math.min(1, R * sY - 0.05))) / (1 - FLOOR)) : 1;
       const fitD = (c) => (kD === 1 ? c : adjust(c, { l: (v) => v * kD }));
       const fitN = (c) => (kN === 1 ? c : adjust(c, { l: (v) => 1 - (1 - v) * kN }));
       const side = (dc, nc) => mix(fitD(dc), fitN(nc), pm);
@@ -1766,7 +1766,7 @@ export default {
     };
 
     // ---------------------------------------------------------------- frame
-    let inkShown = "", inkSnap = false;
+    let inkShown = "", hlShown = "";
     let ledgeStale = true, lastMs = null, lastJump = false, quietUntil = 0, lastPalT = -9, lastPaintT = -9, paintedKey = "", lastTime = "";
     const setFlap = (i, cover) => {
       const f = flaps[i];
@@ -1846,15 +1846,12 @@ export default {
           paintSheet();
           wrap.style.setProperty("--sheet", P.sheet);
         }
-        // the letterpress ink changes side with the scene, in a one-second fade (at once when the clock jumps)
-        if (P.ink !== inkShown || jump !== inkSnap) {
-          if (jump !== inkSnap) wrap.classList.toggle("snap", jump);
-          inkSnap = jump;
-          if (P.ink !== inkShown) {
-            inkShown = P.ink;
-            wrap.style.setProperty("--ink", P.ink);
-            wrap.style.setProperty("--hl", P.hl);
-          }
+        // the letterpress ink follows the scene's side (set on its own, so it never waits for a repaint)
+        if (P.ink !== inkShown || P.hl !== hlShown) {
+          inkShown = P.ink;
+          hlShown = P.hl;
+          wrap.style.setProperty("--ink", P.ink);
+          wrap.style.setProperty("--hl", P.hl);
         }
 
         drawScene(s);

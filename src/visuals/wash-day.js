@@ -52,7 +52,7 @@ import { W, H, TAU, clamp, lerp, smoothstep, approach, rng, hash, createNoise, o
 const FONT = '"Fraunces", Georgia, serif';
 const WALL = 50; // width of each brick sliver
 const GRAV = 900; // px/s^2: a little slower than life, so it is calm to live with
-const LINE_Y = [64, 674, 1294, 1614];
+const LINE_Y = [64, 674, 1284, 1614];
 const SHEET_H = 550;
 const PERSP = 4200;
 const HORIZON = 860;
@@ -67,7 +67,7 @@ const SPEC = [
   { key: "temp", line: 2, x: 84, w: 232, h: 196, cols: 9, rows: 8, pegs: [0, 8] },
   { key: "sun", line: 2, x: 332, w: 232, h: 190, cols: 9, rows: 8, pegs: [0, 8] },
   { key: "moon", line: 2, x: 580, w: 220, h: 262, cols: 8, rows: 10, pegs: [0, 7] },
-  { key: "air", line: 2, x: 816, w: 180, h: 292, cols: 7, rows: 11, pegs: [0, 6] },
+  { key: "air", line: 2, x: 816, w: 180, h: 282, cols: 7, rows: 11, pegs: [0, 6] },
   { key: "fact", line: 3, x: 84, w: 912, h: 244, cols: 30, rows: 9, pegs: [0, 10, 19, 29] },
 ];
 
@@ -497,7 +497,7 @@ export default {
       x.fillRect(0, h - 18, w, 6);
       x.fillRect(0, h - 24, w, 2);
       // two pairs, each a label over its number, with a row of stitches between them
-      const ys = stack(x, w, [["Air quality", 500, 26, 24, 0], [aqi, 900, 52, 36, 18], ["UV index", 500, 26, 24, 46], [uv, 900, 52, 36, 18]], 24, h - 24, w - 30);
+      const ys = stack(x, w, [["Air quality", 500, 26, 24, 0], [aqi, 900, 52, 36, 18], ["UV index", 500, 26, 24, 44], [uv, 900, 52, 36, 18]], 24, h - 24, w - 30);
       const mid = (ys[2] + ys[3]) / 2;
       x.save();
       x.globalAlpha = 0.6;
