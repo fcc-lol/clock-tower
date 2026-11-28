@@ -37,6 +37,7 @@ const TAU = Math.PI * 2;
 const HEAT_K = TAU / (STEP * 5); // the heat crinkle: five samples to a ripple, so it stays a clean wave
 const CHIRP = 0.00011; // waves shorten toward the downwind edge
 const FRONT_W = 190; // half-width of the front that carries a new minute in
+const FRONT_T = 0.9; // seconds its wipe takes to cross the whole frame, at any wind angle
 const WIPE = 0.14; // the old figures give way to the new over this share of it
 const INK = "#f2eee4"; // type on the block
 const TAUT = 0.82; // how much the waves ease off inside the figures (thick line is stiff line)
@@ -233,6 +234,13 @@ export default {
     let travel = 0; // how far the waves have run, px
     let slide = 0; // how far the rain or snow has run along the lines, px
     let frontAt = -1e9; // animation time the last minute's front set off
+    // The texts that go with the time (AM/PM, the date and the day's fact):
+    // the last frame's, which belong to the figures in `cur`, and those of `old`, which are
+    // kept on screen until the wipe has crossed the figures that change.
+    const TIMED = ["ampm", "date", "factLabel", "factValue"];
+    const lastTag = {};
+    let held = null;
+    const diff = [0, 0, 0, 0]; // where the old and new figures differ: x0, y0, x1, y1
     let lastMs = 0;
     const shown = {};
     const put = (key, node, value) => {
@@ -257,7 +265,7 @@ export default {
 
     // ---- this frame's numbers, shared by the passes below ----
     let dx = 1, dy = 0, nx = 0, ny = 1;
-    let k1 = 0, k2 = 0, kg = 0, amp = 0, heat = 0, murk = 0, frontS = 0, frontOn = false, now = 0;
+    let k1 = 0, k2 = 0, kg = 0, amp = 0, heat = 0, murk = 0, frontS = 0, frontOn = false, humpK = 0, now = 0;
     const cx = W / 2;
     const cy = FIELD_H / 2;
     // The part of line `i` inside the frame, as a range of distance along it.
@@ -290,7 +298,7 @@ export default {
       if (heat) d += heat * (0.4 + 0.6 * taut) * Math.sin(sd * HEAT_K + now * 2.2 + i * 0.9);
       if (frontOn) {
         const f = (sd - frontS) / FRONT_W;
-        d += PITCH * 0.5 * Math.exp(-f * f * 1.6) * (1.6 - taut);
+        d += humpK * PITCH * 0.5 * Math.exp(-f * f * 1.6) * (1.6 - taut);
       }
       return d;
     };
@@ -325,15 +333,26 @@ export default {
         const key = `${tx.hh}|${tx.mm}`;
         if (key !== maskKey) {
           old = maskKey && !jumped ? cur : null;
+          held = old ? { ...lastTag } : null;
           cur = digits(tx.hh, tx.mm, 1.5); // mask() returns fresh data each time, so both can be held
           makeHalo(cur);
+          if (old) {
+            diff[0] = diff[1] = 1e9;
+            diff[2] = diff[3] = -1e9;
+            for (let i = 0; i < MC * MR; i++) {
+              if (Math.abs(old.data[i] - cur.data[i]) < 8) continue;
+              const x = (i % MC) * CELL;
+              const y = ((i / MC) | 0) * CELL;
+              diff[0] = Math.min(diff[0], x);
+              diff[1] = Math.min(diff[1], y);
+              diff[2] = Math.max(diff[2], x + CELL);
+              diff[3] = Math.max(diff[3], y + CELL);
+            }
+          }
           frontAt = old ? s.t : -1e9;
           maskKey = key;
         }
         if (jumped) old = null;
-        frontS = -HALF - FRONT_W * 1.3 + (s.t - frontAt) * 480;
-        frontOn = old != null && frontS < HALF + FRONT_W * 1.3;
-        if (!frontOn) old = null;
 
         // ---- colors: the sky's own, as ink on paper by day; as light on black at night ----
         const day = smoothstep(0.4, 0.6, s.daylight);
@@ -389,6 +408,21 @@ export default {
         dy = Math.sin(angle);
         nx = -dy; // across the lines
         ny = dx;
+        // The front's wipe sets off right at the frame's upwind edge, so the new
+        // minute starts arriving at once, and crosses the frame in FRONT_T whatever
+        // the angle. Its shear grows in as it enters and runs on out of the frame.
+        const reachE = Math.abs(dx) * cx + Math.abs(dy) * cy; // the frame's half-depth along the wind
+        const lead = WIPE * FRONT_W;
+        const since = s.t - frontAt;
+        frontS = -reachE - lead + (since * (2 * reachE + 2 * lead)) / FRONT_T;
+        frontOn = old != null && frontS < reachE + 44 + FRONT_W * 1.3;
+        humpK = smoothstep(0, 0.25, since);
+        if (!frontOn) old = null;
+        if (held) {
+          // the moment the wipe has passed the last figure that changes, its texts go up with it
+          const far = Math.max((diff[0] - cx) * dx, (diff[2] - cx) * dx) + Math.max((diff[1] - cy) * dy, (diff[3] - cy) * dy);
+          if (!old || frontS - lead > Math.min(far + PITCH, reachE)) held = null;
+        }
         const mph = live ? w.wind : 0;
         const speed = live ? 8 + 4.4 * Math.pow(mph, 0.94) : 0; // px per second the waves run downwind
         travel += speed * s.dt;
@@ -440,7 +474,7 @@ export default {
           if (frontOn) {
             const f = (sd - frontS) / FRONT_W;
             FRONT[j] = 1 - smoothstep(-WIPE, WIPE, f); // a crisp wipe: the figures are never a blend of two minutes
-            HUMP[j] = PITCH * 0.5 * Math.exp(-f * f * 1.6);
+            HUMP[j] = humpK * PITCH * 0.5 * Math.exp(-f * f * 1.6);
           }
         }
 
@@ -675,18 +709,20 @@ export default {
         }
 
         // ---- type ----
-        put("ampm", ampm, tx.ampm);
+        const tt = held || tx; // the texts that go with the time follow the figures, never run ahead
+        for (const k of TIMED) lastTag[k] = tx[k];
+        put("ampm", ampm, tt.ampm);
         const fresh = put("temp", temp, tx.temp);
         if (put("cond", cond, tx.condition) || fresh) fitText(cond, W - 2 * M - 54 - temp.offsetWidth, 60);
-        if (put("date", date, tx.date)) fitText(date, W - 2 * M, 46);
+        if (put("date", date, tt.date)) fitText(date, W - 2 * M, 46);
         put("sunL", sSun.span, tx.sunLabel);
         put("sunV", sSun.b, tx.sunValue);
         put("moon", sMoon.b, tx.moon);
         put("aqi", sAir.b, tx.aqi);
         put("uv", sUv.b, tx.uv);
-        put("factL", factLabel, tx.factLabel);
-        put("factV", factValue, tx.factValue);
-        const factShow = tx.factValue ? "" : "none";
+        put("factL", factLabel, tt.factLabel);
+        put("factV", factValue, tt.factValue);
+        const factShow = tt.factValue ? "" : "none";
         if (shown.factShow !== factShow) {
           shown.factShow = factShow;
           fact.style.display = factShow;
