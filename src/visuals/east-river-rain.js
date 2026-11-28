@@ -721,12 +721,12 @@ export default {
     // The margin's two ink sets, and how far the type stands between them
     // (1: sumi, 0: cream). The change of set is a short fade of under a
     // second, run from frame(), not a blend tied to the light.
-    let marginDark = null, marginK = -1;
+    let marginDark = null, marginK = -1, skyLight = null;
     const marginSet = { dark: { ink: SUMI, beni: "#a62a20", edge: SUMI }, light: { ink: CREAM_N, beni: "#f08e76", edge: "#2c3040" } };
     const legible = (base, toward, bg) => {
       for (let t = 0; t <= 1.001; t += 0.1) {
         const c = t ? mix(base, toward, t) : base;
-        if (contrast(c, bg) >= 3.1) return c;
+        if (contrast(c, bg) >= 4) return c;
       }
       return toward;
     };
@@ -773,7 +773,9 @@ export default {
       let top = mix("#020308", topDay, smoothstep(0.02, 0.7, d));
       top = mix(top, "#030305", 0.6 * f.storm);
       const flatL = toOklch(flat).l;
-      const onLight = flatL > 0.553; // the ground is light: print in sumi; else leave the type as bare paper
+      // the ground is light: print in sumi; else leave the type as bare paper.
+      // Chosen outright, with a little hysteresis so it cannot flicker.
+      const onLight = (skyLight = skyLight === null || jump ? flatL > 0.553 : flatL > (skyLight ? 0.545 : 0.561));
       // the horizon band climbs higher in heat haze
       // and in the low sun, as a broad warm bokashi rather than a thin line
       const warm = sunLow * dd * (1 - 0.7 * cl);
@@ -796,9 +798,9 @@ export default {
       // deeper (or paler) only while the paper passes through the mid tones.
       const cS = contrast(SUMI, paperC), cC = contrast(CREAM_N, paperC);
       if (marginDark === null || jump) marginDark = cS >= cC;
-      else if (marginDark ? cC > cS * 1.12 : cS > cC * 1.12) marginDark = !marginDark;
-      marginSet.dark.beni = legible("#a62a20", "#4a100b", paperC);
-      marginSet.light.beni = legible("#f08e76", "#ffe6da", paperC);
+      else if (marginDark ? cC > cS * 1.08 : cS > cC * 1.08) marginDark = !marginDark;
+      marginSet.dark.beni = legible("#a62a20", "#2e0906", paperC);
+      marginSet.light.beni = legible("#f08e76", "#fff0e8", paperC);
       if (jump || marginK < 0) marginK = marginDark ? 1 : 0;
       applyMargin();
       setVar("--timeInk", onLight ? SUMI : mix(CREAM_N, "#f4ecd6", d));
