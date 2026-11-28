@@ -247,4 +247,26 @@ The report's `logs` hold what the page wrote with `console.warn` and `console.er
 
 In a browser (`npm run dev`): `/visual.html?id=<id>` runs one piece on live data; add `&scenario=rain-dusk-fall`, or `&wx=snow&at=night`, `&rate=600` (a day in about two minutes), `&seed=7`, `&hud=1` (frame rate and cost). `/gallery.html` shows them all side by side under any conditions.
 
-A piece is ready when, in every scenario (the half-light of `overcast-sunset-fall` included): every readout is present, correct and comfortably legible; nothing overlaps or runs off the frame; night shots are dark; it looks clearly different across weather and time of day; it moves, calmly; the report shows no errors and a frame cost within budget; and it is something you would stop to look at.
+### While it is on screen
+
+Still shots of thirteen moments miss what happens between them, and that is where most faults turned out to live. Two more tools, both needing the dev server running (`npm run dev`):
+
+```sh
+node scripts/transitions.cjs <id>                    # twenty changes a piece lives through, each compared with a fresh start
+node scripts/transitions.cjs <id> --cases minute,hour-9-to-10,fact-goes
+node scripts/transitions.cjs --list                  # the cases
+node scripts/twilight.cjs <id>                       # dusk and dawn a minute at a time: the contrast of every text
+node scripts/twilight.cjs <id> --wx rain --step 120  # in other weather, in coarser steps
+```
+
+`transitions.cjs` runs the piece across a change while it is showing (the minute, the hour gaining or losing a digit, noon, midnight, sunset, the weather changing, a fact arriving or going, data late or lost, the temperature gaining a digit) and then starts it fresh at that same instant with that same data. The two should look alike: a piece that looks different after living through a change has kept something stale (a size fitted to the old text, a panel sized for the old fact). It writes a strip per case (before, during, after, fresh, difference) to `shots/transitions/<id>/`.
+
+`twilight.cjs` walks through dusk and dawn and, for every text in the page, reports the weakest contrast it had and when, with contact sheets in `shots/twilight/<id>/`. Dusk is where a piece changes the colour of its ink, and three things go wrong there:
+
+- **An ink that fades through the tone of its ground.** A blend from dark ink to pale ink passes through "no contrast at all", for as long as the blend takes. Choose light or dark outright, and change over in about a second of time, not over the minutes the light takes.
+- **A choice that flickers.** Hold the choice with a margin (the other ink has to be clearly better before changing), the same margin in both directions.
+- **A choice that is right when the clock jumps and wrong when it runs.** The sweep jumps a minute at a time, so a piece goes straight to each state: it never draws a fade, and a held choice never has a past. Whatever the sweep shows, run the piece in real time through the same minutes as well (`scripts/shoot.js <id> --at 2026-07-14T20:30 --frames 20 --every 30`).
+
+A time made of the artwork (birds, tiles, cloth) needs measuring rather than judging: the middle of a stroke against what is right beside it, in every weather that veils or darkens the ground.
+
+A piece is ready when, in every scenario (the half-light of `overcast-sunset-fall` included): every readout is present, correct and comfortably legible; nothing overlaps or runs off the frame; night shots are dark; it looks clearly different across weather and time of day; it moves, calmly; the report shows no errors and a frame cost within budget; it comes through the changes above looking like a fresh start, and through dusk and dawn readable all the way; and it is something you would stop to look at.
