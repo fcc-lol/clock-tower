@@ -300,6 +300,7 @@ export default {
     // ---- per-window facts -------------------------------------------------------
     const awake = new Float32Array(NWIN); // 0 blind down .. 1 blind up
     const target = new Uint8Array(NWIN);
+    const baked = new Uint8Array(NWIN); // 1: this window is painted into the wall as it stands
     const delay = new Float32Array(NWIN);
     const lampAt = new Float32Array(NWIN); // the light level at which this room's lamp comes on
     const roomOf = new Uint8Array(NWIN);
@@ -975,12 +976,14 @@ export default {
       }
       paintGlow(null, env);
       if (sunS > 0.01) paintShadows(shDx, shDy, sunS);
+      baked.fill(0);
       for (let i = 0; i < NWIN; i++) {
         if (awake[i] !== 1 || target[i] !== 1) continue;
         if (lampV[i] > 0 && lampV[i] < 1) continue; // fading: on the moving layer
         const lamp = lampV[i];
         if (lamp < 0.995) drawGlass(wctx, patWg, patDg, i, 1);
         drawWin(wctx, i, 1, lamp);
+        baked[i] = 1;
       }
       // grain, baked into the wall so the dark gradients do not band
       wctx.globalAlpha = 0.05; wctx.fillStyle = grainPat; wctx.fillRect(0, 0, W, H); wctx.globalAlpha = 1;
@@ -1190,7 +1193,9 @@ export default {
         if (moving || lampMoving) {
           for (let i = 0; i < NWIN; i++) {
             if (awake[i] <= 0) continue;
-            if (awake[i] === target[i] && !(lampV[i] > 0 && lampV[i] < 1)) continue;
+            // (a window that has finished rolling up stays on this layer until the wall is next painted:
+            // the wall waits for the slowest window, and without this the early ones blinked off meanwhile)
+            if (awake[i] === target[i] && !(lampV[i] > 0 && lampV[i] < 1) && baked[i]) continue;
             const lamp = lampV[i];
             if (lamp < 0.995) drawGlass(fctx, patWf, patDf, i, awake[i]);
             drawWin(fctx, i, awake[i], lamp);

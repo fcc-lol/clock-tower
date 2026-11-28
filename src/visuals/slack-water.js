@@ -788,8 +788,8 @@ export default {
       const dayLs = dayF.map(luminance);
       let dayC = 99;
       for (const [k, Ls, v] of behind) dayC = Math.min(dayC, ((1 - v) * Ls + v * Lm + 0.05) / ((1 - v) * dayLs[k] + v * Lm + 0.05));
-      const liftTo = (c, k) => { // the least step toward pale sodium that holds 3.8:1 (the tops 3.5:1) against the sky
-        const v = veilK[k], q = k === 2 ? 3.5 : 3.8, needL = (q * ((1 - v) * skyHi[k] + v * Lm + 0.05) - 0.05 - v * Lm) / (1 - v);
+      const liftTo = (c, k) => { // the least step toward pale sodium that holds 3.8:1 (the tops 3.5:1; more in fog, which the estimate reads less well) against the sky
+        const v = veilK[k], q = (k === 2 ? 3.5 : 3.8) + 0.5 * haze, needL = (q * ((1 - v) * skyHi[k] + v * Lm + 0.05) - 0.05 - v * Lm) / (1 - v);
         if (luminance(c) >= needL) return c;
         let lo = 0, hi = 1;
         for (let k = 0; k < 14; k++) { const m = (lo + hi) / 2; if (luminance(mix(c, NUM_PALE, m)) >= needL) hi = m; else lo = m; }
@@ -800,10 +800,11 @@ export default {
       const nightF = [liftTo("#dd8a24", 0), liftTo("#c8781a", 1), liftTo(mix("#b56a12", "#8ea4c4", 0.3 * moonLight), 2)];
       const litC = Math.min(...nightF.map((c, k) => { const v = veilK[k]; return ((1 - v) * luminance(c) + v * Lm + 0.05) / ((1 - v) * skyHi[k] + v * Lm + 0.05); }));
       // (the lit faces must read clearly better than the day ink before the lamps
-      // come on: the estimate of the sky is not exact)
-      if (P.jump || lampOn === null) lampOn = dayC < 4 && litC > 1.12 * dayC;
+      // come on: the estimate of the sky is not exact, and least so in fog)
+      const margin = wx.fog ? 0.4 : 0;
+      if (P.jump || lampOn === null) lampOn = dayC < 4 && litC > (1.12 + margin) * dayC;
       else if (lampOn) { if (dayC > 4.3 || litC < 0.9 * dayC) lampOn = false; }
-      else if (dayC < 3.8 && litC > 1.18 * dayC) lampOn = true;
+      else if (dayC < 3.8 && litC > (1.18 + margin) * dayC) lampOn = true;
       lampT = lampOn ? 1 : 0;
       // the ink of a zone: whichever of the two reads better against the worst of
       // what is behind it, switched in one step; a soft halo of the ground's own
