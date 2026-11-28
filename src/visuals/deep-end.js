@@ -1088,7 +1088,7 @@ export default {
         // the contrast back, which the palette allows for; in heavy weather (overcast, rain, storm, fog,
         // snow) it takes far more. So there the inks are aimed at the contrast that is seen, the tiles
         // turn over outright (with hysteresis, in a second) to whichever ink can be made to read better,
-        // and where even a white or a near-black tile could not hold, the reflection, the veils and the
+        // and where even a white or the deepest cobalt tile could not hold, the reflection, the veils and the
         // crests are thinned, and under pale figures the floor deepened (dark water under a heavy sky).
         // In clear and partly cloudy weather none of this runs: the palette is exactly as above.
         const hv = Math.max(smoothstep(0.55, 0.9, cloud), e.wet, e.storm, e.fog, Math.min(1, e.snow * 1.6));
@@ -1135,8 +1135,9 @@ export default {
           // the floor falls off, and the figures' last row sits there)
           cA = (th) => (EDGE * seen(0, 0, th, 0) + 0.05) / (seen(LAMIN, 1, th, 0) + 0.05); // the deepest cobalt
           cB = (th) => (seen(LWHITE, 2, th, th) + 0.05) / (seen(0, 0, th, th) + 0.05); // a white tile
-          // which ink reads better, as the water is and as it can be thinned: past the middle by a margin
-          const x = 0.5 * (Math.log(cB(0) / cA(0)) + Math.log(cB(1) / cA(1)));
+          // which ink reads better: the one that can hold the aim at all, and between two that can, the
+          // one that reads better through the water as it is (decided past the middle by a margin)
+          const x = Math.log(Math.min(AIM, cB(1)) / Math.min(AIM, cA(1))) + Math.log(cB(0) / cA(0));
           if (jump || paleOn < 0) paleOn = x > 0 ? 1 : 0;
           else if (paleOn === 0 && x > 0.06) paleOn = 1;
           else if (paleOn === 1 && x < -0.06) paleOn = 0;
