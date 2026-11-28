@@ -125,3 +125,10 @@ node scripts/shoot.js --list
 ```
 
 It writes to `shots/` and prints a report (what the readouts should say, frame cost, brightness, errors). It needs Playwright (`npm i -D playwright && npx playwright install chromium`).
+
+Two more, for what happens while a piece is on screen (both need `npm run dev` running):
+
+```sh
+node scripts/transitions.cjs <id>    # the minute, the hour, midnight, the weather or a fact changing: does it end up looking like a fresh start?
+node scripts/twilight.cjs <id>       # dusk and dawn a minute at a time: is every text readable all the way through?
+```
